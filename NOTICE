@@ -1,0 +1,11 @@
+Hearth
+Copyright 2026 The Hearth authors
+
+This product includes software developed by others:
+
+- assistant-ui (https://github.com/assistant-ui/assistant-ui), MIT License,
+  Copyright (c) 2026 AgentbaseAI Inc.
+  * src/vendor/acp: the ACP adapter (packages/acp), vendored with changes. See src/vendor/acp/NOTICE.md
+    and src/vendor/acp/LICENSE-assistant-ui.
+  * src/components/assistant-ui and src/components/ui: components installed from the assistant-ui and
+    shadcn/ui registries (shadcn/ui: MIT License, Copyright (c) 2023 shadcn).

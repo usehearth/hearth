@@ -1,0 +1,120 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "tw-shimmer";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Hearth: warm stone neutrals, one ember accent. Light and dark follow the system unless the user picks one. */
+:root {
+  --radius: 0.75rem;
+  --background: oklch(0.985 0.004 70);
+  --foreground: oklch(0.22 0.012 50);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.012 50);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.012 50);
+  --primary: oklch(0.64 0.19 42);
+  --primary-foreground: oklch(0.99 0.005 70);
+  --secondary: oklch(0.955 0.008 70);
+  --secondary-foreground: oklch(0.28 0.014 50);
+  --muted: oklch(0.955 0.008 70);
+  --muted-foreground: oklch(0.52 0.014 55);
+  --accent: oklch(0.945 0.018 60);
+  --accent-foreground: oklch(0.28 0.014 50);
+  --destructive: oklch(0.58 0.22 27);
+  --border: oklch(0.91 0.008 70);
+  --input: oklch(0.91 0.008 70);
+  --ring: oklch(0.7 0.16 45);
+  --sidebar: oklch(0.965 0.007 70);
+  --sidebar-foreground: oklch(0.26 0.012 50);
+  --sidebar-border: oklch(0.9 0.008 70);
+  --sidebar-accent: oklch(0.925 0.012 65);
+  --ember: oklch(0.7 0.17 50);
+}
+
+.dark {
+  --background: oklch(0.17 0.008 55);
+  --foreground: oklch(0.93 0.008 70);
+  --card: oklch(0.21 0.009 55);
+  --card-foreground: oklch(0.93 0.008 70);
+  --popover: oklch(0.21 0.009 55);
+  --popover-foreground: oklch(0.93 0.008 70);
+  --primary: oklch(0.7 0.17 48);
+  --primary-foreground: oklch(0.18 0.01 50);
+  --secondary: oklch(0.25 0.01 55);
+  --secondary-foreground: oklch(0.9 0.008 70);
+  --muted: oklch(0.25 0.01 55);
+  --muted-foreground: oklch(0.68 0.012 65);
+  --accent: oklch(0.27 0.014 55);
+  --accent-foreground: oklch(0.93 0.008 70);
+  --destructive: oklch(0.65 0.2 27);
+  --border: oklch(0.29 0.01 55);
+  --input: oklch(0.31 0.01 55);
+  --ring: oklch(0.7 0.16 48);
+  --sidebar: oklch(0.145 0.007 55);
+  --sidebar-foreground: oklch(0.88 0.008 70);
+  --sidebar-border: oklch(0.25 0.009 55);
+  --sidebar-accent: oklch(0.23 0.011 55);
+  --ember: oklch(0.74 0.16 52);
+}
+
+@theme inline {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-ember: var(--ember);
+  @keyframes collapsible-down {
+  from {
+    height: 0;
+    }
+  to {
+    height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+  }
+  @keyframes collapsible-up {
+  from {
+    height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+  to {
+    height: 0;
+    }
+  }
+}
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+}
+
+@custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
+
+@custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));
