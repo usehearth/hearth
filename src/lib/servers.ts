@@ -1,6 +1,11 @@
 // Servers Hearth connects to. Only the address and a name are remembered on this device; never chat content.
-// The key: in the desktop app it lives in the OS keychain; in the web build it is held in memory for this tab only.
+// The key: in the desktop app it lives in the OS keychain (Windows Credential Manager, macOS Keychain, Secret Service);
+// in the web build it is held in memory for this tab only.
 import { useSyncExternalStore } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+
+/** True inside the desktop app (Tauri), where keys live in the OS keychain. */
+export const isDesktop = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 export interface Server {
   id: string;
@@ -13,6 +18,15 @@ const KEY = 'hearth.servers.v1';
 const keys = new Map<string, string>();
 let servers: Server[] = load();
 const listeners = new Set<() => void>();
+const notify = () => { servers = [...servers]; for (const l of listeners) l(); };
+
+/** Desktop: read each server's key from the keychain once at start. */
+export const keysReady: Promise<void> = isDesktop
+  ? Promise.all(servers.map(async (s) => {
+      try { const k = await invoke<string | null>('key_get', { serverId: s.id }); if (k) keys.set(s.id, k); } catch { /* ask for it */ }
+    })).then(notify)
+  : Promise.resolve();
+const storeKey = (id: string, key: string) => { keys.set(id, key); if (isDesktop) void invoke('key_set', { serverId: id, key }).catch(() => {}); };
 
 function load(): Server[] {
   try {
@@ -34,7 +48,7 @@ export function useServers(): Server[] {
 
 export function addServer(s: { name: string; url: string; key: string }): Server {
   const server: Server = { id: crypto.randomUUID(), name: s.name.trim() || hostOf(s.url), url: normaliseUrl(s.url) };
-  keys.set(server.id, s.key.trim());
+  storeKey(server.id, s.key.trim());
   servers = [...servers, server];
   save();
   return server;
@@ -42,12 +56,13 @@ export function addServer(s: { name: string; url: string; key: string }): Server
 
 export function removeServer(id: string) {
   keys.delete(id);
+  if (isDesktop) void invoke('key_delete', { serverId: id }).catch(() => {});
   servers = servers.filter((s) => s.id !== id);
   save();
 }
 
 export const keyFor = (id: string) => keys.get(id);
-export function setKey(id: string, key: string) { keys.set(id, key.trim()); for (const l of listeners) l(); }
+export function setKey(id: string, key: string) { storeKey(id, key.trim()); notify(); }
 
 /** Accepts http(s)://host[:port] or ws(s)://... and returns the ACP WebSocket address. */
 export function normaliseUrl(input: string): string {

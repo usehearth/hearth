@@ -1,0 +1,18 @@
+[package]
+name = "hearth"
+version = "0.1.0"
+description = "Your AI, at home. A server-first chat app for any ACP agent."
+license = "Apache-2.0"
+edition = "2021"
+
+[lib]
+name = "hearth_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native"] }

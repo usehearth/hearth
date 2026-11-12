@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ThreadPane, type ThreadTarget } from '@/components/hearth/ThreadPane';
 import { AddServer, KeyPrompt } from '@/components/hearth/AddServer';
 import { useDirectory, type ProjectGroup, type ThreadItem } from '@/lib/directory';
-import { keyFor, useServers } from '@/lib/servers';
+import { keyFor, keysReady, useServers } from '@/lib/servers';
 import { useTheme } from '@/lib/theme';
 import { cn } from '@/lib/utils';
 
@@ -22,6 +22,8 @@ export default function App() {
   const { dark, toggle } = useTheme();
 
   useEffect(() => { if (!serverId && servers[0]) setServerId(servers[0].id); }, [servers, serverId]);
+  // Desktop: keys arrive from the keychain shortly after start.
+  useEffect(() => { void keysReady.then(() => setKeyVersion((v) => v + 1)); }, []);
   // Open the most recent project's main thread once the list arrives.
   useEffect(() => {
     if (dir.state !== 'ready' || target) return;

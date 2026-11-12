@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Hearth",
+  "version": "0.1.0",
+  "identifier": "dev.usehearth.hearth",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:5178",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      { "title": "Hearth", "width": 1280, "height": 820, "minWidth": 720, "minHeight": 480, "center": true }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ws: wss: http://127.0.0.1:5178 ws://127.0.0.1:5178 ipc: http://ipc.localhost; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "category": "Productivity",
+    "shortDescription": "Your AI, at home",
+    "longDescription": "A server-first chat app for any ACP agent. The server owns the chats; Hearth is the window.",
+    "license": "Apache-2.0"
+  }
+}

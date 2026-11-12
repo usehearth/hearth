@@ -3,7 +3,7 @@ import { KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 import { ClientApp, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 import { createWebSocketStream } from '@agentclientprotocol/sdk/experimental/ws-client';
 import { Button } from '@/components/ui/button';
-import { addServer, hostOf, normaliseUrl, setKey, type Server } from '@/lib/servers';
+import { addServer, hostOf, isDesktop, normaliseUrl, setKey, type Server } from '@/lib/servers';
 import { friendly } from '@/lib/directory';
 
 /** Checks the address and key with a real `initialize` before saving anything. */
@@ -48,7 +48,7 @@ export function AddServer({ first, onDone, onCancel }: { first: boolean; onDone:
           <Field label="Server address" hint="For example wss://ai.home.example or 192.168.1.20:8080">
             <input autoFocus required value={url} onChange={(e) => setUrl(e.target.value)} placeholder="wss://…" className={inputCls} />
           </Field>
-          <Field label="Device key" hint="Made on your server for this device. It stays on this device.">
+          <Field label="Device key" hint={isDesktop ? 'Made on your server for this device. Saved in your system keychain.' : 'Made on your server for this device. Kept in memory for this window.'}>
             <input required type="password" value={key} onChange={(e) => setKeyIn(e.target.value)} placeholder="Paste the key" className={inputCls} autoComplete="off" />
           </Field>
           <Field label="Name (optional)">
@@ -74,7 +74,7 @@ export function KeyPrompt({ server, onSaved, compact }: { server: Server; onSave
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (key.trim()) { setKey(server.id, key); onSaved(); } }} className="mx-1 mt-2 rounded-xl border bg-card p-3">
       <p className="text-sm font-medium">Device key for {server.name}</p>
-      <p className="mt-0.5 text-xs text-muted-foreground">Kept in memory for this window only.</p>
+      <p className="mt-0.5 text-xs text-muted-foreground">{isDesktop ? 'Saved in your system keychain.' : 'Kept in memory for this window only.'}</p>
       <input autoFocus type="password" value={key} onChange={(e) => setKeyIn(e.target.value)} className={`${inputCls} mt-2`} placeholder="Paste the key" autoComplete="off" />
       <Button size="sm" className="mt-2 w-full" type="submit" disabled={!key.trim()}>Unlock</Button>
     </form>
