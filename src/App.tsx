@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, Flame, Loader2, MoonStar, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
+import { ChevronDown, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { ThreadPane, type ThreadTarget } from '@/components/hearth/ThreadPane';
@@ -73,7 +73,7 @@ export default function App() {
           <button onClick={() => setAdding(true)} className="mx-3 mb-2 flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-sidebar-accent" title="Servers">
             <ServerIcon className="size-4 text-muted-foreground" />
             <span className="truncate font-medium">{server?.name}</span>
-            <StatusDot state={dir.state} />
+            <StatusDot state={dir.state === 'ready' && dir.reconnecting ? 'reconnecting' : dir.state} />
             <ChevronDown className="ml-auto size-3.5 text-muted-foreground" />
           </button>
           <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
@@ -103,7 +103,7 @@ export default function App() {
             )}
           </nav>
           <div className="border-t border-sidebar-border px-4 py-2.5 text-[11px] text-muted-foreground">
-            {dir.state === 'ready' ? <>Connected to {dir.agent}. Chats live on the server.</> : 'Chats live on the server, not this device.'}
+            {dir.state === 'ready' ? (dir.reconnecting ? 'Reconnecting…' : <>Connected to {dir.agent}. Chats live on the server.</>) : 'Chats live on the server, not this device.'}
           </div>
         </aside>
 
@@ -135,25 +135,40 @@ export default function App() {
 
 function ProjectSection({ g, activeId, onOpen, onNew }: { g: ProjectGroup; activeId?: string; onOpen: (t: ThreadItem) => void; onNew: () => void }) {
   const [openSec, setOpenSec] = useState(true);
-  const recent = useMemo(() => [...g.threads].sort((a, b) => (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0)), [g.threads]);
+  const [all, setAll] = useState(false);
+  // Pinned first, then most recent.
+  const recent = useMemo(() => [...g.threads].sort((a, b) => Number(b.pinned) - Number(a.pinned)
+    || (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0)), [g.threads]);
+  const needs = [g.main, ...g.threads].filter((t) => t?.status === 'needs_permission').length;
+  const shown = all ? recent : recent.slice(0, SHOW);
   return (
     <div className="mt-1">
       <div className="group flex items-center rounded-lg pr-1 hover:bg-sidebar-accent/60">
         <button onClick={() => setOpenSec((o) => !o)} className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-left text-[13px] font-semibold">
           <ChevronDown className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', !openSec && '-rotate-90')} />
           <span className="truncate">{g.name}</span>
+          {!openSec && needs > 0 && <span className="ml-auto rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary" title="Threads that need you">{needs}</span>}
         </button>
         <IconBtn label={`New thread in ${g.name}`} onClick={onNew} className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"><Plus className="size-3.5" /></IconBtn>
       </div>
       {openSec && (
         <ul className="ml-2 border-l border-sidebar-border pl-1.5">
           {g.main && <ThreadRow t={g.main} active={activeId === g.main.sessionId} onOpen={onOpen} main />}
-          {recent.slice(0, 12).map((t) => <ThreadRow key={t.sessionId} t={t} active={activeId === t.sessionId} onOpen={onOpen} />)}
+          {shown.map((t) => <ThreadRow key={t.sessionId} t={t} active={activeId === t.sessionId} onOpen={onOpen} />)}
+          {recent.length > SHOW && (
+            <li>
+              <button onClick={() => setAll((v) => !v)} className="w-full rounded-lg px-2 py-1 pl-7.5 text-left text-[12px] text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground">
+                {all ? 'Show fewer' : `Show ${recent.length - SHOW} more`}
+              </button>
+            </li>
+          )}
         </ul>
       )}
     </div>
   );
 }
+
+const SHOW = 12;
 
 function ThreadRow({ t, active, onOpen, main }: { t: ThreadItem; active: boolean; onOpen: (t: ThreadItem) => void; main?: boolean }) {
   const running = t.status === 'running' || t.status === 'starting';
@@ -162,7 +177,7 @@ function ThreadRow({ t, active, onOpen, main }: { t: ThreadItem; active: boolean
     <li>
       <button onClick={() => onOpen(t)} className={cn('flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors',
         active ? 'bg-sidebar-accent font-medium text-foreground' : 'text-sidebar-foreground/85 hover:bg-sidebar-accent/60')}>
-        {main ? <Flame className="size-3.5 shrink-0 text-ember" /> : <span className="size-3.5 shrink-0" />}
+        {main ? <Flame className="size-3.5 shrink-0 text-ember" /> : t.pinned ? <Pin className="size-3.5 shrink-0 p-px text-muted-foreground" aria-label="Pinned" /> : <span className="size-3.5 shrink-0" />}
         <span className="truncate">{main ? 'Main thread' : t.title}</span>
         {needs && <span className="ml-auto rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">needs you</span>}
         {running && !needs && <Loader2 className="ml-auto size-3 shrink-0 animate-spin text-muted-foreground" />}
