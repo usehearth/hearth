@@ -44,3 +44,26 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running Hearth");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Round trip through the real OS keychain with a throwaway entry, then remove it.
+    #[test]
+    fn keychain_round_trip() {
+        let id = String::from("00000000-0000-0000-0000-0000000000ff");
+        key_delete(id.clone()).unwrap();
+        assert_eq!(key_get(id.clone()).unwrap(), None);
+        key_set(id.clone(), "test-value-not-a-real-key".into()).unwrap();
+        assert_eq!(key_get(id.clone()).unwrap().as_deref(), Some("test-value-not-a-real-key"));
+        key_delete(id.clone()).unwrap();
+        assert_eq!(key_get(id).unwrap(), None);
+    }
+
+    #[test]
+    fn refuses_odd_ids_and_keys() {
+        assert!(key_get("../other-app".into()).is_err());
+        assert!(key_set("00000000-0000-0000-0000-0000000000ff".into(), String::new()).is_err());
+    }
+}
