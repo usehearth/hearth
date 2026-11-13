@@ -5,6 +5,7 @@ import { DropdownMenu } from 'radix-ui';
 import { Copy, Download, FileDown } from 'lucide-react';
 import { acpMetaOf, diffsOf } from '@/components/hearth/ToolViews';
 import { createTwoFilesPatch } from 'diff';
+import { useAcpSessionTitle } from '@/vendor/acp';
 
 type Part = { type: string; text?: string; toolName?: string; args?: unknown; providerMetadata?: unknown };
 
@@ -28,7 +29,8 @@ export function threadMarkdown(title: string, messages: readonly { role: string;
   return out.join('\n');
 }
 
-export function ExportThread({ title }: { title: string }) {
+export function ExportThread() {
+  const title = useAcpSessionTitle() ?? '';
   const messages = useAuiState((s) => s.thread.messages);
   const md = () => threadMarkdown(title || 'Thread', messages as never);
   const save = () => {

@@ -15,7 +15,7 @@ import { TasksList } from '@/components/hearth/TasksPanel';
 import { ExportThread } from '@/components/hearth/ExportThread';
 import { ComposerBar } from '@/components/hearth/ComposerBar';
 import { notify } from '@/lib/notify';
-import { MessageActionsContext } from '@/components/hearth/messageActions';
+import { MessageActionsProvider } from '@/components/hearth/messageActions';
 import { MentionContext, QueueContext, ShellContext } from '@/components/hearth/SlashMenu';
 import type { AppendMessage } from '@assistant-ui/react';
 
@@ -277,7 +277,6 @@ function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClie
     ...(WebSpeechDictationAdapter.isSupported?.() ? { dictation: new WebSpeechDictationAdapter() } : {}),
     ...(typeof window !== 'undefined' && 'speechSynthesis' in window ? { speech: new WebSpeechSynthesisAdapter() } : {}),
   }), []);
-  const title = useAcpSessionTitle();
   // "!command": a shell command in this thread (servers with the shell extension; the thread must exist).
   const shell = useMemo(() => {
     const ext = client.initializeMeta?.hearth?.extensions;
@@ -351,7 +350,7 @@ function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClie
     <AssistantRuntimeProvider runtime={runtime}>
       <ExtrasContext.Provider value={extras}>
         <Watch events={ev} />
-        <MessageActionsContext.Provider value={messageActions}>
+        <MessageActionsProvider value={messageActions}>
         <ShellContext.Provider value={shell}>
         <MentionContext.Provider value={findFiles}>
         <QueueContext.Provider value={queueApi}>
@@ -364,10 +363,10 @@ function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClie
         </QueueContext.Provider>
         </MentionContext.Provider>
         </ShellContext.Provider>
-        </MessageActionsContext.Provider>
+        </MessageActionsProvider>
         {actionsEl && extras.supported && extras.sessionId && createPortal(
           <>
-            <ExportThread title={title ?? ''} />
+            <ExportThread />
             {extras.filesSupported && (
               <button onClick={() => show('files')} aria-pressed={planOpen && tab === 'files'} title="Files this thread made"
                 className={cn('flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground', planOpen && tab === 'files' && 'bg-accent text-foreground')}>
