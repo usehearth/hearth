@@ -231,6 +231,11 @@ export class AcpClient {
     return this.initializeResult?.agentInfo ?? undefined;
   }
 
+  /** Hearth: the server's `_meta` from `initialize` (e.g. `{ hearth: { extensions, uploadMaxBytes } }`). */
+  get initializeMeta(): Record<string, any> | undefined {
+    return (this.initializeResult as { _meta?: Record<string, any> } | undefined)?._meta ?? undefined;
+  }
+
   get agentCapabilities(): AcpAgentCapabilities | undefined {
     return this.initializeResult?.agentCapabilities;
   }

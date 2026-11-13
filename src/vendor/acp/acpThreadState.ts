@@ -252,6 +252,26 @@ export const splitContext = (text: string): { text: string; files: CompleteAttac
   return { text: rest.trim(), files };
 };
 
+/** Hearth: `[attached: <path>]` lines (files the server saved into the project folder) out of a user message's text. */
+const ATTACHED_LINE = /\n?\[attached: ([^\]\n]+)\]/g;
+export const splitAttached = (text: string): { text: string; files: CompleteAttachment[] } => {
+  if (!text.includes("[attached: ")) return { text, files: [] };
+  const files: CompleteAttachment[] = [];
+  const rest = text.replace(ATTACHED_LINE, (_m, path: string) => {
+    const file = path.split("/").pop() ?? path;
+    files.push({
+      id: `att-${contextIds++}`,
+      type: "document",
+      name: file.replace(/^\d{8}-\d{6}-/, ""),
+      contentType: "application/octet-stream",
+      status: { type: "complete" },
+      content: [{ type: "text", text: `Saved in the project folder: ${path}` }],
+    });
+    return "";
+  });
+  return { text: rest.trim(), files };
+};
+
 /**
  * Hearth: the server owns the thread, so a replay (`session/load`) and turns
  * started in other windows arrive while this window runs no turn of its own.
@@ -267,7 +287,9 @@ const reducePassive = (
     case "user_message_chunk": {
       const block = u.content;
       // Hearth: files sent as embedded text come back inside the text as <context> blocks; show them as file chips.
-      const split = block?.type === "text" ? splitContext(String(block.text ?? "")) : undefined;
+      const ctx = block?.type === "text" ? splitContext(String(block.text ?? "")) : undefined;
+      const att = ctx ? splitAttached(ctx.text) : undefined;
+      const split = ctx && att ? { text: att.text, files: [...ctx.files, ...att.files] } : undefined;
       const part: ThreadUserMessagePart | undefined =
         split
           ? split.text ? { type: "text", text: split.text } : undefined

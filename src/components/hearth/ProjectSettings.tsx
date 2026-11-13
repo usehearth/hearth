@@ -31,6 +31,7 @@ export function ProjectSettings({ project, request }: { project: string; request
   const [allProviders, setAllProviders] = useState(true);
   const [order, setOrder] = useState<string[]>([]);
   const [planFirst, setPlanFirst] = useState(false);
+  const [instructions, setInstructions] = useState('');
 
   const fill = (v: ProjectView) => {
     setView(v);
@@ -39,6 +40,7 @@ export function ProjectSettings({ project, request }: { project: string; request
     setAllProviders(v.providers === null);
     setOrder(v.providers ?? v.availableProviders.map((p) => p.name));
     setPlanFirst(v.planFirst);
+    setInstructions(v.instructions ?? '');
   };
   useEffect(() => {
     setView(null); setErr(null); setSaved(false);
@@ -51,7 +53,7 @@ export function ProjectSettings({ project, request }: { project: string; request
     try {
       const m: Record<string, string | null> = {};
       for (const r of view!.roles) m[r.role] = models[r.role]?.trim() || null;
-      fill(await request<ProjectView>('_hearth/project/update', { project, name, models: m, providers: allProviders ? null : order, planFirst }));
+      fill(await request<ProjectView>('_hearth/project/update', { project, name, models: m, providers: allProviders ? null : order, planFirst, ...(view!.instructions !== null ? { instructions } : {}) }));
       setSaved(true);
     } catch (e2) { setErr(errorText(e2)); } finally { setBusy(false); }
   };
@@ -75,7 +77,14 @@ export function ProjectSettings({ project, request }: { project: string; request
         <Section title="Instructions" sub="What every agent in this project should know, like a project's custom instructions.">
           {view.instructions === null
             ? <p className="rounded-lg border border-dashed px-3 py-2.5 text-sm text-muted-foreground">This server doesn't keep project instructions yet. Until it does, put them in the project's main thread or plan.</p>
-            : <textarea readOnly value={view.instructions} className={cn(inputCls, 'min-h-28')} />}
+            : (
+              <>
+                <textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} maxLength={8000} aria-label="Project instructions"
+                  placeholder="For example: answer in British English; keep changes small; ask before touching the database."
+                  className={cn(inputCls, 'min-h-32 resize-y leading-relaxed')} />
+                <span className="mt-1 block text-right text-xs text-muted-foreground">{instructions.length} / 8000</span>
+              </>
+            )}
         </Section>
 
         <Section title="Models" sub="Leave empty for the server's default. Providers that don't have a model use their closest one.">

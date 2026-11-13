@@ -12,4 +12,6 @@ It matches `@assistant-ui/core` 0.3.35, `@assistant-ui/react` 0.15.36 and `assis
 - `acpThreadState.ts` (H4): updates carrying `_meta.hearth.card` are left out of the messages; Hearth draws them as cards.
 - `conversions.ts` (attachments): text and code file attachments go as embedded text resources (`resource.text`) instead of binary blobs.
 - `acpThreadState.ts` (attachments): in history and other windows' turns, `<context ref=...>` blocks in a user message become file chips (`splitContext`).
+- `AcpClient.ts` (uploads): `initializeMeta`, the server's `_meta` from `initialize` (Hearth reads its extensions and upload limit).
+- `acpThreadState.ts` (uploads): `[attached: <path>]` lines in a user message become file chips too.
 - `globals.d.ts`: declares the build-time version constant.

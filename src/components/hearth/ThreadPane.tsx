@@ -146,7 +146,10 @@ function Runtime({ client, events, actionsEl }: { client: AcpClient; events: Thr
   const attachments = useMemo(() => {
     const a = new HearthAttachments(() => {
       const pc = client.agentCapabilities?.promptCapabilities;
-      return pc ? { image: !!pc.image, embeddedContext: !!pc.embeddedContext } : undefined;
+      if (!pc) return undefined;
+      const h = client.initializeMeta?.hearth;
+      const uploads = Array.isArray(h?.extensions) && h.extensions.includes('uploads') ? Number(h.uploadMaxBytes) || 15 * 1024 * 1024 : undefined;
+      return { image: !!pc.image, embeddedContext: !!pc.embeddedContext, uploadMaxBytes: uploads };
     });
     const add = a.add.bind(a);
     a.add = async (st) => { try { return await add(st); } catch (e) { ev.current.onError((e as Error).message); throw e; } };

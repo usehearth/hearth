@@ -14,7 +14,12 @@ const TEXT_EXT = /\.(txt|md|markdown|csv|tsv|json|jsonc|ya?ml|toml|ini|cfg|conf|
 export const isTextFile = (f: { name: string; type: string }) =>
   f.type.startsWith('text/') || /^application\/(json|xml|x-yaml|yaml|toml|javascript|typescript|x-sh|sql)/.test(f.type) || TEXT_EXT.test(f.name) || /^(Dockerfile|Makefile|README|LICENSE)$/i.test(f.name);
 
-export interface Caps { image: boolean; embeddedContext: boolean }
+export interface Caps {
+  image: boolean;
+  embeddedContext: boolean;
+  /** The server saves other files (PDF, Office...) into the project folder (`uploads` extension), up to this size. */
+  uploadMaxBytes?: number;
+}
 
 export class AttachmentRefused extends Error {}
 
@@ -38,7 +43,12 @@ export class HearthAttachments implements AttachmentAdapter {
       if (file.size > MAX_TEXT_BYTES) throw new AttachmentRefused(`${file.name} is too big (text files up to ${MAX_TEXT_BYTES / 1024} KB).`);
       return { id: id(), type: 'document', name: file.name, contentType: file.type || 'text/plain', file, status: { type: 'requires-action', reason: 'composer-send' } };
     }
-    throw new AttachmentRefused(`${file.name || 'That file'} can't be sent: the server takes images and text or code files. Put other files in the project folder and mention them.`);
+    if (caps.uploadMaxBytes) {
+      if (file.size > caps.uploadMaxBytes) throw new AttachmentRefused(`${file.name} is too big (files up to ${Math.round(caps.uploadMaxBytes / 1024 / 1024)} MB).`);
+      // Saved by the server into the project folder; the agent gets its path.
+      return { id: id(), type: 'document', name: file.name || 'file', contentType: file.type || 'application/octet-stream', file, status: { type: 'requires-action', reason: 'composer-send' } };
+    }
+    throw new AttachmentRefused(`${file.name || 'That file'} can't be sent: this server takes images and text or code files. Put other files in the project folder and mention them.`);
   }
 
   async send(a: PendingAttachment): Promise<CompleteAttachment> {
@@ -50,7 +60,9 @@ export class HearthAttachments implements AttachmentAdapter {
     let bin = '';
     for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
     // A `file` part with a text type: the adapter's conversion sends it as an embedded text resource.
-    return { ...a, status: { type: 'complete' }, content: [{ type: 'file', data: btoa(bin), mimeType: textMime(a.contentType), filename: a.name }] };
+    // Text and code: a text type, sent as embedded text. Anything else: its own type, sent as a file the server saves.
+    const mimeType = isTextFile({ name: a.name, type: a.contentType ?? '' }) ? textMime(a.contentType) : (a.contentType || 'application/octet-stream');
+    return { ...a, status: { type: 'complete' }, content: [{ type: 'file', data: btoa(bin), mimeType, filename: a.name }] };
   }
 
   async remove() { /* nothing kept */ }
