@@ -1,11 +1,11 @@
 // Settings: servers and this device's key, the server's model providers (read-only here, with health and a Test),
 // and appearance. Channels come when the server has them. Nothing here is chat content; keys are never shown.
 import { useCallback, useEffect, useState } from 'react';
-import { Check, CircleAlert, KeyRound, Laptop, Loader2, MoonStar, Palette, Pencil, Plus, Radio, RefreshCw, ScrollText, Server as ServerIcon, Sparkles, Sun, Trash2, X, Zap } from 'lucide-react';
+import { BarChart3, Check, CircleAlert, KeyRound, Laptop, Loader2, MoonStar, Palette, Pencil, Plus, Radio, RefreshCw, ScrollText, Server as ServerIcon, Sparkles, Sun, Trash2, X, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { KeyPrompt } from '@/components/hearth/AddServer';
 import { DeviceKeys, ProviderForm } from '@/components/hearth/AdminSettings';
-import { AuditLog } from '@/components/hearth/ServerSettings';
+import { AuditLog, UsagePage } from '@/components/hearth/ServerSettings';
 import type { DirectoryState } from '@/lib/directory';
 import { forgetKey, isDesktop, keyFor, removeServer, renameServer, type Server } from '@/lib/servers';
 import { setThemeMode, useThemeMode, type ThemeMode } from '@/lib/theme';
@@ -13,7 +13,7 @@ import { errorText } from '@/lib/hearth';
 import { notifyPref, setNotifyPref } from '@/lib/notify';
 import { cn } from '@/lib/utils';
 
-type Section = 'servers' | 'providers' | 'appearance' | 'audit';
+type Section = 'servers' | 'providers' | 'appearance' | 'audit' | 'usage';
 
 export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged }: {
   servers: Server[];
@@ -29,6 +29,7 @@ export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged }: {
     { id: 'providers', label: 'Model providers', icon: Sparkles },
     { id: 'appearance', label: 'Appearance', icon: Palette },
     // Server sections, when the server has them.
+    ...(dir.state === 'ready' && dir.extensions.includes('usage') ? [{ id: 'usage' as const, label: 'Usage', icon: BarChart3 }] : []),
     ...(dir.state === 'ready' && dir.extensions.includes('audit') ? [{ id: 'audit' as const, label: 'Audit log', icon: ScrollText }] : []),
   ];
   return (
@@ -50,6 +51,7 @@ export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged }: {
           {section === 'providers' && <Providers dir={dir} server={server} />}
           {section === 'appearance' && <Appearance />}
           {section === 'audit' && dir.state === 'ready' && <AuditLog request={dir.request} />}
+          {section === 'usage' && dir.state === 'ready' && <UsagePage request={dir.request} />}
         </div>
       </div>
     </div>

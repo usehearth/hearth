@@ -17,6 +17,9 @@ export interface ProjectView {
   instructions: string | null;
   /** Permission rules (servers with the `permissions` extension). */
   permissions?: { mode: string; allow: string[]; deny: string[]; defaults: string[]; alwaysDenied: string[] };
+  /** Monthly budget (servers with `usage`), and what this month cost so far. */
+  budget?: { monthlyUsd: number; warnAt: number } | null;
+  monthCost?: number;
   canEdit: boolean;
 }
 
@@ -44,6 +47,8 @@ export function ProjectSettings({ project, request }: { project: string; request
   const [mode, setMode] = useState('default');
   const [allowText, setAllowText] = useState('');
   const [denyText, setDenyText] = useState('');
+  const [budget, setBudget] = useState('');
+  const [warnAt, setWarnAt] = useState('80');
 
   const fill = (v: ProjectView) => {
     setView(v);
@@ -56,6 +61,8 @@ export function ProjectSettings({ project, request }: { project: string; request
     setMode(v.permissions?.mode ?? 'default');
     setAllowText((v.permissions?.allow ?? []).join('\n'));
     setDenyText((v.permissions?.deny ?? []).join('\n'));
+    setBudget(v.budget ? String(v.budget.monthlyUsd) : '');
+    setWarnAt(v.budget ? String(Math.round(v.budget.warnAt * 100)) : '80');
   };
   useEffect(() => {
     setView(null); setErr(null); setSaved(false);
@@ -69,7 +76,8 @@ export function ProjectSettings({ project, request }: { project: string; request
       const m: Record<string, string | null> = {};
       for (const r of view!.roles) m[r.role] = models[r.role]?.trim() || null;
       fill(await request<ProjectView>('_hearth/project/update', { project, name, models: m, providers: allProviders ? null : order, planFirst, ...(view!.instructions !== null ? { instructions } : {}),
-        ...(view!.permissions ? { permissions: { mode, allow: lines(allowText), deny: lines(denyText) } } : {}) }));
+        ...(view!.permissions ? { permissions: { mode, allow: lines(allowText), deny: lines(denyText) } } : {}),
+        ...(view!.monthCost !== undefined ? { budget: budget.trim() ? { monthlyUsd: Number(budget), warnAt: Number(warnAt) / 100 } : null } : {}) }));
       setSaved(true);
     } catch (e2) { setErr(errorText(e2)); } finally { setBusy(false); }
   };
@@ -169,6 +177,16 @@ export function ProjectSettings({ project, request }: { project: string; request
             <textarea id="perm-deny" value={denyText} onChange={(e) => setDenyText(e.target.value)} rows={3} spellCheck={false}
               placeholder="Bash(curl:*)" className={cn(inputCls, 'font-mono text-xs')} />
             <p className="mt-2 text-xs text-muted-foreground">Always allowed: <span className="font-mono">{view.permissions.defaults.join(', ')}</span>. Always refused: <span className="font-mono">{view.permissions.alwaysDenied.join(', ')}</span>.</p>
+          </Section>
+        )}
+
+        {view.monthCost !== undefined && (
+          <Section title="Budget" sub={`This month so far: $${view.monthCost.toFixed(2)}. Leave empty for no budget.`}>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <label className="flex items-center gap-1.5">$<input value={budget} onChange={(e) => setBudget(e.target.value)} inputMode="decimal" placeholder="none" aria-label="Monthly budget in US dollars" className={cn(inputCls, 'w-28')} /> a month</label>
+              <label className="flex items-center gap-1.5">warn at <input value={warnAt} onChange={(e) => setWarnAt(e.target.value)} inputMode="numeric" aria-label="Warning level in percent" className={cn(inputCls, 'w-16')} />%</label>
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">At the warning level you get a note; at the budget, new work in this project stops until you raise it.</p>
           </Section>
         )}
 

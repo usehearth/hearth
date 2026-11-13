@@ -16,6 +16,62 @@ export function SectionHead({ title, sub, action }: { title: string; sub?: strin
   );
 }
 
+interface UsageReport {
+  days: number; currency: string;
+  byDay: { day: string; project: string; cost: number; sessions: number }[];
+  projects: { project: string; name: string; monthCost: number; budget: number | null }[];
+}
+
+const usd = (n: number) => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: n < 10 ? 2 : 0 }).format(n);
+
+/** What the agents cost: this month per project (against its budget), and each day of the last 30. */
+export function UsagePage({ request }: { request: Request }) {
+  const [r, setR] = useState<UsageReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => { request<UsageReport>('_hearth/usage', { days: 30 }).then((x) => { setR(x); setError(null); }, (e) => setError(errorText(e))); }, [request]);
+  useEffect(load, [load]);
+  if (error) return <p className="text-sm text-destructive">{error}</p>;
+  if (!r) return <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div>;
+  const days: string[] = [];
+  for (let i = r.days - 1; i >= 0; i--) days.push(new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10));
+  const perDay = new Map<string, number>();
+  for (const d of r.byDay) perDay.set(d.day, (perDay.get(d.day) ?? 0) + d.cost);
+  const max = Math.max(0.01, ...perDay.values());
+  const total = [...perDay.values()].reduce((a, b) => a + b, 0);
+  const month = r.projects.reduce((a, p) => a + p.monthCost, 0);
+  return (
+    <div>
+      <SectionHead title="Usage" sub="What the agents cost, from the engines' own reports. Projects can have a monthly budget (project settings)."
+        action={<Button size="sm" variant="outline" onClick={load}><RefreshCw className="size-3.5" />Refresh</Button>} />
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-xl border bg-card p-3"><div className="text-xs text-muted-foreground">This month</div><div className="text-xl font-semibold tabular-nums">{usd(month)}</div></div>
+        <div className="rounded-xl border bg-card p-3"><div className="text-xs text-muted-foreground">Last {r.days} days</div><div className="text-xl font-semibold tabular-nums">{usd(total)}</div></div>
+      </div>
+      <h3 className="mt-6 mb-2 text-sm font-semibold">Each day</h3>
+      <div className="flex h-28 items-end gap-px rounded-lg border bg-card p-2" role="img" aria-label={`Cost per day for the last ${r.days} days, highest ${usd(max)}`}>
+        {days.map((d) => {
+          const v = perDay.get(d) ?? 0;
+          return <div key={d} title={`${d}: ${usd(v)}`} className="flex-1 rounded-t-sm bg-primary/70 hover:bg-primary" style={{ height: `${Math.max(v > 0 ? 3 : 0, (v / max) * 100)}%` }} />;
+        })}
+      </div>
+      <h3 className="mt-6 mb-2 text-sm font-semibold">This month, by project</h3>
+      {!r.projects.length ? <p className="text-sm text-muted-foreground">Nothing yet this month.</p> : (
+        <ul className="divide-y rounded-xl border text-sm">
+          {[...r.projects].sort((a, b) => b.monthCost - a.monthCost).map((p) => {
+            const pct = p.budget ? Math.min(100, (p.monthCost / p.budget) * 100) : null;
+            return (
+              <li key={p.project} className="px-3 py-2">
+                <div className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate font-medium">{p.name}</span><span className="tabular-nums">{usd(p.monthCost)}</span>{p.budget && <span className="text-xs text-muted-foreground tabular-nums">of {usd(p.budget)}</span>}</div>
+                {pct !== null && <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted"><div className={pct >= 100 ? 'h-full bg-destructive' : pct >= 80 ? 'h-full bg-amber-500' : 'h-full bg-primary'} style={{ width: `${pct}%` }} /></div>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 interface AuditEntry { id: string; at: string; actor: string; action: string; target: string | null; detail: Record<string, unknown> | null }
 
 const when = (s: string) => new Date(s).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
