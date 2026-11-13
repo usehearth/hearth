@@ -29,6 +29,9 @@ export interface ProjectGroup { project: string; name: string; cwd: string; main
   /** Conversations imported from Claude into this project (`_hearth/history/counts`). */
   imported?: number }
 
+/** Imported conversations from a folder that isn't a project (`_hearth/history/counts` groups). */
+export interface ImportedGroup { group: string; count: number; client: boolean }
+
 /** `_hearth/history/counts`: per project. */
 interface HistoryCount { project: string; name: string; cwd: string; count: number; client?: string }
 
@@ -58,6 +61,8 @@ export type DirectoryState =
       workDevice: boolean;
       /** An admin device (may make projects, change providers). */
       admin: boolean;
+      /** Imported conversations whose folder isn't a project, by group. */
+      importedGroups: ImportedGroup[];
       /** A request on the list connection (settings use it). */
       request: <T = unknown>(method: string, params?: unknown) => Promise<T> }
   | { state: 'error'; message: string; retry: () => void };
@@ -148,7 +153,7 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
         hasClients ? (conn.agent.request('_hearth/clients' as any, {}) as Promise<any>).catch(() => null) : null,
         hasHistory ? (conn.agent.request('_hearth/history/counts' as any, {}) as Promise<any>).catch(() => null) : null,
       ]);
-      return { groups: withHistory(group((res.sessions ?? []).map(toItem)), (hc?.projects ?? []) as HistoryCount[]), cards, clients: (cl?.clients ?? []) as ClientLine[], workDevice: !!cl?.workDevice, admin };
+      return { groups: withHistory(group((res.sessions ?? []).map(toItem)), (hc?.projects ?? []) as HistoryCount[]), cards, clients: (cl?.clients ?? []) as ClientLine[], workDevice: !!cl?.workDevice, admin, importedGroups: (hc?.groups ?? []) as ImportedGroup[] };
     };
     const answer = async (e: CardEntry, a: CardAnswer) => {
       const r = await conn.agent.request('_hearth/card/answer' as any, { sessionId: e.sessionId, itemId: e.card.id, ...a });

@@ -7,10 +7,10 @@ import { AddServer, KeyPrompt } from '@/components/hearth/AddServer';
 import { NeedsYou } from '@/components/hearth/NeedsYou';
 import { Settings } from '@/components/hearth/Settings';
 import { ProjectSettings } from '@/components/hearth/ProjectSettings';
-import { HistoryView, ImportedThread, type Continued, type ImportedSummary } from '@/components/hearth/History';
+import { HistoryView, ImportedThread, type Continued, type HistoryScope, type ImportedSummary } from '@/components/hearth/History';
 import { NewProject, type Made } from '@/components/hearth/NewProject';
 import type { CardEntry } from '@/lib/hearth';
-import { useDirectory, type ClientLine, type ProjectGroup, type ThreadItem } from '@/lib/directory';
+import { useDirectory, type ClientLine, type ImportedGroup, type ProjectGroup, type ThreadItem } from '@/lib/directory';
 import { keyFor, keysReady, useServers } from '@/lib/servers';
 import { useTheme } from '@/lib/theme';
 import { cn } from '@/lib/utils';
@@ -29,7 +29,8 @@ export default function App() {
   type View = 'thread' | 'needs' | 'settings' | 'project' | 'history' | 'imported' | 'newproject';
   const [view, setView] = useState<View>('thread');
   // History: a project's imported conversations (or all of them, to search), and the one open.
-  const [historyOf, setHistoryOf] = useState<{ project?: string; name?: string } | null>(null);
+  const [historyOf, setHistoryOf] = useState<HistoryScope | null>(null);
+  const histKey = historyOf && 'project' in historyOf ? `p:${historyOf.project}` : historyOf && 'group' in historyOf ? `g:${historyOf.group}` : '';
   const [imported, setImported] = useState<ImportedSummary | null>(null);
   const [projectView, setProjectView] = useState<{ slug: string; name: string } | null>(null);
   const [actionsEl, setActionsEl] = useState<HTMLElement | null>(null);
@@ -69,7 +70,7 @@ export default function App() {
     const id = `new-${crypto.randomUUID()}`;
     setTarget({ id, t: { kind: 'new', cwd: g.cwd, meta: { hearth: { project: g.project } } }, title: 'New thread', project: g.name, client: g.client });
   }, []);
-  const openHistory = useCallback((g?: ProjectGroup) => { setHistoryOf(g ? { project: g.project, name: g.name } : {}); setView('history'); setNavOpen(false); }, []);
+  const openHistory = useCallback((s: HistoryScope) => { setHistoryOf(s); setView('history'); setNavOpen(false); }, []);
   const openImported = useCallback((s: ImportedSummary) => { setImported(s); setView('imported'); setNavOpen(false); }, []);
   const groupOf = (slug: string) => (dir.state === 'ready' ? dir.groups.find((g) => g.project === slug) : undefined);
   // Continue in Hearth: the server made the thread; open it with the summary in the composer, ready to add to.
@@ -133,8 +134,8 @@ export default function App() {
             </button>
           )}
           {dir.state === 'ready' && dir.extensions.includes('history') && (
-            <button onClick={() => openHistory()} aria-current={view === 'history' && !historyOf?.project ? 'page' : undefined}
-              className={cn('mx-3 mb-1 flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] hover:bg-sidebar-accent', view === 'history' && !historyOf?.project && 'bg-sidebar-accent font-medium')}>
+            <button onClick={() => openHistory({})} aria-current={view === 'history' && !histKey ? 'page' : undefined}
+              className={cn('mx-3 mb-1 flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] hover:bg-sidebar-accent', view === 'history' && !histKey && 'bg-sidebar-accent font-medium')}>
               <HistoryIcon className="size-4 text-muted-foreground" /><span>Search history</span>
             </button>
           )}
@@ -164,14 +165,15 @@ export default function App() {
                 {dir.groups.filter((g) => !g.client).map((g) => (
                   <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)}
                     onSettings={dir.extensions.includes('project') ? () => { setProjectView({ slug: g.project, name: g.name }); go('project'); } : undefined}
-                    settingsOpen={view === 'project' && projectView?.slug === g.project} onHistory={() => openHistory(g)} historyOpen={(view === 'history' || view === 'imported') && historyOf?.project === g.project} />
+                    settingsOpen={view === 'project' && projectView?.slug === g.project} onHistory={() => openHistory({ project: g.project, name: g.name })} historyOpen={(view === 'history' || view === 'imported') && histKey === `p:${g.project}`} />
                 ))}
                 <ClientsSection groups={dir.groups.filter((g) => !!g.client)} lines={dir.clients} workDevice={dir.workDevice}
                   render={(g) => (
                     <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)}
                       onSettings={dir.extensions.includes('project') ? () => { setProjectView({ slug: g.project, name: g.name }); go('project'); } : undefined}
-                      settingsOpen={view === 'project' && projectView?.slug === g.project} onHistory={() => openHistory(g)} historyOpen={(view === 'history' || view === 'imported') && historyOf?.project === g.project} />
+                      settingsOpen={view === 'project' && projectView?.slug === g.project} onHistory={() => openHistory({ project: g.project, name: g.name })} historyOpen={(view === 'history' || view === 'imported') && histKey === `p:${g.project}`} />
                   )} />
+                <ImportedSection groups={dir.importedGroups} active={(view === 'history' || view === 'imported') ? histKey : ''} onOpen={(g) => openHistory({ group: g.group, name: g.group, client: g.client })} />
               </>
             )}
           </nav>
@@ -187,7 +189,7 @@ export default function App() {
               <Menu className="size-5" />
               {dir.state === 'ready' && dir.cards.length > 0 && <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-primary" aria-label="Something needs you" />}
             </button>
-            {view === 'newproject' ? <span className="text-sm font-medium">New project</span> : view === 'history' ? <span className="truncate text-sm font-medium">{historyOf?.project ? <>{historyOf.name}<span className="text-muted-foreground"> · History</span></> : 'Imported history'}</span> : view === 'imported' && imported ? <><span className="truncate text-sm font-medium">{imported.title}</span><span className="shrink-0 text-sm text-muted-foreground">· Imported</span></> : view === 'project' && projectView ? <><span className="truncate text-sm font-medium">{projectView.name}</span><span className="text-sm text-muted-foreground">· Project settings</span></> : view === 'settings' ? <span className="text-sm font-medium">Settings</span> : view === 'needs' ? <span className="text-sm font-medium">Needs you</span> : target ? (
+            {view === 'newproject' ? <span className="text-sm font-medium">New project</span> : view === 'history' ? <span className="truncate text-sm font-medium">{historyOf && 'name' in historyOf ? <>{historyOf.name}<span className="text-muted-foreground"> · History</span></> : 'Imported history'}</span> : view === 'imported' && imported ? <><span className="truncate text-sm font-medium">{imported.title}</span><span className="shrink-0 text-sm text-muted-foreground">· Imported</span></> : view === 'project' && projectView ? <><span className="truncate text-sm font-medium">{projectView.name}</span><span className="text-sm text-muted-foreground">· Project settings</span></> : view === 'settings' ? <span className="text-sm font-medium">Settings</span> : view === 'needs' ? <span className="text-sm font-medium">Needs you</span> : target ? (
               <>
                 <span className="truncate text-sm font-medium">{target.title}</span>
                 {target.project && <span className="truncate text-sm text-muted-foreground">· {target.project}</span>}
@@ -222,10 +224,10 @@ export default function App() {
             <div className="min-h-0 flex-1"><ProjectSettings project={projectView.slug} request={dir.request} /></div>
           )}
           {view === 'history' && historyOf && dir.state === 'ready' && (
-            <div className="min-h-0 flex-1"><HistoryView request={dir.request} project={historyOf.project} projectName={historyOf.name} onOpen={openImported} /></div>
+            <div className="min-h-0 flex-1"><HistoryView request={dir.request} scope={historyOf} onOpen={openImported} /></div>
           )}
           {view === 'imported' && imported && dir.state === 'ready' && (
-            <div className="min-h-0 flex-1"><ImportedThread key={imported.id} request={dir.request} id={imported.id} onContinue={continued} /></div>
+            <div className="min-h-0 flex-1"><ImportedThread key={imported.id} request={dir.request} summary={imported} onContinue={continued} /></div>
           )}
           {view === 'newproject' && dir.state === 'ready' && (
             <div className="min-h-0 flex-1"><NewProject request={dir.request} onDone={made} /></div>
@@ -288,6 +290,31 @@ function ProjectSection({ g, activeId, onOpen, onNew, onSettings, settingsOpen, 
           )}
         </ul>
       )}
+    </div>
+  );
+}
+
+/** Imported Claude Code conversations from folders that aren't Hearth projects, one row per folder (group). */
+function ImportedSection({ groups, active, onOpen }: { groups: ImportedGroup[]; active: string; onOpen: (g: ImportedGroup) => void }) {
+  if (!groups.length) return null;
+  return (
+    <div className="mt-3" aria-label="Imported">
+      <div className="flex items-center gap-1.5 px-2 pt-2 pb-1">
+        <HistoryIcon className="size-3 text-muted-foreground" />
+        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Imported (Claude Code)</span>
+      </div>
+      <ul>
+        {groups.map((g) => (
+          <li key={`${g.client}:${g.group}`}>
+            <button onClick={() => onOpen(g)} className={cn('flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors',
+              active === `g:${g.group}` ? 'bg-sidebar-accent font-medium text-foreground' : 'text-sidebar-foreground/85 hover:bg-sidebar-accent/60')}>
+              {g.client ? <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label="Client" /> : <span className="size-3.5 shrink-0" />}
+              <span className="truncate">{g.group}</span>
+              <span className="ml-auto text-[11px] text-muted-foreground">{g.count}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
