@@ -5,6 +5,7 @@ import { Check, CircleHelp, GitMerge, Loader2, Send, ShieldQuestion, TriangleAle
 import { Button } from '@/components/ui/button';
 import { type Card, type CardAnswer, decidedLine, errorText } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
+import { FormQuestion } from '@/components/hearth/FormQuestion';
 
 const ICON: Record<string, typeof CircleHelp> = { question: CircleHelp, review_merge: GitMerge, permission: ShieldQuestion, failure: TriangleAlert };
 
@@ -42,6 +43,10 @@ export function CardView({ card, onAnswer, where, compact }: {
             <code className="mt-1.5 block truncate rounded-md bg-muted px-2 py-1 text-xs">{card.toolCall.title}</code>
           )}
           {!open && <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground"><Check className="size-3.5" />{decidedLine(card)}</div>}
+          {open && card.answerable === 'form' && card.form && (
+            <FormQuestion schema={card.form.schema} busy={!!busy}
+              onSend={(content) => void go('form', { decision: 'answer', content })} onSkip={() => void go('skip', { decision: 'deny' })} />
+          )}
           {open && card.answerable === 'text' && (
             <form className="mt-2.5 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (text.trim()) void go('answer', { decision: 'answer', text: text.trim() }); }}>
               <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Type your answer" aria-label="Your answer"
