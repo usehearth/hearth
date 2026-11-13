@@ -1259,7 +1259,7 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   }, [approval, isRequiresAction, status?.type]);
 
   return (
-    <ToolFallbackRoot open={open} onOpenChange={setOpen}>
+    <ToolFallbackRoot open={open} onOpenChange={setOpen} data-tool-call-id={(part as { toolCallId?: string }).toolCallId}>
       <ToolFallbackTrigger
         toolName={label}
         status={status}

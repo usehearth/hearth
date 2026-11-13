@@ -72,6 +72,83 @@ export function UsagePage({ request }: { request: Request }) {
   );
 }
 
+interface Extension { id: string; kind: string; name: string; scope: string; description: string | null; content: string; enabled: boolean; updated_at: string }
+const KIND_LABEL: Record<string, string> = { skill: 'Skill', command: 'Slash command', agent: 'Subagent', hook: 'Hook', output_style: 'Output style' };
+const KIND_HINT: Record<string, string> = {
+  skill: 'Instructions the agent loads when the task fits (like a SKILL.md).',
+  command: 'A /command: its text is the prompt. $ARGUMENTS takes what follows the command.',
+  agent: 'A subagent the main agent can hand work to: its system prompt.',
+  hook: 'JSON for Claude Code hooks, e.g. {"PostToolUse": [{"matcher": "Edit", "hooks": [{"type": "command", "command": "npm run lint"}]}]}',
+  output_style: 'How the agent writes its answers.',
+};
+
+/**
+ * The owner's own skills, slash commands, subagents, hooks and output styles (admin devices). They reach every
+ * session (global) or one project's; a repo's own .claude/ folder is never loaded.
+ */
+export function ExtensionsPage({ request }: { request: Request }) {
+  const [items, setItems] = useState<Extension[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [edit, setEdit] = useState<Partial<Extension> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => { request<{ extensions: Extension[] }>('_hearth/extensions', {}).then((r) => { setItems(r.extensions); setError(null); }, (e) => setError(errorText(e))); }, [request]);
+  useEffect(load, [load]);
+  const save = async () => {
+    if (!edit) return;
+    let confirm = false;
+    if (edit.kind === 'hook') {
+      confirm = window.confirm('Hooks run shell commands as the agent on every matching tool call, in every project they apply to. Save it?');
+      if (!confirm) return;
+    }
+    setBusy(true);
+    try { await request('_hearth/extensions/save', { ...edit, confirm }); setEdit(null); load(); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
+  };
+  return (
+    <div>
+      <SectionHead title="Extensions" sub="Your own skills, slash commands, subagents, hooks and output styles. They reach every project's agents (or one project's). A repo's own .claude folder is never used."
+        action={<Button size="sm" onClick={() => setEdit({ kind: 'command', scope: 'global', enabled: true, name: '', content: '' })}>Add</Button>} />
+      {error && <p className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
+      {edit && (
+        <div className="mb-4 space-y-2 rounded-xl border bg-card p-3 text-sm">
+          <div className="flex flex-wrap gap-2">
+            <select value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value })} aria-label="Kind" className="h-9 rounded-md border bg-background px-2">
+              {Object.entries(KIND_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </select>
+            <input value={edit.name ?? ''} onChange={(e) => setEdit({ ...edit, name: e.target.value.toLowerCase() })} placeholder="name-with-dashes" aria-label="Name" className="h-9 min-w-40 flex-1 rounded-md border bg-background px-3 font-mono" />
+            <input value={edit.scope ?? 'global'} onChange={(e) => setEdit({ ...edit, scope: e.target.value })} placeholder="global or a project" aria-label="Scope" className="h-9 w-40 rounded-md border bg-background px-3" />
+          </div>
+          <input value={edit.description ?? ''} onChange={(e) => setEdit({ ...edit, description: e.target.value })} placeholder="What it is for (shown to the agent)" aria-label="Description" className="h-9 w-full rounded-md border bg-background px-3" />
+          <p className="text-xs text-muted-foreground">{KIND_HINT[edit.kind ?? 'command']}</p>
+          <textarea value={edit.content ?? ''} onChange={(e) => setEdit({ ...edit, content: e.target.value })} rows={8} spellCheck={false} aria-label="Content"
+            className="w-full rounded-md border bg-background px-3 py-2 font-mono text-xs" />
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1.5"><input type="checkbox" checked={edit.enabled !== false} onChange={(e) => setEdit({ ...edit, enabled: e.target.checked })} className="size-4 accent-primary" />On</label>
+            <div className="ml-auto flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => setEdit(null)}>Cancel</Button>
+              <Button size="sm" disabled={busy || !edit.name || !edit.content} onClick={() => void save()}>{busy && <Loader2 className="size-3.5 animate-spin" />}Save</Button>
+            </div>
+          </div>
+        </div>
+      )}
+      {!items && !error && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div>}
+      {items && !items.length && !edit && <p className="text-sm text-muted-foreground">None yet. Add a slash command your agents should know, a skill, or a reviewer subagent.</p>}
+      {items && items.length > 0 && (
+        <ul className="divide-y rounded-xl border text-sm">
+          {items.map((x) => (
+            <li key={x.id} className="flex items-center gap-2 px-3 py-2">
+              <span className="w-24 shrink-0 text-xs text-muted-foreground">{KIND_LABEL[x.kind] ?? x.kind}</span>
+              <span className="min-w-0 flex-1"><span className="font-mono font-medium">{x.kind === 'command' ? '/' : ''}{x.name}</span>
+                <span className="block truncate text-xs text-muted-foreground">{x.scope === 'global' ? 'Every project' : x.scope}{x.description ? ` · ${x.description}` : ''}{x.enabled ? '' : ' · off'}</span></span>
+              <Button size="sm" variant="ghost" onClick={() => setEdit(x)}>Edit</Button>
+              <Button size="sm" variant="ghost" onClick={() => { if (window.confirm(`Delete ${x.name}?`)) request('_hearth/extensions/delete', { id: x.id }).then(load, (e) => setError(errorText(e))); }}>Delete</Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 interface AuditEntry { id: string; at: string; actor: string; action: string; target: string | null; detail: Record<string, unknown> | null }
 
 const when = (s: string) => new Date(s).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });

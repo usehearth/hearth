@@ -8,6 +8,8 @@ import { cn } from '@/lib/utils';
 
 export interface AcpToolMeta {
   name?: string;
+  /** The engine's own tool name (Claude Code: Task for a subagent, Bash...). */
+  tool?: string;
   kind?: string;
   title?: string;
   status?: string;
