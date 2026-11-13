@@ -225,7 +225,7 @@ export default function App() {
             </div>
           )}
           {view === 'project' && projectView && dir.state === 'ready' && (
-            <div className="min-h-0 flex-1"><ProjectSettings project={projectView.slug} request={dir.request} /></div>
+            <div className="min-h-0 flex-1"><ProjectSettings project={projectView.slug} request={dir.request} extensions={dir.extensions} /></div>
           )}
           {view === 'needs' && dir.state === 'ready' && (
             <div className="min-h-0 flex-1"><NeedsYou cards={dir.cards} onAnswer={dir.answer} onOpen={openCard} /></div>

@@ -226,6 +226,77 @@ export function ConnectorsPage({ request }: { request: Request }) {
   );
 }
 
+interface Schedule { id: number; project: string; cron: string; tz: string; kind: string; title: string; prompt: string; enabled: boolean; last_run_at: string | null; handler: string | null }
+interface Trigger { id: number; name: string; project: string; source: string; title: string; enabled: boolean; queued?: number; hookUrl?: string }
+interface Run { schedule_id?: number; trigger_id?: number; title?: string; name?: string; started_at: string; status?: string; session_id?: string | null }
+
+/** Schedules (cron) and triggers (poll, webhook, event): what runs on its own. Admin devices. */
+export function SchedulesPage({ request }: { request: Request }) {
+  const [data, setData] = useState<{ schedules: Schedule[]; next?: { id: number; next: string | null }[]; triggers: Trigger[]; runs: { schedules: Run[]; triggers: Run[] } } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState<{ project: string; title: string; cron: string; prompt: string } | null>(null);
+  const load = useCallback(() => { request<any>('_hearth/schedules', {}).then((r) => { setData(r); setError(null); }, (e) => setError(errorText(e))); }, [request]);
+  useEffect(load, [load]);
+  const call = (path: string, body: unknown = {}) => request('_hearth/schedules/call', { path, body }).then(load, (e) => setError(errorText(e)));
+  const when = (s: string | null | undefined) => (s ? new Date(s).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'never');
+  return (
+    <div>
+      <SectionHead title="Schedules" sub="Work that runs on its own: timed jobs and triggers (a webhook, a polled tool, a server event). Each run is an ordinary session with its project's rules."
+        action={<Button size="sm" onClick={() => setForm({ project: '', title: '', cron: '0 9 * * 1-5', prompt: '' })}>Add</Button>} />
+      {error && <p className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
+      {form && (
+        <div className="mb-4 space-y-2 rounded-xl border bg-card p-3 text-sm">
+          <div className="flex flex-wrap gap-2">
+            <input value={form.project} onChange={(e) => setForm({ ...form, project: e.target.value })} placeholder="project" aria-label="Project" className="h-9 w-36 rounded-md border bg-background px-3 font-mono" />
+            <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Title" aria-label="Title" className="h-9 min-w-40 flex-1 rounded-md border bg-background px-3" />
+            <input value={form.cron} onChange={(e) => setForm({ ...form, cron: e.target.value })} placeholder="0 9 * * 1-5" aria-label="When (cron)" className="h-9 w-36 rounded-md border bg-background px-3 font-mono" />
+          </div>
+          <textarea value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })} rows={4} placeholder="What the agent should do each time" aria-label="Prompt" className="w-full rounded-md border bg-background px-3 py-2" />
+          <p className="text-xs text-muted-foreground">When: minute hour day month weekday, in the server's time zone (0 9 * * 1-5 = weekdays at 09:00).</p>
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="outline" onClick={() => setForm(null)}>Cancel</Button>
+            <Button size="sm" disabled={!form.project || !form.title || !form.prompt} onClick={() => void call('/api/schedules', { ...form, kind: 'job', enabled: true }).then(() => setForm(null))}>Save</Button>
+          </div>
+        </div>
+      )}
+      {!data && !error && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div>}
+      {data && (
+        <>
+          <ul className="divide-y rounded-xl border text-sm">
+            {!data.schedules.length && <li className="px-3 py-2 text-muted-foreground">No schedules.</li>}
+            {data.schedules.map((s) => (
+              <li key={s.id} className="flex flex-wrap items-center gap-2 px-3 py-2">
+                <span className="min-w-0 flex-1"><span className="font-medium">{s.title}</span><span className="block truncate text-xs text-muted-foreground">
+                  {s.project} · <span className="font-mono">{s.cron}</span> {s.tz} · last run {when(s.last_run_at)}{(() => { const n = data.next?.find((x) => x.id === s.id)?.next; return n && s.enabled ? ` · next ${when(n)}` : ''; })()}{s.handler ? ' · built in' : ''}</span></span>
+                <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={s.enabled} onChange={(e) => void call(`/api/schedules/${s.id}`, { enabled: e.target.checked })} className="size-4 accent-primary" />On</label>
+                <Button size="sm" variant="ghost" onClick={() => void call(`/api/schedules/${s.id}`, { run: true })}>Run now</Button>
+                {!s.handler && <Button size="sm" variant="ghost" onClick={() => { if (window.confirm(`Delete "${s.title}"?`)) void call(`/api/schedules/${s.id}/delete`); }}>Delete</Button>}
+              </li>
+            ))}
+          </ul>
+          <h3 className="mt-6 mb-2 text-sm font-semibold">Triggers</h3>
+          <ul className="divide-y rounded-xl border text-sm">
+            {!data.triggers.length && <li className="px-3 py-2 text-muted-foreground">No triggers. A GitHub repo can start work from “@hearth” mentions: a webhook trigger, with the repo's webhook at /hook/github/&lt;name&gt; (its key from the page).</li>}
+            {data.triggers.map((t) => (
+              <li key={t.id} className="flex flex-wrap items-center gap-2 px-3 py-2">
+                <span className="min-w-0 flex-1"><span className="font-medium">{t.title || t.name}</span><span className="block truncate text-xs text-muted-foreground">{t.project} · {t.source}{t.queued ? ` · ${t.queued} waiting` : ''}</span></span>
+                <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={t.enabled} onChange={(e) => void call(`/api/triggers/${t.id}`, { enabled: e.target.checked })} className="size-4 accent-primary" />On</label>
+              </li>
+            ))}
+          </ul>
+          <h3 className="mt-6 mb-2 text-sm font-semibold">Recent runs</h3>
+          <ul className="divide-y rounded-xl border text-xs">
+            {[...data.runs.schedules, ...data.runs.triggers].sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at)).slice(0, 30).map((r, i) => (
+              <li key={i} className="flex gap-2 px-3 py-1.5"><span className="min-w-0 flex-1 truncate">{r.title || r.name}</span><span className="text-muted-foreground">{when(r.started_at)}</span>{r.status && <span className="text-muted-foreground">{r.status}</span>}</li>
+            ))}
+            {!data.runs.schedules.length && !data.runs.triggers.length && <li className="px-3 py-2 text-muted-foreground">No runs yet.</li>}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 interface AuditEntry { id: string; at: string; actor: string; action: string; target: string | null; detail: Record<string, unknown> | null }
 
 const when = (s: string) => new Date(s).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });

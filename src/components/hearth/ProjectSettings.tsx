@@ -24,6 +24,8 @@ export interface ProjectView {
   /** Monthly budget (servers with `usage`), and what this month cost so far. */
   budget?: { monthlyUsd: number; warnAt: number } | null;
   monthCost?: number;
+  /** The git remote (servers with `git`): its URL and whether a token is set (never the token). */
+  remote?: { url: string; hasToken: boolean } | null;
   canEdit: boolean;
 }
 
@@ -36,7 +38,7 @@ const lines = (t: string) => t.split(/\r?\n/).map((x) => x.trim()).filter(Boolea
 
 type Request = <T = unknown>(method: string, params?: unknown) => Promise<T>;
 
-export function ProjectSettings({ project, request }: { project: string; request: Request }) {
+export function ProjectSettings({ project, request, extensions = [] }: { project: string; request: Request; extensions?: string[] }) {
   const [view, setView] = useState<ProjectView | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -53,6 +55,8 @@ export function ProjectSettings({ project, request }: { project: string; request
   const [denyText, setDenyText] = useState('');
   const [budget, setBudget] = useState('');
   const [tools, setTools] = useState<string[]>([]);
+  const [remoteUrl, setRemoteUrl] = useState('');
+  const [remoteToken, setRemoteToken] = useState('');
   const [repoMcp, setRepoMcp] = useState(false);
   const [repoApproved, setRepoApproved] = useState<string[]>([]);
   const [warnAt, setWarnAt] = useState('80');
@@ -70,6 +74,8 @@ export function ProjectSettings({ project, request }: { project: string; request
     setDenyText((v.permissions?.deny ?? []).join('\n'));
     setBudget(v.budget ? String(v.budget.monthlyUsd) : '');
     setTools(v.tools);
+    setRemoteUrl(v.remote?.url ?? '');
+    setRemoteToken('');
     setRepoMcp(!!v.repoMcp?.enabled);
     setRepoApproved(v.repoMcp?.approved ?? []);
     setWarnAt(v.budget ? String(Math.round(v.budget.warnAt * 100)) : '80');
@@ -88,6 +94,7 @@ export function ProjectSettings({ project, request }: { project: string; request
       fill(await request<ProjectView>('_hearth/project/update', { project, name, models: m, providers: allProviders ? null : order, planFirst, ...(view!.instructions !== null ? { instructions } : {}),
         ...(view!.permissions ? { permissions: { mode, allow: lines(allowText), deny: lines(denyText) } } : {}),
         ...(view!.toolChoices && (tools.join() !== view!.tools.join()) ? { tools } : {}),
+        ...(extensions.includes('git') && (remoteUrl.trim() !== (view!.remote?.url ?? '') || remoteToken) ? { remote: remoteUrl.trim() ? { url: remoteUrl.trim(), ...(remoteToken ? { token: remoteToken } : {}) } : null } : {}),
         ...(view!.repoMcp && (repoMcp !== view!.repoMcp.enabled || repoApproved.join() !== view!.repoMcp.approved.join()) ? { repoMcp, repoMcpApproved: repoApproved } : {}),
         ...(view!.monthCost !== undefined ? { budget: budget.trim() ? { monthlyUsd: Number(budget), warnAt: Number(warnAt) / 100 } : null } : {}) }));
       setSaved(true);
@@ -172,6 +179,15 @@ export function ProjectSettings({ project, request }: { project: string; request
           </label>
         </Section>
 
+        {extensions.includes('git') && (
+          <Section title="Git remote" sub="Where branches are pushed and pull requests opened (GitHub). Agents never push; you do, here. Changing it needs an admin device.">
+            <input value={remoteUrl} onChange={(e) => setRemoteUrl(e.target.value)} placeholder="https://github.com/owner/repo.git" aria-label="Remote URL" className={cn(inputCls, 'font-mono')} />
+            <input value={remoteToken} onChange={(e) => setRemoteToken(e.target.value)} type="password" autoComplete="off" aria-label="Remote token"
+              placeholder={view.remote?.hasToken ? 'Token set (type to replace)' : 'Token (a fine-grained token for this repo)'} className={cn(inputCls, 'mt-2')} />
+            {view.remote && <PullRequests project={project} request={request} />}
+          </Section>
+        )}
+
         {view.permissions && (
           <Section title="Permissions" sub="What agents may do without asking. Threads can change their own mode; “Always allow” on a prompt adds a rule here (project) or to the thread.">
             <div role="radiogroup" aria-label="Mode new threads start in" className="grid grid-cols-3 gap-2 max-sm:grid-cols-1">
@@ -245,6 +261,49 @@ export function ProjectSettings({ project, request }: { project: string; request
           {err && <span className="text-sm text-destructive">{err}</span>}
         </div>
       </form>
+    </div>
+  );
+}
+
+/** Push a branch and open a pull request; the project's pull requests with their CI. */
+function PullRequests({ project, request }: { project: string; request: Request }) {
+  const [prs, setPrs] = useState<{ number: number; url: string; branch: string; base: string; state: string; ci: string | null; ci_detail: string | null }[] | null>(null);
+  const [branch, setBranch] = useState('');
+  const [title, setTitle] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = () => request<{ prs: NonNullable<typeof prs> }>('_hearth/git/prs', { project }).then((r) => setPrs(r.prs), () => setPrs([]));
+  useEffect(() => { void load(); }, [project]); // eslint-disable-line react-hooks/exhaustive-deps
+  const go = async (what: 'push' | 'pr') => {
+    setBusy(what); setMsg(null);
+    try {
+      if (what === 'push') { await request('_hearth/git/push', { project, branch }); setMsg(`Pushed ${branch}.`); }
+      else { const r = await request<{ number: number; url: string; existing: boolean }>('_hearth/git/pr', { project, branch, title: title || branch }); setMsg(`${r.existing ? 'Already open' : 'Opened'}: PR #${r.number}`); void load(); }
+    } catch (e) { setMsg(errorText(e)); } finally { setBusy(null); }
+  };
+  return (
+    <div className="mt-3 rounded-lg border p-2.5 text-sm">
+      <div className="flex flex-wrap gap-2">
+        <input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="branch" aria-label="Branch" className={cn(inputCls, 'w-44 font-mono')} />
+        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Pull request title" aria-label="Pull request title" className={cn(inputCls, 'min-w-40 flex-1')} />
+      </div>
+      <div className="mt-2 flex gap-2">
+        <Button type="button" size="sm" variant="outline" disabled={!branch || !!busy} onClick={() => void go('push')}>{busy === 'push' && <Loader2 className="size-3.5 animate-spin" />}Push</Button>
+        <Button type="button" size="sm" disabled={!branch || !!busy} onClick={() => void go('pr')}>{busy === 'pr' && <Loader2 className="size-3.5 animate-spin" />}Push and open PR</Button>
+      </div>
+      {msg && <p className="mt-2 text-xs text-muted-foreground">{msg}</p>}
+      {prs && prs.length > 0 && (
+        <ul className="mt-2 space-y-1 text-xs">
+          {prs.map((p) => (
+            <li key={p.number} className="flex items-center gap-2">
+              <a href={p.url} target="_blank" rel="noreferrer" className="font-medium underline-offset-2 hover:underline">#{p.number}</a>
+              <span className="font-mono">{p.branch} → {p.base}</span>
+              <span className={cn('ml-auto rounded px-1.5', p.ci === 'failure' ? 'bg-destructive/15 text-destructive' : p.ci === 'success' ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-muted text-muted-foreground')}>
+                {p.state !== 'open' ? p.state : p.ci === 'failure' ? `CI failed: ${p.ci_detail ?? ''}` : p.ci ?? 'no checks'}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
