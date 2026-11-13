@@ -14,6 +14,10 @@ export interface ProjectView {
   availableProviders: { name: string; kind: string; priority: number }[];
   planFirst: boolean;
   tools: string[];
+  /** MCP servers that can be picked (admin devices change them; servers with `mcp`). */
+  toolChoices?: string[];
+  /** The repo's own .mcp.json (personal projects). */
+  repoMcp?: { enabled: boolean; found: { name: string; type: string; url: string | null; command: string | null; hash: string; usable: boolean }[]; approved: string[] } | null;
   instructions: string | null;
   /** Permission rules (servers with the `permissions` extension). */
   permissions?: { mode: string; allow: string[]; deny: string[]; defaults: string[]; alwaysDenied: string[] };
@@ -48,6 +52,9 @@ export function ProjectSettings({ project, request }: { project: string; request
   const [allowText, setAllowText] = useState('');
   const [denyText, setDenyText] = useState('');
   const [budget, setBudget] = useState('');
+  const [tools, setTools] = useState<string[]>([]);
+  const [repoMcp, setRepoMcp] = useState(false);
+  const [repoApproved, setRepoApproved] = useState<string[]>([]);
   const [warnAt, setWarnAt] = useState('80');
 
   const fill = (v: ProjectView) => {
@@ -62,6 +69,9 @@ export function ProjectSettings({ project, request }: { project: string; request
     setAllowText((v.permissions?.allow ?? []).join('\n'));
     setDenyText((v.permissions?.deny ?? []).join('\n'));
     setBudget(v.budget ? String(v.budget.monthlyUsd) : '');
+    setTools(v.tools);
+    setRepoMcp(!!v.repoMcp?.enabled);
+    setRepoApproved(v.repoMcp?.approved ?? []);
     setWarnAt(v.budget ? String(Math.round(v.budget.warnAt * 100)) : '80');
   };
   useEffect(() => {
@@ -77,6 +87,8 @@ export function ProjectSettings({ project, request }: { project: string; request
       for (const r of view!.roles) m[r.role] = models[r.role]?.trim() || null;
       fill(await request<ProjectView>('_hearth/project/update', { project, name, models: m, providers: allProviders ? null : order, planFirst, ...(view!.instructions !== null ? { instructions } : {}),
         ...(view!.permissions ? { permissions: { mode, allow: lines(allowText), deny: lines(denyText) } } : {}),
+        ...(view!.toolChoices && (tools.join() !== view!.tools.join()) ? { tools } : {}),
+        ...(view!.repoMcp && (repoMcp !== view!.repoMcp.enabled || repoApproved.join() !== view!.repoMcp.approved.join()) ? { repoMcp, repoMcpApproved: repoApproved } : {}),
         ...(view!.monthCost !== undefined ? { budget: budget.trim() ? { monthlyUsd: Number(budget), warnAt: Number(warnAt) / 100 } : null } : {}) }));
       setSaved(true);
     } catch (e2) { setErr(errorText(e2)); } finally { setBusy(false); }
@@ -190,7 +202,37 @@ export function ProjectSettings({ project, request }: { project: string; request
           </Section>
         )}
 
-        {view.tools.length > 0 && (
+        {view.toolChoices && (
+          <Section title="Tools" sub="The MCP servers this project's agents get (changing them needs an admin device). Add servers in Settings > Connectors.">
+            <div className="flex flex-wrap gap-1.5">
+              {[...new Set([...view.toolChoices, ...tools])].map((t) => (
+                <button type="button" key={t} aria-pressed={tools.includes(t)} onClick={() => setTools((x) => (x.includes(t) ? x.filter((y) => y !== t) : [...x, t]))}
+                  className={cn('flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs', tools.includes(t) ? 'border-primary bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-accent')}>
+                  <Wrench className="size-3" />{t}{tools.includes(t) && <Check className="size-3" />}
+                </button>
+              ))}
+            </div>
+            {view.repoMcp && (
+              <div className="mt-3 rounded-lg border p-2.5 text-sm">
+                <label className="flex items-start gap-2">
+                  <input type="checkbox" checked={repoMcp} onChange={(e) => setRepoMcp(e.target.checked)} className="mt-0.5 size-4 accent-(--primary)" />
+                  <span>Use the repo's own .mcp.json<span className="block text-xs text-muted-foreground">Only servers you allow below, only http ones (a command in the repo never runs), and their tools still ask.</span></span>
+                </label>
+                {repoMcp && (view.repoMcp.found.length === 0
+                  ? <p className="mt-2 text-xs text-muted-foreground">Nothing found yet: the file is read when a session starts.</p>
+                  : <ul className="mt-2 space-y-1">{view.repoMcp.found.map((f) => (
+                      <li key={f.hash} className="flex items-center gap-2 text-xs">
+                        <input type="checkbox" disabled={!f.usable} checked={repoApproved.includes(f.hash)} aria-label={`Allow ${f.name}`}
+                          onChange={(e) => setRepoApproved((a) => (e.target.checked ? [...a, f.hash] : a.filter((h) => h !== f.hash)))} className="size-3.5 accent-(--primary)" />
+                        <span className="font-mono">{f.name}</span>
+                        <span className="min-w-0 flex-1 truncate text-muted-foreground">{f.usable ? f.url : f.command ? `command: ${f.command} (never run)` : 'not usable'}</span>
+                      </li>))}</ul>)}
+              </div>
+            )}
+          </Section>
+        )}
+
+        {!view.toolChoices && view.tools.length > 0 && (
           <Section title="Tools" sub="Set on the server.">
             <div className="flex flex-wrap gap-1.5">{view.tools.map((t) => <span key={t} className="flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-xs"><Wrench className="size-3" />{t}</span>)}</div>
           </Section>

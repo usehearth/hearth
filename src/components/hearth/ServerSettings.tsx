@@ -149,6 +149,83 @@ export function ExtensionsPage({ request }: { request: Request }) {
   );
 }
 
+interface McpServer { name: string; title: string; url: string; client: string | null; enabled: boolean; has_token: boolean; oauth?: boolean; expiresAt?: string | null }
+
+/** Open a sign-in page: the system browser in the desktop app, a new tab on the web. */
+async function openExternal(url: string) {
+  if ('__TAURI_INTERNALS__' in window) {
+    try { const { openUrl } = await import('@tauri-apps/plugin-opener'); await openUrl(url); return; } catch { /* fall back */ }
+  }
+  window.open(url, '_blank', 'noopener');
+}
+
+/** MCP connectors: the servers agents can be given (per project, in project settings). Admin devices. */
+export function ConnectorsPage({ request }: { request: Request }) {
+  const [items, setItems] = useState<McpServer[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState<{ name: string; title: string; url: string; token: string; client: string } | null>(null);
+  const [tests, setTests] = useState<Record<string, string>>({});
+  const load = useCallback(() => { request<{ servers: McpServer[] }>('_hearth/mcp', {}).then((r) => { setItems(r.servers); setError(null); }, (e) => setError(errorText(e))); }, [request]);
+  useEffect(load, [load]);
+  const test = async (name: string) => {
+    setTests((t) => ({ ...t, [name]: 'Testing…' }));
+    try {
+      const r = await request<{ ok: boolean; tools?: string[]; error?: string; ms: number }>('_hearth/mcp/test', { name });
+      setTests((t) => ({ ...t, [name]: r.ok ? `${r.tools!.length} tool${r.tools!.length === 1 ? '' : 's'} (${r.ms} ms)` : r.error ?? 'failed' }));
+    } catch (e) { setTests((t) => ({ ...t, [name]: errorText(e) })); }
+  };
+  const signIn = async (name: string) => {
+    try {
+      const r = await request<{ connected?: boolean; authorizationUrl?: string }>('_hearth/mcp/oauth/start', { name });
+      if (r.authorizationUrl) { await openExternal(r.authorizationUrl); setTests((t) => ({ ...t, [name]: 'Finish signing in in the browser, then Test.' })); }
+      else { setTests((t) => ({ ...t, [name]: 'Signed in.' })); load(); }
+    } catch (e) { setError(errorText(e)); }
+  };
+  return (
+    <div>
+      <SectionHead title="Connectors" sub="MCP servers your agents can use. Give a project the ones it needs in its settings. Tokens are stored encrypted and never shown."
+        action={<Button size="sm" onClick={() => setForm({ name: '', title: '', url: '', token: '', client: '' })}>Add</Button>} />
+      {error && <p className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
+      {form && (
+        <div className="mb-4 space-y-2 rounded-xl border bg-card p-3 text-sm">
+          <div className="flex flex-wrap gap-2">
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value.toLowerCase() })} placeholder="name" aria-label="Name" className="h-9 w-40 rounded-md border bg-background px-3 font-mono" />
+            <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="What it is (e.g. Linear)" aria-label="Title" className="h-9 min-w-40 flex-1 rounded-md border bg-background px-3" />
+          </div>
+          <input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://example.com/mcp" aria-label="URL" className="h-9 w-full rounded-md border bg-background px-3 font-mono" />
+          <input value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} type="password" autoComplete="off" placeholder="Token (leave empty for OAuth sign-in or no token)" aria-label="Token" className="h-9 w-full rounded-md border bg-background px-3" />
+          <input value={form.client} onChange={(e) => setForm({ ...form, client: e.target.value })} placeholder="Client (only for a client's own login)" aria-label="Client" className="h-9 w-full rounded-md border bg-background px-3" />
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="outline" onClick={() => setForm(null)}>Cancel</Button>
+            <Button size="sm" disabled={!form.name || !form.url} onClick={async () => {
+              try { await request('_hearth/mcp/save', { name: form.name, title: form.title, url: form.url, ...(form.token ? { token: form.token } : {}), ...(form.client ? { client: form.client } : {}) }); setForm(null); load(); }
+              catch (e) { setError(errorText(e)); }
+            }}>Save</Button>
+          </div>
+        </div>
+      )}
+      {!items && !error && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div>}
+      {items && !items.length && !form && <p className="text-sm text-muted-foreground">No connectors yet.</p>}
+      {items && items.length > 0 && (
+        <ul className="divide-y rounded-xl border text-sm">
+          {items.map((s) => (
+            <li key={s.name} className="px-3 py-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="min-w-0 flex-1"><span className="font-mono font-medium">{s.name}</span>{s.title && <span className="text-muted-foreground"> · {s.title}</span>}
+                  <span className="block truncate text-xs text-muted-foreground">{s.url}{s.client ? ` · client ${s.client}` : ''} · {s.oauth ? 'signed in (OAuth)' : s.has_token ? 'token set' : 'no token'}</span></span>
+                <Button size="sm" variant="ghost" onClick={() => void test(s.name)}>Test</Button>
+                <Button size="sm" variant="ghost" onClick={() => void signIn(s.name)}>{s.oauth ? 'Sign in again' : 'Sign in'}</Button>
+                <Button size="sm" variant="ghost" onClick={() => { if (window.confirm(`Remove ${s.name}? Projects that use it lose it.`)) request('_hearth/mcp/delete', { name: s.name }).then(load, (e) => setError(errorText(e))); }}>Remove</Button>
+              </div>
+              {tests[s.name] && <p className="mt-1 text-xs text-muted-foreground">{tests[s.name]}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 interface AuditEntry { id: string; at: string; actor: string; action: string; target: string | null; detail: Record<string, unknown> | null }
 
 const when = (s: string) => new Date(s).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
