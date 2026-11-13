@@ -1,0 +1,28 @@
+{
+  "name": "@hearth/cli",
+  "version": "0.1.0",
+  "description": "Hearth from the terminal: list and search threads, chat, run one-shot prompts, and an ACP stdio bridge for editors.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "hearth": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node test/bridge-smoke.mjs"
+  },
+  "dependencies": {
+    "@hearth/sdk": "file:../sdk"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3"
+  }
+}
