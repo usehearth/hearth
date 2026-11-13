@@ -10,4 +10,6 @@ It matches `@assistant-ui/core` 0.3.35, `@assistant-ui/react` 0.15.36 and `assis
 - `AcpThreadController.ts`: an existing session opens on load, so its history shows before the first prompt.
 - `AcpClient.ts` (H4): `extRequest` for server extension requests (`_hearth/plan`, `_hearth/cards`, `_hearth/card/answer`) and `subscribeExtNotification` for `_hearth/*` notifications.
 - `acpThreadState.ts` (H4): updates carrying `_meta.hearth.card` are left out of the messages; Hearth draws them as cards.
+- `conversions.ts` (attachments): text and code file attachments go as embedded text resources (`resource.text`) instead of binary blobs.
+- `acpThreadState.ts` (attachments): in history and other windows' turns, `<context ref=...>` blocks in a user message become file chips (`splitContext`).
 - `globals.d.ts`: declares the build-time version constant.

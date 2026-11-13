@@ -110,6 +110,21 @@ export function threadContentToAcpBlocks(
           blocks.push({ type: "audio", data: source.data, mimeType });
           break;
         }
+        // Hearth: text and code files go as an embedded text resource, which any agent can read.
+        if (isTextMime(mimeType)) {
+          const text = decodeUtf8Base64(source.data);
+          if (text !== null) {
+            blocks.push({
+              type: "resource",
+              resource: {
+                uri: `file:///${encodeURIComponent(part.filename ?? "attachment")}`,
+                mimeType,
+                text,
+              },
+            });
+            break;
+          }
+        }
         blocks.push({
           type: "resource",
           resource: {
@@ -663,3 +678,20 @@ export function appendContentBlock(
   }
   return [...content, ...parts];
 }
+
+/** Hearth: text-like MIME types sent as embedded text. */
+const isTextMime = (t: string) =>
+  t.startsWith("text/") ||
+  /^application\/(json|xml|x-yaml|yaml|toml|javascript|typescript|x-sh|sql)/.test(t);
+
+/** Hearth: base64 of UTF-8 bytes to a string, or null if it is not valid UTF-8. */
+const decodeUtf8Base64 = (data: string): string | null => {
+  try {
+    const bin = atob(data);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+};

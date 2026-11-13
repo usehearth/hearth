@@ -230,6 +230,28 @@ const cancelPermissions = (state: AcpThreadState): AcpThreadState => {
   return next;
 };
 
+/** Hearth: `<context ref="file:///name">text</context>` blocks (embedded files) out of a user message's text. */
+const CONTEXT_BLOCK = /\n?<context ref="([^"]*)">\n([\s\S]*?)\n<\/context>/g;
+let contextIds = 0;
+export const splitContext = (text: string): { text: string; files: CompleteAttachment[] } => {
+  if (!text.includes("<context ref=")) return { text, files: [] };
+  const files: CompleteAttachment[] = [];
+  const rest = text.replace(CONTEXT_BLOCK, (_m, ref: string, body: string) => {
+    let name = ref;
+    try { name = decodeURIComponent(ref.replace(/^file:\/\/\/?/, "")) || ref; } catch { /* keep the ref */ }
+    files.push({
+      id: `ctx-${contextIds++}`,
+      type: "document",
+      name,
+      contentType: "text/plain",
+      status: { type: "complete" },
+      content: [{ type: "text", text: body }],
+    });
+    return "";
+  });
+  return { text: rest.trim(), files };
+};
+
 /**
  * Hearth: the server owns the thread, so a replay (`session/load`) and turns
  * started in other windows arrive while this window runs no turn of its own.
@@ -244,21 +266,28 @@ const reducePassive = (
   switch (u.sessionUpdate) {
     case "user_message_chunk": {
       const block = u.content;
+      // Hearth: files sent as embedded text come back inside the text as <context> blocks; show them as file chips.
+      const split = block?.type === "text" ? splitContext(String(block.text ?? "")) : undefined;
       const part: ThreadUserMessagePart | undefined =
-        block?.type === "text"
-          ? { type: "text", text: String(block.text ?? "") }
+        split
+          ? split.text ? { type: "text", text: split.text } : undefined
           : block?.type === "image" && block.data
             ? { type: "image", image: `data:${block.mimeType};base64,${block.data}` }
             : undefined;
-      if (!part) return state;
+      const files = split?.files ?? [];
+      if (!part && !files.length) return state;
       const head = state.headId ? state.messagesById[state.headId] : undefined;
+      if (!part && state.passiveUserOpen && head?.role === "user") {
+        return { ...state, messagesById: { ...state.messagesById, [head.id]: { ...head, attachments: [...head.attachments, ...files] } } };
+      }
+      if (!part) return state;
       if (state.passiveUserOpen && head?.role === "user") {
         const last = head.content[head.content.length - 1];
         const content =
           part.type === "text" && last?.type === "text"
             ? [...head.content.slice(0, -1), { type: "text" as const, text: last.text + part.text }]
             : [...head.content, part];
-        return { ...state, messagesById: { ...state.messagesById, [head.id]: { ...head, content } } };
+        return { ...state, messagesById: { ...state.messagesById, [head.id]: { ...head, content, attachments: [...head.attachments, ...files] } } };
       }
       const message: AcpUserMessage = {
         role: "user",
@@ -266,7 +295,7 @@ const reducePassive = (
         parentId: state.headId,
         createdAt: Date.now(),
         content: [part],
-        attachments: [],
+        attachments: files,
       };
       return { ...withMessage(state, message), passiveUserOpen: true, passiveAssistantId: undefined };
     }
