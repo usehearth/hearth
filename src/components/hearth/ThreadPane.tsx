@@ -156,7 +156,7 @@ function Runtime({ client, events, actionsEl }: { client: AcpClient; events: Thr
           <button onClick={togglePlan} aria-pressed={planOpen} title={planOpen ? 'Hide the plan' : 'Show the plan'}
             className={cn('flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground', planOpen && 'text-foreground')}>
             {planOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
-            <span>Plan</span>
+            <span className="max-sm:sr-only">Plan</span>
             {hasPlan && !planOpen && <span className="size-1.5 rounded-full bg-primary" aria-label="has a plan" />}
           </button>, actionsEl)}
       </ExtrasContext.Provider>
@@ -175,7 +175,7 @@ function useWide() {
 function PlanPanel({ extras, onClose }: { extras: Extras; onClose: () => void }) {
   const { plan, planLoading, refreshPlan } = extras;
   return (
-    <aside aria-label="Plan" className="flex w-[22rem] shrink-0 flex-col border-l bg-sidebar/40 max-lg:w-80">
+    <aside aria-label="Plan" className="flex w-[22rem] shrink-0 flex-col border-l bg-sidebar/40 max-lg:w-80 max-md:fixed max-md:inset-0 max-md:z-30 max-md:w-full max-md:border-l-0 max-md:bg-background max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)]">
       <div className="flex h-11 shrink-0 items-center gap-2 border-b px-4">
         <ListChecks className="size-4 text-muted-foreground" />
         <span className="text-sm font-medium">Plan</span>

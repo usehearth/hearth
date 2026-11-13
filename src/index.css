@@ -148,3 +148,7 @@
   .hearth-md table { @apply my-2 w-full text-xs; }
   .hearth-md th, .hearth-md td { @apply border-b px-2 py-1 text-start; }
 }
+
+/* Phones: keep clear of the notch and the home bar (installed app, viewport-fit=cover). */
+@utility pt-safe { padding-top: env(safe-area-inset-top); }
+@utility pb-safe { padding-bottom: env(safe-area-inset-bottom); }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BellDot, ChevronDown, Settings as SettingsIcon, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
+import { BellDot, ChevronDown, Menu, Settings as SettingsIcon, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { ThreadPane, type ThreadTarget } from '@/components/hearth/ThreadPane';
@@ -27,6 +27,9 @@ export default function App() {
   const [view, setView] = useState<'thread' | 'needs' | 'settings' | 'project'>('thread');
   const [projectView, setProjectView] = useState<{ slug: string; name: string } | null>(null);
   const [actionsEl, setActionsEl] = useState<HTMLElement | null>(null);
+  // Phones: the sidebar is a drawer, closed whenever something is picked in it.
+  const [navOpen, setNavOpen] = useState(false);
+  const go = useCallback((v: 'thread' | 'needs' | 'settings' | 'project') => { setView(v); setNavOpen(false); }, []);
   const { dark, toggle } = useTheme();
 
   useEffect(() => { if (!serverId && servers[0]) setServerId(servers[0].id); }, [servers, serverId]);
@@ -43,17 +46,20 @@ export default function App() {
   const open = useCallback((t: ThreadItem) => {
     setError(null);
     setView('thread');
+    setNavOpen(false);
     // The thread already open stays connected (coming back from Needs you, or a second click).
     setTarget((cur) => (cur?.sessionId === t.sessionId ? cur : { id: t.sessionId, sessionId: t.sessionId, t: { kind: 'open', sessionId: t.sessionId, cwd: t.cwd }, title: t.kind === 'main' ? 'Main thread' : t.title, project: t.projectName }));
   }, []);
   const openCard = useCallback((e: CardEntry) => {
     setError(null);
     setView('thread');
+    setNavOpen(false);
     setTarget((cur) => (cur?.sessionId === e.sessionId ? cur : { id: e.sessionId, sessionId: e.sessionId, t: { kind: 'open', sessionId: e.sessionId, cwd: e.cwd }, title: e.kind === 'main' ? 'Main thread' : e.title, project: e.projectName }));
   }, []);
   const newThread = useCallback((g: ProjectGroup) => {
     setError(null);
     setView('thread');
+    setNavOpen(false);
     const id = `new-${crypto.randomUUID()}`;
     setTarget({ id, t: { kind: 'new', cwd: g.cwd, meta: { hearth: { project: g.project } } }, title: 'New thread', project: g.name });
   }, []);
@@ -77,24 +83,27 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex h-full">
-        {/* Sidebar: the server's own chat list */}
-        <aside className="flex w-72 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+        {navOpen && <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setNavOpen(false)} aria-hidden />}
+        {/* Sidebar: the server's own chat list (a drawer on phones) */}
+        <aside className={cn('flex w-72 shrink-0 flex-col border-r border-sidebar-border bg-sidebar pt-safe pb-safe text-sidebar-foreground',
+          'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-[85vw] max-md:max-w-80 max-md:shadow-2xl max-md:transition-transform max-md:duration-200',
+          !navOpen && 'max-md:-translate-x-full')} aria-label="Threads">
           <div className="flex items-center gap-2.5 px-4 pt-4 pb-3">
             <img src="/logo.svg" alt="" className="size-7 rounded-lg shadow-sm" />
             <span className="text-[15px] font-semibold tracking-tight">Hearth</span>
             <div className="ml-auto flex items-center gap-0.5">
               <IconBtn label={dark ? 'Light mode' : 'Dark mode'} onClick={toggle}>{dark ? <Sun className="size-4" /> : <MoonStar className="size-4" />}</IconBtn>
-              <IconBtn label="Settings" onClick={() => setView('settings')} className={view === 'settings' ? 'bg-sidebar-accent text-foreground' : undefined}><SettingsIcon className="size-4" /></IconBtn>
+              <IconBtn label="Settings" onClick={() => go('settings')} className={view === 'settings' ? 'bg-sidebar-accent text-foreground' : undefined}><SettingsIcon className="size-4" /></IconBtn>
             </div>
           </div>
-          <button onClick={() => setView('settings')} className="mx-3 mb-2 flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-sidebar-accent" title="Servers">
+          <button onClick={() => go('settings')} className="mx-3 mb-2 flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-sidebar-accent" title="Servers">
             <ServerIcon className="size-4 text-muted-foreground" />
             <span className="truncate font-medium">{server?.name}</span>
             <StatusDot state={dir.state === 'ready' && dir.reconnecting ? 'reconnecting' : dir.state} />
             <ChevronDown className="ml-auto size-3.5 text-muted-foreground" />
           </button>
           {dir.state === 'ready' && (
-            <button onClick={() => setView('needs')} aria-current={view === 'needs' ? 'page' : undefined}
+            <button onClick={() => go('needs')} aria-current={view === 'needs' ? 'page' : undefined}
               className={cn('mx-3 mb-1 flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] hover:bg-sidebar-accent', view === 'needs' && 'bg-sidebar-accent font-medium')}>
               <BellDot className={cn('size-4', dir.cards.length ? 'text-primary' : 'text-muted-foreground')} />
               <span>Needs you</span>
@@ -123,7 +132,7 @@ export default function App() {
                 {dir.groups.length === 0 && <p className="px-2 py-3 text-sm text-muted-foreground">No threads on this server yet.</p>}
                 {dir.groups.map((g) => (
                   <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)}
-                    onSettings={dir.extensions.includes('project') ? () => { setProjectView({ slug: g.project, name: g.name }); setView('project'); } : undefined}
+                    onSettings={dir.extensions.includes('project') ? () => { setProjectView({ slug: g.project, name: g.name }); go('project'); } : undefined}
                     settingsOpen={view === 'project' && projectView?.slug === g.project} />
                 ))}
               </>
@@ -135,8 +144,12 @@ export default function App() {
         </aside>
 
         {/* Main: the open thread */}
-        <main className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-12 shrink-0 items-center gap-2 border-b px-5">
+        <main className="flex min-w-0 flex-1 flex-col pb-safe">
+          <header className="flex shrink-0 items-center gap-2 border-b px-5 pt-safe max-md:px-3 [&>*]:my-auto" style={{ minHeight: 'calc(3rem + env(safe-area-inset-top))' }}>
+            <button onClick={() => setNavOpen(true)} aria-label="Open threads" className="relative -ml-1 grid size-9 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground md:hidden">
+              <Menu className="size-5" />
+              {dir.state === 'ready' && dir.cards.length > 0 && <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-primary" aria-label="Something needs you" />}
+            </button>
             {view === 'project' && projectView ? <><span className="truncate text-sm font-medium">{projectView.name}</span><span className="text-sm text-muted-foreground">· Project settings</span></> : view === 'settings' ? <span className="text-sm font-medium">Settings</span> : view === 'needs' ? <span className="text-sm font-medium">Needs you</span> : target ? (
               <>
                 <span className="truncate text-sm font-medium">{target.title}</span>
@@ -190,8 +203,8 @@ function ProjectSection({ g, activeId, onOpen, onNew, onSettings, settingsOpen }
           <span className="truncate">{g.name}</span>
           {!openSec && needs > 0 && <span className="ml-auto rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary" title="Threads that need you">{needs}</span>}
         </button>
-        {onSettings && <IconBtn label={`Settings for ${g.name}`} onClick={onSettings} className={cn('opacity-0 group-hover:opacity-100 focus-visible:opacity-100', settingsOpen && 'bg-sidebar-accent text-foreground opacity-100')}><SlidersHorizontal className="size-3.5" /></IconBtn>}
-        <IconBtn label={`New thread in ${g.name}`} onClick={onNew} className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"><Plus className="size-3.5" /></IconBtn>
+        {onSettings && <IconBtn label={`Settings for ${g.name}`} onClick={onSettings} className={cn('opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100', settingsOpen && 'bg-sidebar-accent text-foreground opacity-100')}><SlidersHorizontal className="size-3.5" /></IconBtn>}
+        <IconBtn label={`New thread in ${g.name}`} onClick={onNew} className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"><Plus className="size-3.5" /></IconBtn>
       </div>
       {openSec && (
         <ul className="ml-2 border-l border-sidebar-border pl-1.5">
@@ -257,7 +270,7 @@ function Welcome() {
       <div>
         <img src="/logo.svg" alt="" className="mx-auto size-14 rounded-2xl shadow-md" />
         <h1 className="mt-4 text-xl font-semibold tracking-tight">Your AI, at home</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Pick a thread on the left, or start a new one with the + next to a project.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Pick a thread from the list, or start a new one with the + next to a project.</p>
       </div>
     </div>
   );
