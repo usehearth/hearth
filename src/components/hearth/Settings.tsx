@@ -10,6 +10,7 @@ import type { DirectoryState } from '@/lib/directory';
 import { forgetKey, isDesktop, keyFor, removeServer, renameServer, type Server } from '@/lib/servers';
 import { setThemeMode, useThemeMode, type ThemeMode } from '@/lib/theme';
 import { errorText } from '@/lib/hearth';
+import { notifyPref, setNotifyPref } from '@/lib/notify';
 import { cn } from '@/lib/utils';
 
 type Section = 'servers' | 'providers' | 'appearance' | 'audit';
@@ -261,6 +262,28 @@ function Appearance() {
           </button>
         ))}
       </div>
+      <Notifications />
     </>
+  );
+}
+
+function Notifications() {
+  const [on, setOn] = useState(notifyPref);
+  const [note, setNote] = useState<string | null>(null);
+  return (
+    <div className="mt-6">
+      <h3 className="text-sm font-semibold">Notifications</h3>
+      <label className="mt-2 flex items-start gap-3 rounded-xl border bg-card px-3 py-3 text-sm">
+        <input type="checkbox" checked={on} className="mt-0.5 size-4 accent-primary" onChange={async (e) => {
+          const want = e.target.checked;
+          const got = await setNotifyPref(want);
+          setOn(got);
+          setNote(want && !got ? 'Notifications are blocked for Hearth. Allow them in your system or browser settings, then try again.' : null);
+        }} />
+        <span><span className="font-medium">Tell me when a turn finishes or something needs me</span>
+          <span className="block text-xs text-muted-foreground">Only when Hearth isn't the window in front. On this device only.</span></span>
+      </label>
+      {note && <p className="mt-2 text-sm text-destructive">{note}</p>}
+    </div>
   );
 }

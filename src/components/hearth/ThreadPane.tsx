@@ -10,6 +10,8 @@ import { AcpClient, useAcpPlan, useAcpRuntime, useAcpSessionTitle } from '@/vend
 import type { AcpWebSocketLike } from '@/vendor/acp/AcpClient';
 import { Thread, type ThreadComponents } from '@/components/assistant-ui/elements/thread.aui';
 import { CardView } from '@/components/hearth/CardView';
+import { UsageMeter } from '@/components/hearth/UsageMeter';
+import { notify } from '@/lib/notify';
 import { Markdown } from '@/components/hearth/Markdown';
 import { FilesList, FileView, type FileContent, type FileItem } from '@/components/hearth/FilesPanel';
 import { openSocket } from '@/lib/servers';
@@ -186,7 +188,7 @@ function useThreadExtras(client: AcpClient): Extras {
 }
 
 const ExtrasContext = createContext<Extras | null>(null);
-const components: ThreadComponents = { AboveComposer: () => <AboveComposer /> };
+const components: ThreadComponents = { AboveComposer: () => <AboveComposer />, ComposerExtra: () => <UsageMeter /> };
 
 function Runtime({ client, events, actionsEl }: { client: AcpClient; events: ThreadEvents; actionsEl?: HTMLElement | null }) {
   const ev = useRef(events);
@@ -362,6 +364,17 @@ function Watch({ events }: { events: React.RefObject<ThreadEvents> }) {
   const running = useAuiState((s) => s.thread.isRunning);
   const was = useRef(running);
   useEffect(() => { if (title) events.current.onTitle(title); }, [title, events]);
-  useEffect(() => { if (was.current && !running) events.current.onTurnEnd(); was.current = running; }, [running, events]);
+  const lastText = useAuiState((s) => {
+    const m = s.thread.messages.at(-1);
+    if (!m || m.role !== 'assistant') return '';
+    return m.content.map((p) => (p.type === 'text' ? p.text : '')).join(' ').trim();
+  });
+  useEffect(() => {
+    if (was.current && !running) {
+      events.current.onTurnEnd();
+      void notify(title ? `Done · ${title}` : 'Hearth: turn finished', lastText || 'The answer is ready.');
+    }
+    was.current = running;
+  }, [running, events]); // eslint-disable-line react-hooks/exhaustive-deps
   return null;
 }

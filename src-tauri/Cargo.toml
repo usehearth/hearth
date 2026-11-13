@@ -15,4 +15,5 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
+tauri-plugin-notification = "=2.8.0"
 keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native"] }

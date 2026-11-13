@@ -8,6 +8,7 @@ import {
 import { File, getFileHref } from "@/components/assistant-ui/elements/file";
 import { ThreadFollowupSuggestions } from "@/components/assistant-ui/elements/follow-up-suggestions.aui";
 import { Image } from "@/components/assistant-ui/elements/image";
+import { useSlashMenu } from "@/components/hearth/SlashMenu";
 import { MarkdownText } from "@/components/assistant-ui/elements/markdown-text";
 import {
   Reasoning,
@@ -529,8 +530,11 @@ const ThreadSuggestionItem: FC = () => {
 };
 
 const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
+  // Hearth: the agent's slash commands, as a menu above the composer.
+  const slash = useSlashMenu();
   return (
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
+      {slash.menu}
       <ComposerPrimitive.AttachmentDropzone asChild>
         <div
           data-slot="aui_composer-shell"
@@ -544,6 +548,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
             autoFocus={autoFocus}
             enterKeyHint="send"
             aria-label="Message input"
+            onKeyDown={slash.onKeyDown}
           />
           <ComposerAction />
         </div>

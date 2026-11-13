@@ -31,6 +31,7 @@ import {
   type ToolCallMessagePartComponent,
 } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
+import { acpMetaOf, commandOf, DiffView, diffsOf, exitCodeOf, isShell, outputOf, TerminalView } from "@/components/hearth/ToolViews";
 import {
   CollapsibleRoot as Collapsible,
   CollapsibleContent,
@@ -1210,7 +1211,13 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   interrupt,
   approval,
   respondToApproval,
+  ...part
 }) => {
+  // Hearth: edits as a real diff, shell commands as a terminal, from the ACP call itself.
+  const meta = acpMetaOf(part as { providerMetadata?: unknown });
+  const diffs = diffsOf(meta);
+  const shell = !diffs.length && isShell(meta, toolName);
+  const label = meta?.title?.replace(/`/g, "") || toolName;
   const isCancelled =
     status?.type === "incomplete" && status.reason === "cancelled";
   const isRequiresAction = status?.type === "requires-action";
@@ -1218,7 +1225,7 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
     approval != null ||
     (isRequiresAction && offersInterruptAction(status, approval, interrupt));
 
-  const [open, setOpen] = useState(isRequiresAction);
+  const [open, setOpen] = useState(isRequiresAction || diffs.length > 0);
   const [prevRequiresAction, setPrevRequiresAction] =
     useState(isRequiresAction);
   if (isRequiresAction !== prevRequiresAction) {
@@ -1254,17 +1261,24 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   return (
     <ToolFallbackRoot open={open} onOpenChange={setOpen}>
       <ToolFallbackTrigger
-        toolName={toolName}
+        toolName={label}
         status={status}
         isError={isError}
         responseDeliveryStatus={responseDeliveryStatus}
       />
       <ToolFallbackContent>
         <ToolFallbackError status={status} />
-        <ToolFallbackArgs
-          argsText={argsText}
-          className={cn(isCancelled && "opacity-60")}
-        />
+        {diffs.length > 0 ? (
+          <div className="space-y-2">{diffs.map((d, i) => <DiffView key={i} path={d.path} oldText={d.oldText} newText={d.newText} />)}</div>
+        ) : shell ? (
+          <TerminalView command={commandOf((part as { args?: unknown }).args) ?? label} output={outputOf(meta) || (typeof result === "string" ? result : "")}
+            exitCode={exitCodeOf(result)} running={status?.type === "running"} />
+        ) : (
+          <ToolFallbackArgs
+            argsText={argsText}
+            className={cn(isCancelled && "opacity-60")}
+          />
+        )}
         {shouldRenderApproval && (
           <ToolFallbackApproval
             addResult={addResult}
@@ -1295,7 +1309,7 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
             }}
           />
         )}
-        <ToolFallbackResult result={result} />
+        {!diffs.length && !shell && <ToolFallbackResult result={result} />}
       </ToolFallbackContent>
     </ToolFallbackRoot>
   );

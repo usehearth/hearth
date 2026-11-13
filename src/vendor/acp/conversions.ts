@@ -18,6 +18,7 @@ import {
   resolveFilePartSource,
   resolveImageMediaType,
 } from "@assistant-ui/core/internal";
+import { createTwoFilesPatch } from "diff";
 import type { ReadonlyJSONObject } from "assistant-stream/utils";
 import type {
   AcpContentBlock,
@@ -232,8 +233,10 @@ export function toolCallContentToText(
         if (text) pieces.push(text);
       }
     } else if (item.type === "diff" && typeof item.path === "string") {
+      // Hearth: a real unified diff (the old text used to be dropped).
       pieces.push(
-        `--- ${item.path}\n+++ ${item.path}\n${String(item.newText)}`,
+        createTwoFilesPatch(item.path, item.path, typeof item.oldText === "string" ? item.oldText : "", String(item.newText ?? ""), "", "", { context: 3 })
+          .split("\n").slice(1).join("\n"),
       );
     }
   }
@@ -347,6 +350,8 @@ type AcpToolCallMetadata = {
     readonly path: string;
     readonly line?: number;
   }[];
+  /** Hearth: the call's last `content` collection as the agent sent it (diffs with old and new text, terminal output). */
+  readonly content?: readonly ReadonlyJSONObject[];
 };
 
 const locationsOf = (locations: readonly AcpToolCallLocation[]) =>
@@ -370,7 +375,9 @@ const mergedMetadataOf = (
   const locations = update.locations
     ? locationsOf(update.locations)
     : previous?.locations;
+  const content = Array.isArray(update.content) && update.content.length ? (update.content as unknown as readonly ReadonlyJSONObject[]) : previous?.content;
   return {
+    ...(content !== undefined && { content }),
     ...(name !== undefined && { name }),
     ...(kind !== undefined && { kind }),
     ...(title !== undefined && { title }),
@@ -387,7 +394,8 @@ const sameMetadata = (
   metadata.kind === previous?.kind &&
   metadata.title === previous?.title &&
   metadata.status === previous?.status &&
-  metadata.locations === previous?.locations;
+  metadata.locations === previous?.locations &&
+  metadata.content === previous?.content;
 
 /**
  * `toolName` is the key apps register tool UIs against, so it has to stay

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { notify } from '@/lib/notify';
 import { Archive, BellDot, Briefcase, ChevronDown, Lock, Menu, Settings as SettingsIcon, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -39,6 +40,16 @@ export default function App() {
   const menu = threadsExt && dir.state === 'ready' ? (t: ThreadItem) => <ThreadMenu t={t} request={dir.request} onError={setError} /> : undefined;
 
   useEffect(() => { if (!serverId && servers[0]) setServerId(servers[0].id); }, [servers, serverId]);
+  // A notification for each new Needs-you card (when on and this window isn't in front). The first list only seeds.
+  const seenCards = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (dir.state !== 'ready') return;
+    const ids = new Set(dir.cards.map((e) => e.card.id));
+    if (seenCards.current) for (const e of dir.cards) if (!seenCards.current.has(e.card.id)) {
+      void notify(`Needs you · ${e.projectName}`, `${e.card.label}: ${e.card.title}`, `card:${e.card.id}`, () => openCard(e));
+    }
+    seenCards.current = ids;
+  }, [dir]); // eslint-disable-line react-hooks/exhaustive-deps
   // Desktop: keys arrive from the keychain shortly after start.
   useEffect(() => { void keysReady.then(() => setKeyVersion((v) => v + 1)); }, []);
   // Open the most recent project's main thread once the list arrives.
