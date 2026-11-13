@@ -3,7 +3,7 @@ import { notify } from '@/lib/notify';
 import { Archive, BellDot, Briefcase, ChevronDown, Lock, Menu, Settings as SettingsIcon, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
-import { ThreadPane, type ThreadTarget } from '@/components/hearth/ThreadPane';
+import { ThreadPane, type FirstMessage, type ThreadTarget } from '@/components/hearth/ThreadPane';
 import { AddServer, KeyPrompt } from '@/components/hearth/AddServer';
 import { NeedsYou } from '@/components/hearth/NeedsYou';
 import { Settings } from '@/components/hearth/Settings';
@@ -22,7 +22,7 @@ export default function App() {
   const [keyVersion, setKeyVersion] = useState(0);
   const dir = useDirectory(server, keyVersion);
   // `id` keys the open pane (stable for its lifetime); `sessionId` is the server's id once known.
-  const [target, setTarget] = useState<{ id: string; sessionId?: string; t: ThreadTarget; title: string; project?: string; client?: string } | null>(null);
+  const [target, setTarget] = useState<{ id: string; sessionId?: string; t: ThreadTarget; title: string; project?: string; client?: string; first?: FirstMessage } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   // The main pane shows the open thread, or the needs-you view.
@@ -94,6 +94,11 @@ export default function App() {
     }),
     onTitle: (title: string) => setTarget((t) => (t && t.title !== title && t.title !== 'Main thread' ? { ...t, title } : t)),
     onTurnEnd: () => refresh?.(),
+    // Edit, Regenerate, Rewind: open the fork the server made.
+    onFork: (sessionId: string, title: string, first: FirstMessage) => {
+      setTarget((t) => ({ id: sessionId, sessionId, t: { kind: 'open', sessionId, cwd: t?.t.cwd ?? '' }, title, project: t?.project, client: t?.client, first }));
+      refresh?.();
+    },
   }), [refresh]);
 
   if (!servers.length || adding) {
@@ -228,7 +233,7 @@ export default function App() {
           {/* The open thread stays mounted behind the needs-you view, so going back keeps its place. */}
           <div className={cn('min-h-0 flex-1', view !== 'thread' && 'hidden')}>
             {target && server && key
-              ? <ThreadPane key={target.id} url={server.url} serverKey={key} target={target.t} events={events} actionsEl={actionsEl} />
+              ? <ThreadPane key={target.id} url={server.url} serverKey={key} target={target.t} events={events} actionsEl={actionsEl} first={target.first} />
               : <Welcome />}
           </div>
         </main>

@@ -13,6 +13,24 @@ import { CardView } from '@/components/hearth/CardView';
 import { UsageMeter } from '@/components/hearth/UsageMeter';
 import { ComposerBar } from '@/components/hearth/ComposerBar';
 import { notify } from '@/lib/notify';
+import { MessageActionsContext } from '@/components/hearth/messageActions';
+import type { AppendMessage } from '@assistant-ui/react';
+
+const textOf = (content: readonly { type: string; text?: string }[] | undefined) =>
+  (content ?? []).map((p) => (p.type === 'text' ? p.text ?? '' : '')).join('').trim();
+
+/** True once the thread has finished opening: session/load answered (so its whole history is shown) and not loading. */
+function useAuiStateOf(runtime: { thread: { getState: () => { isLoading: boolean }; subscribe: (cb: () => void) => () => void } }, client: AcpClient) {
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    const check = () => setLoaded(!!client.sessionId && !runtime.thread.getState().isLoading);
+    check();
+    const a = runtime.thread.subscribe(check);
+    const b = client.subscribeConnectionChange(check);
+    return () => { a(); b(); };
+  }, [runtime, client]);
+  return loaded;
+}
 import { Markdown } from '@/components/hearth/Markdown';
 import { FilesList, FileView, type FileContent, type FileItem } from '@/components/hearth/FilesPanel';
 import { openSocket } from '@/lib/servers';
@@ -32,10 +50,15 @@ export interface ThreadEvents {
   onTitle: (title: string) => void;
   /** A turn finished: the sidebar may have changed. */
   onTurnEnd: () => void;
+  /** The thread was forked (Edit, Regenerate, Rewind): open the fork, then send or prefill its first message. */
+  onFork?: (sessionId: string, title: string, first: FirstMessage) => void;
 }
 
-export function ThreadPane({ url, serverKey, target, events, actionsEl }: {
-  url: string; serverKey: string; target: ThreadTarget; events: ThreadEvents;
+/** What a fork opens with: a message sent at once (Edit, Regenerate) or put in the composer (Rewind). */
+export interface FirstMessage { text: string; send: boolean }
+
+export function ThreadPane({ url, serverKey, target, events, actionsEl, first }: {
+  url: string; serverKey: string; target: ThreadTarget; events: ThreadEvents; first?: FirstMessage;
   /** Where the thread's header buttons go (the plan toggle). */
   actionsEl?: HTMLElement | null;
 }) {
@@ -91,7 +114,7 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl }: {
             : <><Loader2 className="size-3 animate-spin" />Reconnecting…</>}
         </div>
       )}
-      <Runtime key={gen} client={client} events={events} actionsEl={actionsEl} />
+      <Runtime key={gen} client={client} events={events} actionsEl={actionsEl} first={gen === 0 ? first : undefined} />
     </div>
   );
 }
@@ -200,7 +223,7 @@ function ComposerExtra() {
   return <ComposerBar client={x.client} onError={x.onError} />;
 }
 
-function Runtime({ client, events, actionsEl }: { client: AcpClient; events: ThreadEvents; actionsEl?: HTMLElement | null }) {
+function Runtime({ client, events, actionsEl, first }: { client: AcpClient; events: ThreadEvents; actionsEl?: HTMLElement | null; first?: FirstMessage }) {
   const ev = useRef(events);
   ev.current = events;
   // Images and text files, as this server takes them (its promptCapabilities); a refused file says why.
@@ -217,8 +240,44 @@ function Runtime({ client, events, actionsEl }: { client: AcpClient; events: Thr
     a.add = async (st) => { try { return await add(st); } catch (e) { ev.current.onError((e as Error).message); throw e; } };
     return a;
   }, [client]);
-  const runtime = useAcpRuntime({ client, permissions: 'ask', onError: (e) => ev.current.onError(e.message), adapters: { attachments } });
+  // Edit, Regenerate and Rewind: the server owns the thread, so each forks it at that turn and opens the fork.
+  const fork = useCallback(async (keepTurns: number, text: string, send: boolean, restoreFiles = false) => {
+    const ext = client.initializeMeta?.hearth?.extensions;
+    if (!Array.isArray(ext) || !ext.includes('fork')) throw new Error("This server can't fork threads.");
+    const r = await client.extRequest<{ sessionId: string; title: string }>('_hearth/thread/fork', { sessionId: client.sessionId, keepTurns, restoreFiles });
+    ev.current.onFork?.(r.sessionId, r.title, { text, send });
+  }, [client]);
+  const userTurn = (messageId: string | null, inclusive: boolean) => {
+    const msgs = runtimeRef.current?.thread.getState().messages ?? [];
+    const i = messageId ? msgs.findIndex((m) => m.id === messageId) : -1;
+    return { turn: msgs.slice(0, inclusive ? i + 1 : Math.max(i, 0)).filter((m) => m.role === 'user').length, message: i >= 0 ? msgs[i] : undefined };
+  };
+  const onEdit = useCallback(async (m: AppendMessage) => {
+    const { turn } = userTurn(m.parentId, true);
+    await fork(turn, textOf(m.content), true).catch((e) => ev.current.onError((e as Error).message));
+  }, [fork]); // eslint-disable-line react-hooks/exhaustive-deps
+  const onReload = useCallback(async (parentId: string | null) => {
+    const { turn, message } = userTurn(parentId, false);
+    if (!message) return;
+    await fork(turn, textOf(message.content), true).catch((e) => ev.current.onError((e as Error).message));
+  }, [fork]); // eslint-disable-line react-hooks/exhaustive-deps
+  const messageActions = useMemo(() => ({
+    rewind: async (messageId: string, restoreFiles: boolean) => {
+      const { turn, message } = userTurn(messageId, false);
+      await fork(turn, message ? textOf(message.content) : '', false, restoreFiles);
+    },
+  }), [fork]); // eslint-disable-line react-hooks/exhaustive-deps
+  const runtime = useAcpRuntime({ client, permissions: 'ask', onError: (e) => ev.current.onError(e.message), adapters: { attachments }, onEdit, onReload });
   runtimeRef.current = runtime;
+  // A fork opens with its first message: sent (Edit, Regenerate) or ready in the composer (Rewind).
+  const firstDone = useRef(false);
+  const loaded = useAuiStateOf(runtime, client);
+  useEffect(() => {
+    if (!first || firstDone.current || !loaded) return;
+    firstDone.current = true;
+    if (first.send && first.text.trim()) void runtime.thread.append({ role: 'user', content: [{ type: 'text', text: first.text }] });
+    else runtime.thread.composer.setText(first.text);
+  }, [first, loaded, runtime]);
   useEffect(() => client.subscribeConnectionChange(() => { if (client.sessionId) ev.current.onSession(client.sessionId); }), [client]);
   const base = useThreadExtras(client);
   const extras = useMemo(() => ({ ...base, onError: (m: string) => ev.current.onError(m) }), [base]);
@@ -237,12 +296,14 @@ function Runtime({ client, events, actionsEl }: { client: AcpClient; events: Thr
     <AssistantRuntimeProvider runtime={runtime}>
       <ExtrasContext.Provider value={extras}>
         <Watch events={ev} />
+        <MessageActionsContext.Provider value={messageActions}>
         <div className="flex h-full">
           <div className="relative min-w-0 flex-1">
             <Thread components={components} />
           </div>
           {planOpen && <SidePanel extras={extras} tab={extras.filesSupported ? tab : 'plan'} onTab={setTab} onClose={() => setOpen('closed')} />}
         </div>
+        </MessageActionsContext.Provider>
         {actionsEl && extras.supported && extras.sessionId && createPortal(
           <>
             {extras.filesSupported && (

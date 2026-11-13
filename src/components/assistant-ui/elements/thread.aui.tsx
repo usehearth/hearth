@@ -9,6 +9,7 @@ import { File, getFileHref } from "@/components/assistant-ui/elements/file";
 import { ThreadFollowupSuggestions } from "@/components/assistant-ui/elements/follow-up-suggestions.aui";
 import { Image } from "@/components/assistant-ui/elements/image";
 import { useSlashMenu } from "@/components/hearth/SlashMenu";
+import { RewindButton } from "@/components/hearth/messageActions";
 import { MarkdownText } from "@/components/assistant-ui/elements/markdown-text";
 import {
   Reasoning,
@@ -943,6 +944,7 @@ const UserActionBar: FC = () => {
           <PencilIcon />
         </TooltipIconButton>
       </ActionBarPrimitive.Edit>
+      <RewindButton />
     </ActionBarPrimitive.Root>
   );
 };
