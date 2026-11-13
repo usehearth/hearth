@@ -20,7 +20,7 @@ export interface ProjectView {
   repoMcp?: { enabled: boolean; found: { name: string; type: string; url: string | null; command: string | null; hash: string; usable: boolean }[]; approved: string[] } | null;
   instructions: string | null;
   /** Permission rules (servers with the `permissions` extension). */
-  permissions?: { mode: string; allow: string[]; deny: string[]; defaults: string[]; alwaysDenied: string[] };
+  permissions?: { mode: string; allow: string[]; deny: string[]; defaults: string[]; alwaysDenied: string[]; allowAuto?: boolean };
   /** Monthly budget (servers with `usage`), and what this month cost so far. */
   budget?: { monthlyUsd: number; warnAt: number } | null;
   monthCost?: number;
@@ -33,6 +33,7 @@ const MODES = [
   { id: 'default', name: 'Ask', sub: 'Asks before anything not allowed below' },
   { id: 'acceptEdits', name: 'Accept edits', sub: 'Edits inside the project without asking' },
   { id: 'plan', name: 'Plan', sub: 'Reads and plans; changes nothing' },
+  { id: 'auto', name: 'Auto', sub: 'Goes ahead; asks only for risky things' },
 ];
 const lines = (t: string) => t.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
 
@@ -51,6 +52,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
   const [planFirst, setPlanFirst] = useState(false);
   const [instructions, setInstructions] = useState('');
   const [mode, setMode] = useState('default');
+  const [allowAuto, setAllowAuto] = useState(false);
   const [allowText, setAllowText] = useState('');
   const [denyText, setDenyText] = useState('');
   const [budget, setBudget] = useState('');
@@ -70,6 +72,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
     setPlanFirst(v.planFirst);
     setInstructions(v.instructions ?? '');
     setMode(v.permissions?.mode ?? 'default');
+    setAllowAuto(!!v.permissions?.allowAuto);
     setAllowText((v.permissions?.allow ?? []).join('\n'));
     setDenyText((v.permissions?.deny ?? []).join('\n'));
     setBudget(v.budget ? String(v.budget.monthlyUsd) : '');
@@ -92,7 +95,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
       const m: Record<string, string | null> = {};
       for (const r of view!.roles) m[r.role] = models[r.role]?.trim() || null;
       fill(await request<ProjectView>('_hearth/project/update', { project, name, models: m, providers: allProviders ? null : order, planFirst, ...(view!.instructions !== null ? { instructions } : {}),
-        ...(view!.permissions ? { permissions: { mode, allow: lines(allowText), deny: lines(denyText) } } : {}),
+        ...(view!.permissions ? { permissions: { mode: mode === 'auto' && !allowAuto ? 'default' : mode, allow: lines(allowText), deny: lines(denyText), ...(allowAuto !== !!view!.permissions.allowAuto ? { allowAuto } : {}) } } : {}),
         ...(view!.toolChoices && (tools.join() !== view!.tools.join()) ? { tools } : {}),
         ...(extensions.includes('git') && (remoteUrl.trim() !== (view!.remote?.url ?? '') || remoteToken) ? { remote: remoteUrl.trim() ? { url: remoteUrl.trim(), ...(remoteToken ? { token: remoteToken } : {}) } : null } : {}),
         ...(view!.repoMcp && (repoMcp !== view!.repoMcp.enabled || repoApproved.join() !== view!.repoMcp.approved.join()) ? { repoMcp, repoMcpApproved: repoApproved } : {}),
@@ -190,14 +193,20 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
 
         {view.permissions && (
           <Section title="Permissions" sub="What agents may do without asking. Threads can change their own mode; “Always allow” on a prompt adds a rule here (project) or to the thread.">
-            <div role="radiogroup" aria-label="Mode new threads start in" className="grid grid-cols-3 gap-2 max-sm:grid-cols-1">
-              {MODES.map((m) => (
+            <div role="radiogroup" aria-label="Mode new threads start in" className={cn('grid gap-2 max-sm:grid-cols-1', allowAuto ? 'grid-cols-4' : 'grid-cols-3')}>
+              {MODES.filter((m) => m.id !== 'auto' || allowAuto).map((m) => (
                 <button type="button" key={m.id} role="radio" aria-checked={mode === m.id} onClick={() => setMode(m.id)}
                   className={cn('rounded-xl border bg-card px-3 py-2 text-left text-sm hover:bg-accent', mode === m.id && 'border-primary ring-2 ring-primary/20')}>
                   <span className="font-medium">{m.name}</span><span className="block text-xs text-muted-foreground">{m.sub}</span>
                 </button>
               ))}
             </div>
+            {!view.client && (
+              <label className="mt-3 flex items-start gap-2 text-sm">
+                <input type="checkbox" checked={allowAuto} onChange={(e) => setAllowAuto(e.target.checked)} className="mt-0.5 size-4 accent-(--primary)" />
+                <span>Allow auto mode<span className="block text-xs text-muted-foreground">Threads may then go ahead without asking, except for risky things (the network, deleting, secrets, git history). The runner still checks every call. Needs an admin device.</span></span>
+              </label>
+            )}
             <label className="mt-3 block text-xs font-medium text-muted-foreground" htmlFor="perm-allow">Also allowed (one rule per line)</label>
             <textarea id="perm-allow" value={allowText} onChange={(e) => setAllowText(e.target.value)} rows={4} spellCheck={false}
               placeholder={'Bash(npm test:*)\nWebFetch(domain:docs.example.com)\nmcp__server__tool'} className={cn(inputCls, 'font-mono text-xs')} />

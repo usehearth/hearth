@@ -245,10 +245,10 @@ function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClie
     return a;
   }, [client]);
   // Edit, Regenerate and Rewind: the server owns the thread, so each forks it at that turn and opens the fork.
-  const fork = useCallback(async (keepTurns: number, text: string, send: boolean, restoreFiles = false) => {
+  const fork = useCallback(async (keepTurns: number, text: string, send: boolean, restoreFiles = false, replace = true) => {
     const ext = client.initializeMeta?.hearth?.extensions;
     if (!Array.isArray(ext) || !ext.includes('fork')) throw new Error("This server can't fork threads.");
-    const r = await client.extRequest<{ sessionId: string; title: string }>('_hearth/thread/fork', { sessionId: client.sessionId, keepTurns, restoreFiles });
+    const r = await client.extRequest<{ sessionId: string; title: string }>('_hearth/thread/fork', { sessionId: client.sessionId, keepTurns, restoreFiles, replace });
     ev.current.onFork?.(r.sessionId, r.title, { text, send });
   }, [client]);
   const userTurn = (messageId: string | null, inclusive: boolean) => {
@@ -266,9 +266,9 @@ function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClie
     await fork(turn, textOf(message.content), true).catch((e) => ev.current.onError((e as Error).message));
   }, [fork]); // eslint-disable-line react-hooks/exhaustive-deps
   const messageActions = useMemo(() => ({
-    rewind: async (messageId: string, restoreFiles: boolean) => {
+    rewind: async (messageId: string, restoreFiles: boolean, replace: boolean) => {
       const { turn, message } = userTurn(messageId, false);
-      await fork(turn, message ? textOf(message.content) : '', false, restoreFiles);
+      await fork(turn, message ? textOf(message.content) : '', false, restoreFiles, replace);
     },
   }), [fork]); // eslint-disable-line react-hooks/exhaustive-deps
   // "!command": a shell command in this thread (servers with the shell extension; the thread must exist).

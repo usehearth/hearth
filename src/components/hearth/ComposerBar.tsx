@@ -3,12 +3,12 @@
 // and stick to the thread on the server, so every window and later session uses them.
 import { useEffect, useState } from 'react';
 import { DropdownMenu } from 'radix-ui';
-import { Check, ChevronDown, Cpu, FileEdit, Hand, ListTodo } from 'lucide-react';
+import { Check, ChevronDown, Cpu, FileEdit, Hand, ListTodo, Zap } from 'lucide-react';
 import { useAcpConfigOptions, useAcpCurrentModeId, type AcpClient } from '@/vendor/acp';
 import { UsageMeter } from '@/components/hearth/UsageMeter';
 import { cn } from '@/lib/utils';
 
-const MODE_ICON: Record<string, typeof Hand> = { default: Hand, acceptEdits: FileEdit, plan: ListTodo };
+const MODE_ICON: Record<string, typeof Hand> = { default: Hand, acceptEdits: FileEdit, plan: ListTodo, auto: Zap };
 const FALLBACK_MODES = [
   { id: 'default', name: 'Ask', description: 'Asks before anything not pre-approved' },
   { id: 'acceptEdits', name: 'Accept edits', description: 'Edits inside the project without asking' },
