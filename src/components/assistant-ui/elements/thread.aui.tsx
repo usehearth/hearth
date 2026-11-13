@@ -130,6 +130,8 @@ export type ThreadComponents = {
     | undefined;
   TaskGroup?: ComponentType<{ group: ThreadGroupPart }> | undefined;
   ComposerExtra?: ComponentType | undefined;
+  /** Hearth: shown just above the composer (cards, the turn checklist). */
+  AboveComposer?: ComponentType | undefined;
 };
 
 const messageGroupBy = groupPartByType({
@@ -223,7 +225,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
   isEmpty,
   autoFocus,
 }) => {
-  const { Welcome = ThreadWelcome } = useContext(ThreadComponentsContext);
+  const { Welcome = ThreadWelcome, AboveComposer } = useContext(ThreadComponentsContext);
 
   return (
     <ThreadPrimitive.Root
@@ -274,6 +276,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
           >
             <ThreadScrollToBottom />
             <ThreadFollowupSuggestions />
+            {AboveComposer && <AboveComposer />}
             <Composer autoFocus={autoFocus} />
             <AuiIf condition={(s) => isNewChatView(s) && s.composer.isEmpty}>
               <ThreadSuggestions />

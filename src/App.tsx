@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
+import { BellDot, ChevronDown, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { ThreadPane, type ThreadTarget } from '@/components/hearth/ThreadPane';
 import { AddServer, KeyPrompt } from '@/components/hearth/AddServer';
+import { NeedsYou } from '@/components/hearth/NeedsYou';
+import type { CardEntry } from '@/lib/hearth';
 import { useDirectory, type ProjectGroup, type ThreadItem } from '@/lib/directory';
 import { keyFor, keysReady, useServers } from '@/lib/servers';
 import { useTheme } from '@/lib/theme';
@@ -19,6 +21,9 @@ export default function App() {
   const [target, setTarget] = useState<{ id: string; sessionId?: string; t: ThreadTarget; title: string; project?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  // The main pane shows the open thread, or the needs-you view.
+  const [view, setView] = useState<'thread' | 'needs'>('thread');
+  const [actionsEl, setActionsEl] = useState<HTMLElement | null>(null);
   const { dark, toggle } = useTheme();
 
   useEffect(() => { if (!serverId && servers[0]) setServerId(servers[0].id); }, [servers, serverId]);
@@ -34,10 +39,18 @@ export default function App() {
 
   const open = useCallback((t: ThreadItem) => {
     setError(null);
-    setTarget({ id: t.sessionId, sessionId: t.sessionId, t: { kind: 'open', sessionId: t.sessionId, cwd: t.cwd }, title: t.kind === 'main' ? 'Main thread' : t.title, project: t.projectName });
+    setView('thread');
+    // The thread already open stays connected (coming back from Needs you, or a second click).
+    setTarget((cur) => (cur?.sessionId === t.sessionId ? cur : { id: t.sessionId, sessionId: t.sessionId, t: { kind: 'open', sessionId: t.sessionId, cwd: t.cwd }, title: t.kind === 'main' ? 'Main thread' : t.title, project: t.projectName }));
+  }, []);
+  const openCard = useCallback((e: CardEntry) => {
+    setError(null);
+    setView('thread');
+    setTarget((cur) => (cur?.sessionId === e.sessionId ? cur : { id: e.sessionId, sessionId: e.sessionId, t: { kind: 'open', sessionId: e.sessionId, cwd: e.cwd }, title: e.kind === 'main' ? 'Main thread' : e.title, project: e.projectName }));
   }, []);
   const newThread = useCallback((g: ProjectGroup) => {
     setError(null);
+    setView('thread');
     const id = `new-${crypto.randomUUID()}`;
     setTarget({ id, t: { kind: 'new', cwd: g.cwd, meta: { hearth: { project: g.project } } }, title: 'New thread', project: g.name });
   }, []);
@@ -76,6 +89,14 @@ export default function App() {
             <StatusDot state={dir.state === 'ready' && dir.reconnecting ? 'reconnecting' : dir.state} />
             <ChevronDown className="ml-auto size-3.5 text-muted-foreground" />
           </button>
+          {dir.state === 'ready' && (
+            <button onClick={() => setView('needs')} aria-current={view === 'needs' ? 'page' : undefined}
+              className={cn('mx-3 mb-1 flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] hover:bg-sidebar-accent', view === 'needs' && 'bg-sidebar-accent font-medium')}>
+              <BellDot className={cn('size-4', dir.cards.length ? 'text-primary' : 'text-muted-foreground')} />
+              <span>Needs you</span>
+              {dir.cards.length > 0 && <span className="ml-auto rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">{dir.cards.length}</span>}
+            </button>
+          )}
           <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
             {dir.state === 'connecting' && <SidebarSkeleton />}
             {dir.state === 'no-key' && server && <KeyPrompt server={server} onSaved={() => setKeyVersion((v) => v + 1)} />}
@@ -97,7 +118,7 @@ export default function App() {
                 </div>
                 {dir.groups.length === 0 && <p className="px-2 py-3 text-sm text-muted-foreground">No threads on this server yet.</p>}
                 {dir.groups.map((g) => (
-                  <ProjectSection key={g.project} g={g} activeId={target?.sessionId} onOpen={open} onNew={() => newThread(g)} />
+                  <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)} />
                 ))}
               </>
             )}
@@ -110,21 +131,26 @@ export default function App() {
         {/* Main: the open thread */}
         <main className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-12 shrink-0 items-center gap-2 border-b px-5">
-            {target ? (
+            {view === 'needs' ? <span className="text-sm font-medium">Needs you</span> : target ? (
               <>
                 <span className="truncate text-sm font-medium">{target.title}</span>
                 {target.project && <span className="truncate text-sm text-muted-foreground">· {target.project}</span>}
               </>
             ) : <span className="text-sm text-muted-foreground">Pick a thread</span>}
+            <div ref={setActionsEl} className={cn('ml-auto flex items-center gap-1', view !== 'thread' && 'hidden')} />
           </header>
           {error && (
             <div className="mx-5 mt-3 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
               <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" /><span className="text-foreground/90">{error}</span>
             </div>
           )}
-          <div className="min-h-0 flex-1">
+          {view === 'needs' && dir.state === 'ready' && (
+            <div className="min-h-0 flex-1"><NeedsYou cards={dir.cards} onAnswer={dir.answer} onOpen={openCard} /></div>
+          )}
+          {/* The open thread stays mounted behind the needs-you view, so going back keeps its place. */}
+          <div className={cn('min-h-0 flex-1', view !== 'thread' && 'hidden')}>
             {target && server && key
-              ? <ThreadPane key={target.id} url={server.url} serverKey={key} target={target.t} events={events} />
+              ? <ThreadPane key={target.id} url={server.url} serverKey={key} target={target.t} events={events} actionsEl={actionsEl} />
               : <Welcome />}
           </div>
         </main>
@@ -139,7 +165,7 @@ function ProjectSection({ g, activeId, onOpen, onNew }: { g: ProjectGroup; activ
   // Pinned first, then most recent.
   const recent = useMemo(() => [...g.threads].sort((a, b) => Number(b.pinned) - Number(a.pinned)
     || (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0)), [g.threads]);
-  const needs = [g.main, ...g.threads].filter((t) => t?.status === 'needs_permission').length;
+  const needs = [g.main, ...g.threads].filter((t) => t && needsYou(t)).length;
   const shown = all ? recent : recent.slice(0, SHOW);
   return (
     <div className="mt-1">
@@ -169,10 +195,11 @@ function ProjectSection({ g, activeId, onOpen, onNew }: { g: ProjectGroup; activ
 }
 
 const SHOW = 12;
+const needsYou = (t: ThreadItem) => t.status === 'needs_permission' || t.openCards > 0;
 
 function ThreadRow({ t, active, onOpen, main }: { t: ThreadItem; active: boolean; onOpen: (t: ThreadItem) => void; main?: boolean }) {
   const running = t.status === 'running' || t.status === 'starting';
-  const needs = t.status === 'needs_permission';
+  const needs = needsYou(t);
   return (
     <li>
       <button onClick={() => onOpen(t)} className={cn('flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors',

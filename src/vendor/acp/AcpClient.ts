@@ -170,6 +170,8 @@ export class AcpClient {
   private sessionConfigOptions: readonly AcpSessionConfigOption[] | undefined;
   private readonly sessionUpdateListeners = new Set<AcpSessionUpdateListener>();
   private readonly connectionListeners = new Set<AcpConnectionListener>();
+  /** Hearth: listeners for server extension notifications (`_hearth/*`). */
+  private readonly extListeners = new Set<(method: string, params: unknown) => void>();
 
   constructor(options: AcpClientOptions) {
     this.options = options;
@@ -180,6 +182,20 @@ export class AcpClient {
     return () => {
       this.sessionUpdateListeners.delete(listener);
     };
+  }
+
+  /** Hearth: server extension notifications (methods starting with `_`), e.g. `_hearth/plan_changed`. */
+  subscribeExtNotification(listener: (method: string, params: unknown) => void): () => void {
+    this.extListeners.add(listener);
+    return () => {
+      this.extListeners.delete(listener);
+    };
+  }
+
+  /** Hearth: a server extension request (e.g. `_hearth/plan`), once connected. */
+  extRequest<TResult = unknown>(method: string, params: unknown): Promise<TResult> {
+    if (!method.startsWith("_")) return Promise.reject(new Error(`Not an extension method: ${method}`));
+    return this.request<TResult>(method, params);
   }
 
   subscribeConnectionChange(listener: AcpConnectionListener): () => void {
@@ -670,6 +686,13 @@ export class AcpClient {
   }
 
   private handleNotification(msg: any): void {
+    // Hearth: extension notifications go to their own listeners.
+    if (typeof msg.method === "string" && msg.method.startsWith("_")) {
+      for (const listener of [...this.extListeners]) {
+        invokeUserCallback("acp", "onExtNotification", listener, msg.method, msg.params);
+      }
+      return;
+    }
     if (msg.method !== "session/update") return;
     const params = msg.params as
       | { sessionId?: unknown; update?: AcpSessionUpdate }

@@ -118,3 +118,33 @@
 @custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
 
 @custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));
+/* Markdown outside chat messages (plan panel, file previews). */
+@layer components {
+  .hearth-md > :first-child { margin-top: 0; }
+  .hearth-md > :last-child { margin-bottom: 0; }
+  .hearth-md h1 { @apply mt-4 mb-2 text-base font-semibold; }
+  .hearth-md h2 { @apply mt-4 mb-1.5 text-[15px] font-semibold; }
+  .hearth-md h3, .hearth-md h4 { @apply mt-3 mb-1 text-sm font-semibold; }
+  .hearth-md p { @apply my-2; }
+  .hearth-md ul { @apply my-2 ms-4 list-disc marker:text-muted-foreground; }
+  .hearth-md ol { @apply my-2 ms-4 list-decimal marker:text-muted-foreground; }
+  .hearth-md li { @apply mt-0.5; }
+  .hearth-md li.task-list-item { @apply -ms-4 list-none; }
+  .hearth-md li.task-list-item input {
+    appearance: none; width: 0.85rem; height: 0.85rem; margin-inline-end: 0.45rem; vertical-align: -2px;
+    border: 1.5px solid color-mix(in oklab, var(--muted-foreground) 70%, transparent); border-radius: 4px;
+  }
+  .hearth-md li.task-list-item input:checked {
+    border-color: var(--primary); background: var(--primary) center / 80% no-repeat
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E");
+  }
+  .hearth-md li.task-list-item:has(input:checked) { color: var(--muted-foreground); }
+  .hearth-md a { @apply text-primary underline underline-offset-2; }
+  .hearth-md code { @apply rounded bg-muted px-1 py-0.5 font-mono text-[12px]; }
+  .hearth-md pre { @apply my-2 overflow-x-auto rounded-lg bg-muted p-2.5 text-[12px]; }
+  .hearth-md pre code { @apply bg-transparent p-0; }
+  .hearth-md blockquote { @apply my-2 border-s-2 border-muted-foreground/30 ps-3 text-muted-foreground; }
+  .hearth-md hr { @apply my-3 border-muted-foreground/20; }
+  .hearth-md table { @apply my-2 w-full text-xs; }
+  .hearth-md th, .hearth-md td { @apply border-b px-2 py-1 text-start; }
+}

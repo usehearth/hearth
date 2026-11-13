@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ClientApp, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 import { createWebSocketStream } from '@agentclientprotocol/sdk/experimental/ws-client';
 import { keyFor, type Server } from './servers';
+import type { CardAnswer, CardEntry } from './hearth';
 
 export interface ThreadItem {
   sessionId: string;
@@ -18,6 +19,8 @@ export interface ThreadItem {
   status: string | null;
   runnerOnline: boolean | null;
   pinned: boolean;
+  /** Open cards in this thread (questions, approvals, permission prompts). */
+  openCards: number;
 }
 
 export interface ProjectGroup { project: string; name: string; cwd: string; main?: ThreadItem; threads: ThreadItem[] }
@@ -25,7 +28,10 @@ export interface ProjectGroup { project: string; name: string; cwd: string; main
 export type DirectoryState =
   | { state: 'no-key' }
   | { state: 'connecting' }
-  | { state: 'ready'; agent: string; groups: ProjectGroup[]; refresh: () => void; reconnecting?: boolean }
+  | { state: 'ready'; agent: string; groups: ProjectGroup[]; refresh: () => void; reconnecting?: boolean;
+      /** Every open card this device may see (`_hearth/cards`); empty on servers without it. */
+      cards: CardEntry[];
+      answer: (e: CardEntry, a: CardAnswer) => Promise<unknown> }
   | { state: 'error'; message: string; retry: () => void };
 
 const folderName = (cwd: string) => cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || cwd;
@@ -43,6 +49,7 @@ export function toItem(s: any): ThreadItem {
     status: h.status ?? null,
     runnerOnline: h.runnerOnline ?? null,
     pinned: !!h.pinned,
+    openCards: Number(h.openCards ?? 0) || 0,
   };
 }
 
@@ -91,11 +98,26 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
     const app = new ClientApp({ name: 'hearth-directory' })
       .onNotification('_hearth/sessions_changed', (p: unknown) => p, () => {
         relist ??= setTimeout(() => { relist = null; refresh(); }, RELIST_MS);
+      })
+      .onNotification('_hearth/cards_changed', (p: unknown) => p, () => {
+        relist ??= setTimeout(() => { relist = null; refresh(); }, RELIST_MS);
       });
     const conn = app.connect(createWebSocketStream(server.url, { protocols: ['acp', `bearer.${key}`] }));
+    let hasCards = true;
     const list = async () => {
-      const res: any = await conn.agent.request('session/list', {});
-      return group((res.sessions ?? []).map(toItem));
+      const [res, cards] = await Promise.all([
+        conn.agent.request('session/list', {}) as Promise<any>,
+        hasCards ? (conn.agent.request('_hearth/cards' as any, {}) as Promise<any>).then((r) => (r?.cards ?? []) as CardEntry[], (e: any) => {
+          if (e?.code === -32601) hasCards = false; // a plain ACP server: no cards
+          return [] as CardEntry[];
+        }) : Promise.resolve([] as CardEntry[]),
+      ]);
+      return { groups: group((res.sessions ?? []).map(toItem)), cards };
+    };
+    const answer = async (e: CardEntry, a: CardAnswer) => {
+      const r = await conn.agent.request('_hearth/card/answer' as any, { sessionId: e.sessionId, itemId: e.card.id, ...a });
+      refresh();
+      return r;
     };
     void conn.closed.finally(() => {
       if (!ready || !live) return;
@@ -110,14 +132,14 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
           clientInfo: { name: 'hearth', version: '0.1.0' },
         });
         if (!init?.agentCapabilities?.sessionCapabilities?.list) throw new Error('This server does not list its chats (no session/list).');
-        const groups = await list();
+        const first = await list();
         if (!live) return;
         const agent = String(init.agentInfo?.title ?? init.agentInfo?.name ?? 'ACP server');
-        refresh = () => { void list().then((g) => live && setSt({ state: 'ready', agent, groups: g, refresh })).catch(() => { /* a drop reconnects */ }); };
+        refresh = () => { void list().then((l) => live && setSt({ state: 'ready', agent, ...l, refresh, answer })).catch(() => { /* a drop reconnects */ }); };
         ready = true;
         wasReady.current = true;
         fails.current = 0;
-        setSt({ state: 'ready', agent, groups, refresh });
+        setSt({ state: 'ready', agent, ...first, refresh, answer });
       } catch (e) {
         if (!live) return;
         if (wasReady.current && fails.current < GIVE_UP_AFTER) { reconnectLater(); return; } // keep the list, keep trying

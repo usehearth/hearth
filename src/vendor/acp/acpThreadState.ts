@@ -311,6 +311,8 @@ const reduceSessionUpdate = (
   state: AcpThreadState,
   update: AcpSessionUpdate,
 ): AcpThreadState => {
+  // Hearth: a card (`_meta.hearth.card`) is drawn as a card by the app, not as message text.
+  if ((update as any)?._meta?.hearth?.card) return state;
   if (state.settlingAssistantId === undefined && runningId(state) === undefined) {
     const passive = reducePassive(state, update);
     if (passive) return passive;
