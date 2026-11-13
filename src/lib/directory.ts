@@ -21,9 +21,14 @@ export interface ThreadItem {
   pinned: boolean;
   /** Open cards in this thread (questions, approvals, permission prompts). */
   openCards: number;
+  /** Set for a client project's thread (H5): the client's name. Only a work device is sent these. */
+  client?: string;
 }
 
-export interface ProjectGroup { project: string; name: string; cwd: string; main?: ThreadItem; threads: ThreadItem[] }
+export interface ProjectGroup { project: string; name: string; cwd: string; main?: ThreadItem; threads: ThreadItem[]; client?: string }
+
+/** H5: one content-free line per client, for a device that may not open client threads. */
+export interface ClientLine { client: string; needsYou: number }
 
 export type DirectoryState =
   | { state: 'no-key' }
@@ -34,6 +39,9 @@ export type DirectoryState =
       answer: (e: CardEntry, a: CardAnswer) => Promise<unknown>;
       /** The `_hearth` extensions the server says it has (from initialize). */
       extensions: string[];
+      /** H5: client lines for this device (empty on a work device, which lists client threads instead). */
+      clients: ClientLine[];
+      workDevice: boolean;
       /** A request on the list connection (settings use it). */
       request: <T = unknown>(method: string, params?: unknown) => Promise<T> }
   | { state: 'error'; message: string; retry: () => void };
@@ -54,13 +62,14 @@ export function toItem(s: any): ThreadItem {
     runnerOnline: h.runnerOnline ?? null,
     pinned: !!h.pinned,
     openCards: Number(h.openCards ?? 0) || 0,
+    ...(typeof h.client === 'string' && h.client ? { client: h.client } : {}),
   };
 }
 
 export function group(items: ThreadItem[]): ProjectGroup[] {
   const by = new Map<string, ProjectGroup>();
   for (const it of items) {
-    const g = by.get(it.project) ?? { project: it.project, name: it.projectName, cwd: it.cwd, threads: [] };
+    const g = by.get(it.project) ?? { project: it.project, name: it.projectName, cwd: it.cwd, threads: [], ...(it.client ? { client: it.client } : {}) };
     if (it.kind === 'main' && !g.main) g.main = it; else g.threads.push(it);
     by.set(it.project, g);
   }
@@ -108,6 +117,7 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
       });
     const conn = app.connect(createWebSocketStream(server.url, { protocols: ['acp', `bearer.${key}`] }));
     let hasCards = true;
+    let hasClients = false;
     const list = async () => {
       const [res, cards] = await Promise.all([
         conn.agent.request('session/list', {}) as Promise<any>,
@@ -116,7 +126,8 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
           return [] as CardEntry[];
         }) : Promise.resolve([] as CardEntry[]),
       ]);
-      return { groups: group((res.sessions ?? []).map(toItem)), cards };
+      const cl = hasClients ? await (conn.agent.request('_hearth/clients' as any, {}) as Promise<any>).catch(() => null) : null;
+      return { groups: group((res.sessions ?? []).map(toItem)), cards, clients: (cl?.clients ?? []) as ClientLine[], workDevice: !!cl?.workDevice };
     };
     const answer = async (e: CardEntry, a: CardAnswer) => {
       const r = await conn.agent.request('_hearth/card/answer' as any, { sessionId: e.sessionId, itemId: e.card.id, ...a });
@@ -136,6 +147,7 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
           clientInfo: { name: 'hearth', version: '0.1.0' },
         });
         if (!init?.agentCapabilities?.sessionCapabilities?.list) throw new Error('This server does not list its chats (no session/list).');
+        hasClients = Array.isArray(init?._meta?.hearth?.extensions) && init._meta.hearth.extensions.includes('clients');
         const first = await list();
         if (!live) return;
         const agent = String(init.agentInfo?.title ?? init.agentInfo?.name ?? 'ACP server');

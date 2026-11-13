@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BellDot, ChevronDown, Menu, Settings as SettingsIcon, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
+import { BellDot, Briefcase, ChevronDown, Lock, Menu, Settings as SettingsIcon, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { ThreadPane, type ThreadTarget } from '@/components/hearth/ThreadPane';
@@ -8,7 +8,7 @@ import { NeedsYou } from '@/components/hearth/NeedsYou';
 import { Settings } from '@/components/hearth/Settings';
 import { ProjectSettings } from '@/components/hearth/ProjectSettings';
 import type { CardEntry } from '@/lib/hearth';
-import { useDirectory, type ProjectGroup, type ThreadItem } from '@/lib/directory';
+import { useDirectory, type ClientLine, type ProjectGroup, type ThreadItem } from '@/lib/directory';
 import { keyFor, keysReady, useServers } from '@/lib/servers';
 import { useTheme } from '@/lib/theme';
 import { cn } from '@/lib/utils';
@@ -20,7 +20,7 @@ export default function App() {
   const [keyVersion, setKeyVersion] = useState(0);
   const dir = useDirectory(server, keyVersion);
   // `id` keys the open pane (stable for its lifetime); `sessionId` is the server's id once known.
-  const [target, setTarget] = useState<{ id: string; sessionId?: string; t: ThreadTarget; title: string; project?: string } | null>(null);
+  const [target, setTarget] = useState<{ id: string; sessionId?: string; t: ThreadTarget; title: string; project?: string; client?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   // The main pane shows the open thread, or the needs-you view.
@@ -48,7 +48,7 @@ export default function App() {
     setView('thread');
     setNavOpen(false);
     // The thread already open stays connected (coming back from Needs you, or a second click).
-    setTarget((cur) => (cur?.sessionId === t.sessionId ? cur : { id: t.sessionId, sessionId: t.sessionId, t: { kind: 'open', sessionId: t.sessionId, cwd: t.cwd }, title: t.kind === 'main' ? 'Main thread' : t.title, project: t.projectName }));
+    setTarget((cur) => (cur?.sessionId === t.sessionId ? cur : { id: t.sessionId, sessionId: t.sessionId, t: { kind: 'open', sessionId: t.sessionId, cwd: t.cwd }, title: t.kind === 'main' ? 'Main thread' : t.title, project: t.projectName, client: t.client }));
   }, []);
   const openCard = useCallback((e: CardEntry) => {
     setError(null);
@@ -61,7 +61,7 @@ export default function App() {
     setView('thread');
     setNavOpen(false);
     const id = `new-${crypto.randomUUID()}`;
-    setTarget({ id, t: { kind: 'new', cwd: g.cwd, meta: { hearth: { project: g.project } } }, title: 'New thread', project: g.name });
+    setTarget({ id, t: { kind: 'new', cwd: g.cwd, meta: { hearth: { project: g.project } } }, title: 'New thread', project: g.name, client: g.client });
   }, []);
   const refresh = dir.state === 'ready' ? dir.refresh : undefined;
   const events = useMemo(() => ({
@@ -108,6 +108,7 @@ export default function App() {
               <BellDot className={cn('size-4', dir.cards.length ? 'text-primary' : 'text-muted-foreground')} />
               <span>Needs you</span>
               {dir.cards.length > 0 && <span className="ml-auto rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">{dir.cards.length}</span>}
+              {dir.cards.length === 0 && dir.clients.some((c) => c.needsYou > 0) && <span className="ml-auto text-[11px] text-muted-foreground">client work waits</span>}
             </button>
           )}
           <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
@@ -130,11 +131,17 @@ export default function App() {
                   <IconBtn label="Refresh" onClick={dir.refresh}><RefreshCw className="size-3.5" /></IconBtn>
                 </div>
                 {dir.groups.length === 0 && <p className="px-2 py-3 text-sm text-muted-foreground">No threads on this server yet.</p>}
-                {dir.groups.map((g) => (
+                {dir.groups.filter((g) => !g.client).map((g) => (
                   <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)}
                     onSettings={dir.extensions.includes('project') ? () => { setProjectView({ slug: g.project, name: g.name }); go('project'); } : undefined}
                     settingsOpen={view === 'project' && projectView?.slug === g.project} />
                 ))}
+                <ClientsSection groups={dir.groups.filter((g) => !!g.client)} lines={dir.clients} workDevice={dir.workDevice}
+                  render={(g) => (
+                    <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)}
+                      onSettings={dir.extensions.includes('project') ? () => { setProjectView({ slug: g.project, name: g.name }); go('project'); } : undefined}
+                      settingsOpen={view === 'project' && projectView?.slug === g.project} />
+                  )} />
               </>
             )}
           </nav>
@@ -158,6 +165,12 @@ export default function App() {
             ) : <span className="text-sm text-muted-foreground">Pick a thread</span>}
             <div ref={setActionsEl} className={cn('ml-auto flex items-center gap-1', view !== 'thread' && 'hidden')} />
           </header>
+          {view === 'thread' && target?.client && (
+            <div className="flex items-center gap-2 border-b bg-amber-500/10 px-5 py-1.5 text-xs text-amber-900 max-md:px-3 dark:text-amber-200" role="note">
+              <Lock className="size-3.5 shrink-0" />
+              <span><span className="font-semibold">Client: {target.client}.</span> Content stays on the work machine; the server keeps only summaries.</span>
+            </div>
+          )}
           {error && (
             <div className="mx-5 mt-3 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
               <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" /><span className="text-foreground/90">{error}</span>
@@ -219,6 +232,32 @@ function ProjectSection({ g, activeId, onOpen, onNew, onSettings, settingsOpen }
           )}
         </ul>
       )}
+    </div>
+  );
+}
+
+/**
+ * H5: client projects in their own section. A work device lists their threads like any other project; elsewhere it
+ * gets one content-free line per client and the content stays on the work machine.
+ */
+function ClientsSection({ groups, lines, workDevice, render }: { groups: ProjectGroup[]; lines: ClientLine[]; workDevice: boolean; render: (g: ProjectGroup) => React.ReactNode }) {
+  if (!groups.length && !lines.length) return null;
+  return (
+    <div className="mt-3" aria-label="Clients">
+      <div className="flex items-center gap-1.5 px-2 pt-2 pb-1">
+        <Briefcase className="size-3 text-muted-foreground" />
+        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Clients</span>
+      </div>
+      {workDevice || groups.length ? groups.map(render) : lines.map((l) => (
+        <div key={l.client} className="mx-1 flex items-start gap-2 rounded-lg px-2 py-1.5 text-[13px]">
+          <Lock className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1">
+            <span className="font-medium">{l.client}</span>
+            <span className="block text-xs text-muted-foreground">{l.needsYou > 0 ? `${l.needsYou} ${l.needsYou === 1 ? 'thing needs' : 'things need'} you: open it on a work device.` : 'Opens on a work device.'}</span>
+          </span>
+          {l.needsYou > 0 && <span className="rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">{l.needsYou}</span>}
+        </div>
+      ))}
     </div>
   );
 }
