@@ -15,7 +15,7 @@ import { TasksList } from '@/components/hearth/TasksPanel';
 import { ComposerBar } from '@/components/hearth/ComposerBar';
 import { notify } from '@/lib/notify';
 import { MessageActionsContext } from '@/components/hearth/messageActions';
-import { ShellContext } from '@/components/hearth/SlashMenu';
+import { MentionContext, QueueContext, ShellContext } from '@/components/hearth/SlashMenu';
 import type { AppendMessage } from '@assistant-ui/react';
 
 const textOf = (content: readonly { type: string; text?: string }[] | undefined) =>
@@ -281,8 +281,36 @@ function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClie
       catch (e) { ev.current.onError((e as Error).message); }
     };
   }, [client, client.initializeMeta]); // eslint-disable-line react-hooks/exhaustive-deps
+  // @-mentions: the project's files (servers with the mentions extension).
+  const findFiles = useMemo(() => {
+    const ext = client.initializeMeta?.hearth?.extensions;
+    if (!Array.isArray(ext) || !ext.includes('mentions')) return null;
+    return async (query: string) => (client.sessionId ? (await client.extRequest<{ files: string[] }>('_hearth/files/find', { sessionId: client.sessionId, query })).files : []);
+  }, [client, client.initializeMeta]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Messages typed while the agent works, sent in order when it finishes.
+  const [queue, setQueue] = useState<string[]>([]);
+  const queueApi = useMemo(() => ({ items: queue, add: (t: string) => setQueue((q) => [...q, t]), remove: (i: number) => setQueue((q) => q.filter((_, j) => j !== i)) }), [queue]);
   const runtime = useAcpRuntime({ client, permissions: 'ask', onError: (e) => ev.current.onError(e.message), adapters: { attachments }, onEdit, onReload });
   runtimeRef.current = runtime;
+  // When the agent finishes, the next queued message goes (once: a send in flight waits until the run has started).
+  const queueRef = useRef(queue);
+  queueRef.current = queue;
+  const sending = useRef(false);
+  useEffect(() => {
+    const tick = () => {
+      const st = runtime.thread.getState();
+      if (st.isRunning) { sending.current = false; return; }
+      if (st.isLoading || sending.current || !queueRef.current.length) return;
+      const [next, ...rest] = queueRef.current;
+      queueRef.current = rest;
+      setQueue(rest);
+      sending.current = true;
+      void runtime.thread.append({ role: 'user', content: [{ type: 'text', text: next }] });
+      setTimeout(() => { sending.current = false; }, 3000); // a send that never started a run does not block the queue
+    };
+    tick();
+    return runtime.thread.subscribe(tick);
+  }, [runtime, queue.length]);
   // A fork opens with its first message: sent (Edit, Regenerate) or ready in the composer (Rewind).
   // Text from the editor goes at the end of whatever is being typed.
   useEffect(() => {
@@ -318,12 +346,16 @@ function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClie
         <Watch events={ev} />
         <MessageActionsContext.Provider value={messageActions}>
         <ShellContext.Provider value={shell}>
+        <MentionContext.Provider value={findFiles}>
+        <QueueContext.Provider value={queueApi}>
         <div className="flex h-full">
           <div className="relative min-w-0 flex-1">
             <Thread components={components} />
           </div>
           {planOpen && <SidePanel extras={extras} tab={!extras.filesSupported && tab === 'files' ? 'plan' : tab} onTab={setTab} onClose={() => setOpen('closed')} />}
         </div>
+        </QueueContext.Provider>
+        </MentionContext.Provider>
         </ShellContext.Provider>
         </MessageActionsContext.Provider>
         {actionsEl && extras.supported && extras.sessionId && createPortal(

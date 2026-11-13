@@ -26,6 +26,8 @@ export interface ProjectView {
   monthCost?: number;
   /** The git remote (servers with `git`): its URL and whether a token is set (never the token). */
   remote?: { url: string; hasToken: boolean } | null;
+  /** More folders the agents may use (servers that have them; admin devices change them). */
+  extraFolders?: string[];
   canEdit: boolean;
 }
 
@@ -58,6 +60,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
   const [budget, setBudget] = useState('');
   const [tools, setTools] = useState<string[]>([]);
   const [remoteUrl, setRemoteUrl] = useState('');
+  const [folders, setFolders] = useState('');
   const [remoteToken, setRemoteToken] = useState('');
   const [repoMcp, setRepoMcp] = useState(false);
   const [repoApproved, setRepoApproved] = useState<string[]>([]);
@@ -78,6 +81,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
     setBudget(v.budget ? String(v.budget.monthlyUsd) : '');
     setTools(v.tools);
     setRemoteUrl(v.remote?.url ?? '');
+    setFolders((v.extraFolders ?? []).join('\n'));
     setRemoteToken('');
     setRepoMcp(!!v.repoMcp?.enabled);
     setRepoApproved(v.repoMcp?.approved ?? []);
@@ -97,6 +101,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
       fill(await request<ProjectView>('_hearth/project/update', { project, name, models: m, providers: allProviders ? null : order, planFirst, ...(view!.instructions !== null ? { instructions } : {}),
         ...(view!.permissions ? { permissions: { mode: mode === 'auto' && !allowAuto ? 'default' : mode, allow: lines(allowText), deny: lines(denyText), ...(allowAuto !== !!view!.permissions.allowAuto ? { allowAuto } : {}) } } : {}),
         ...(view!.toolChoices && (tools.join() !== view!.tools.join()) ? { tools } : {}),
+        ...(view!.extraFolders && lines(folders).join('\n') !== view!.extraFolders.join('\n') ? { extraFolders: lines(folders) } : {}),
         ...(extensions.includes('git') && (remoteUrl.trim() !== (view!.remote?.url ?? '') || remoteToken) ? { remote: remoteUrl.trim() ? { url: remoteUrl.trim(), ...(remoteToken ? { token: remoteToken } : {}) } : null } : {}),
         ...(view!.repoMcp && (repoMcp !== view!.repoMcp.enabled || repoApproved.join() !== view!.repoMcp.approved.join()) ? { repoMcp, repoMcpApproved: repoApproved } : {}),
         ...(view!.monthCost !== undefined ? { budget: budget.trim() ? { monthlyUsd: Number(budget), warnAt: Number(warnAt) / 100 } : null } : {}) }));
@@ -181,6 +186,13 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
             <span>Plan first<span className="block text-xs text-muted-foreground">Workers write a spec for your OK before they build.</span></span>
           </label>
         </Section>
+
+        {view.extraFolders && (
+          <Section title="Extra folders" sub="More folders this project's agents may read and edit, one per line (they must be on the runner's machine, in its folders). Needs an admin device.">
+            <textarea value={folders} onChange={(e) => setFolders(e.target.value)} rows={2} spellCheck={false} aria-label="Extra folders"
+              placeholder="/workspace/shared-lib" className={cn(inputCls, 'font-mono text-xs')} />
+          </Section>
+        )}
 
         {extensions.includes('git') && (
           <Section title="Git remote" sub="Where branches are pushed and pull requests opened (GitHub). Agents never push; you do, here. Changing it needs an admin device.">
