@@ -11,6 +11,7 @@ import type { AcpWebSocketLike } from '@/vendor/acp/AcpClient';
 import { Thread, type ThreadComponents } from '@/components/assistant-ui/elements/thread.aui';
 import { CardView } from '@/components/hearth/CardView';
 import { UsageMeter } from '@/components/hearth/UsageMeter';
+import { ComposerBar } from '@/components/hearth/ComposerBar';
 import { notify } from '@/lib/notify';
 import { Markdown } from '@/components/hearth/Markdown';
 import { FilesList, FileView, type FileContent, type FileItem } from '@/components/hearth/FilesPanel';
@@ -102,6 +103,8 @@ const GIVE_UP_AFTER = 6;
 const ANSWERED_LINGER_MS = 6000;
 
 interface Extras {
+  client: AcpClient;
+  onError: (message: string) => void;
   sessionId?: string;
   supported: boolean;
   cards: Card[];
@@ -184,11 +187,18 @@ function useThreadExtras(client: AcpClient): Extras {
     if (r?.card) { setCards((cs) => mergeCard(cs, { ...card, ...r.card })); linger(r.card); }
   }, [client, linger]);
 
-  return { sessionId, supported, cards, answer, plan, planLoading, refreshPlan, files, filesSupported, filesLoading, refreshFiles, readFile };
+  return { client, onError: () => {}, sessionId, supported, cards, answer, plan, planLoading, refreshPlan, files, filesSupported, filesLoading, refreshFiles, readFile };
 }
 
 const ExtrasContext = createContext<Extras | null>(null);
-const components: ThreadComponents = { AboveComposer: () => <AboveComposer />, ComposerExtra: () => <UsageMeter /> };
+const components: ThreadComponents = { AboveComposer: () => <AboveComposer />, ComposerExtra: () => <ComposerExtra /> };
+
+/** Beside the attach button: mode, model and usage. */
+function ComposerExtra() {
+  const x = useContext(ExtrasContext);
+  if (!x) return <UsageMeter />;
+  return <ComposerBar client={x.client} onError={x.onError} />;
+}
 
 function Runtime({ client, events, actionsEl }: { client: AcpClient; events: ThreadEvents; actionsEl?: HTMLElement | null }) {
   const ev = useRef(events);
@@ -210,7 +220,8 @@ function Runtime({ client, events, actionsEl }: { client: AcpClient; events: Thr
   const runtime = useAcpRuntime({ client, permissions: 'ask', onError: (e) => ev.current.onError(e.message), adapters: { attachments } });
   runtimeRef.current = runtime;
   useEffect(() => client.subscribeConnectionChange(() => { if (client.sessionId) ev.current.onSession(client.sessionId); }), [client]);
-  const extras = useThreadExtras(client);
+  const base = useThreadExtras(client);
+  const extras = useMemo(() => ({ ...base, onError: (m: string) => ev.current.onError(m) }), [base]);
   // Open or closed, remembered per thread; by default open when the thread has a plan, on a wide enough window.
   const [pref, setPref] = useState(() => planPref(extras.sessionId));
   useEffect(() => { setPref(planPref(extras.sessionId)); }, [extras.sessionId]);

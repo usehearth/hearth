@@ -192,6 +192,24 @@ export class AcpClient {
     };
   }
 
+  /** Hearth (parity): change the session's mode (ACP session/set_mode). */
+  setMode(modeId: string): Promise<unknown> {
+    if (!this._sessionId) return Promise.reject(new Error("No session yet: send a message first."));
+    return this.request("session/set_mode", { sessionId: this._sessionId, modeId });
+  }
+
+  /** Hearth (parity): change one of the agent's session settings (ACP session/set_config_option). */
+  setConfigOption(configId: string, value: string | boolean): Promise<unknown> {
+    if (!this._sessionId) return Promise.reject(new Error("No session yet: send a message first."));
+    return this.request("session/set_config_option", { sessionId: this._sessionId, configId, value });
+  }
+
+  /** Hearth (parity): `_meta.hearth` of the last session/new or session/load answer (e.g. the thread's provider). */
+  get sessionMeta(): Record<string, unknown> | undefined {
+    return this.lastSessionMeta;
+  }
+  private lastSessionMeta: Record<string, unknown> | undefined;
+
   /** Hearth: a server extension request (e.g. `_hearth/plan`), once connected. */
   extRequest<TResult = unknown>(method: string, params: unknown): Promise<TResult> {
     if (!method.startsWith("_")) return Promise.reject(new Error(`Not an extension method: ${method}`));
@@ -503,6 +521,7 @@ export class AcpClient {
     this.lostSessionId = undefined;
     this.sessionModes = session.modes ?? undefined;
     this.sessionConfigOptions = session.configOptions ?? undefined;
+    this.lastSessionMeta = ((session as { _meta?: { hearth?: Record<string, unknown> } })._meta?.hearth) ?? undefined;
     this.emitConnectionChange();
     return session.sessionId;
   }
