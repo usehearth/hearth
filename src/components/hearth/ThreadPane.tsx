@@ -15,6 +15,7 @@ import { TasksList } from '@/components/hearth/TasksPanel';
 import { ComposerBar } from '@/components/hearth/ComposerBar';
 import { notify } from '@/lib/notify';
 import { MessageActionsContext } from '@/components/hearth/messageActions';
+import { ShellContext } from '@/components/hearth/SlashMenu';
 import type { AppendMessage } from '@assistant-ui/react';
 
 const textOf = (content: readonly { type: string; text?: string }[] | undefined) =>
@@ -270,6 +271,16 @@ function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClie
       await fork(turn, message ? textOf(message.content) : '', false, restoreFiles);
     },
   }), [fork]); // eslint-disable-line react-hooks/exhaustive-deps
+  // "!command": a shell command in this thread (servers with the shell extension; the thread must exist).
+  const shell = useMemo(() => {
+    const ext = client.initializeMeta?.hearth?.extensions;
+    if (!Array.isArray(ext) || !ext.includes('shell')) return null;
+    return async (command: string) => {
+      if (!client.sessionId) { ev.current.onError('Send a first message, then run commands in this thread.'); return; }
+      try { await client.extRequest('_hearth/shell', { sessionId: client.sessionId, command }); }
+      catch (e) { ev.current.onError((e as Error).message); }
+    };
+  }, [client, client.initializeMeta]); // eslint-disable-line react-hooks/exhaustive-deps
   const runtime = useAcpRuntime({ client, permissions: 'ask', onError: (e) => ev.current.onError(e.message), adapters: { attachments }, onEdit, onReload });
   runtimeRef.current = runtime;
   // A fork opens with its first message: sent (Edit, Regenerate) or ready in the composer (Rewind).
@@ -306,12 +317,14 @@ function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClie
       <ExtrasContext.Provider value={extras}>
         <Watch events={ev} />
         <MessageActionsContext.Provider value={messageActions}>
+        <ShellContext.Provider value={shell}>
         <div className="flex h-full">
           <div className="relative min-w-0 flex-1">
             <Thread components={components} />
           </div>
           {planOpen && <SidePanel extras={extras} tab={!extras.filesSupported && tab === 'files' ? 'plan' : tab} onTab={setTab} onClose={() => setOpen('closed')} />}
         </div>
+        </ShellContext.Provider>
         </MessageActionsContext.Provider>
         {actionsEl && extras.supported && extras.sessionId && createPortal(
           <>

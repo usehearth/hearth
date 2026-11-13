@@ -1,7 +1,7 @@
 // The "/" menu in the composer: the agent's own slash commands (ACP available_commands_update: /compact, /init,
 // /review, the owner's custom commands...). Typing "/" at the start opens it; arrows move, Enter or Tab picks, Escape
 // closes. Picking a command puts "/name " in the composer so a hint or argument can follow; sending it runs it.
-import { useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useAui, useAuiState } from '@assistant-ui/react';
 import { SquareSlash } from 'lucide-react';
 import { useAcpAvailableCommands } from '@/vendor/acp';
@@ -20,7 +20,11 @@ export function matchCommands(commands: readonly SlashCommand[], query: string):
 /** The "/word" being typed, when the composer holds only that (no space yet). */
 export const slashQuery = (text: string) => (/^\/[^\s/]*$/.test(text) ? text.slice(1) : null);
 
+/** "!command": run a shell command in the thread (the thread pane provides it when the server can). */
+export const ShellContext = createContext<((command: string) => Promise<void>) | null>(null);
+
 export function useSlashMenu() {
+  const runShell = useContext(ShellContext);
   const aui = useAui();
   const text = useAuiState((s) => s.composer.text);
   const commands = (useAcpAvailableCommands() ?? []) as readonly SlashCommand[];
@@ -32,7 +36,16 @@ export function useSlashMenu() {
   useEffect(() => { setActive(0); }, [query]);
 
   const pick = (c: SlashCommand) => { aui.composer.setText(`/${c.name} `, { origin: 'user' } as never); };
+  const shellMode = !!runShell && /^!\S/.test(text);
   const onKeyDown = (e: React.KeyboardEvent) => {
+    // "!command" + Enter: a shell command, not a message to the agent.
+    if (shellMode && e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const command = text.slice(1).trim();
+      aui.composer.setText('', { origin: 'user' } as never);
+      void runShell!(command);
+      return;
+    }
     if (!open) return;
     if (e.key === 'ArrowDown') { e.preventDefault(); setActive((i) => (i + 1) % items.length); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((i) => (i - 1 + items.length) % items.length); }
@@ -56,5 +69,10 @@ export function useSlashMenu() {
       ))}
     </div>
   ) : null;
-  return { menu, onKeyDown };
+  const hint = shellMode ? (
+    <div className="absolute right-0 bottom-full left-0 z-30 mb-2 rounded-lg border bg-popover px-3 py-1.5 text-xs text-muted-foreground shadow-sm">
+      <span className="font-mono text-foreground">!</span> Shell: Enter runs it in this thread's folder (as the agent's user); the agent sees the output next turn.
+    </div>
+  ) : null;
+  return { menu: menu ?? hint, onKeyDown };
 }
