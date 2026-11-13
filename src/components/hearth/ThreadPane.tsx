@@ -5,12 +5,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AssistantRuntimeProvider, useAuiState } from '@assistant-ui/react';
-import { ChevronDown, Circle, CircleCheck, CircleDot, ListChecks, Loader2, PanelRightClose, PanelRightOpen, RefreshCw } from 'lucide-react';
+import { ChevronDown, Circle, FolderOpen, CircleCheck, CircleDot, ListChecks, Loader2, PanelRightClose, PanelRightOpen, RefreshCw } from 'lucide-react';
 import { AcpClient, useAcpPlan, useAcpRuntime, useAcpSessionTitle } from '@/vendor/acp';
 import type { AcpWebSocketLike } from '@/vendor/acp/AcpClient';
 import { Thread, type ThreadComponents } from '@/components/assistant-ui/elements/thread.aui';
 import { CardView } from '@/components/hearth/CardView';
 import { Markdown } from '@/components/hearth/Markdown';
+import { FilesList, FileView, type FileContent, type FileItem } from '@/components/hearth/FilesPanel';
 import { openSocket } from '@/lib/servers';
 import { HearthAttachments } from '@/lib/attachments';
 import { type Card, type CardAnswer, type CardEntry, type Plan, cardOf, mergeCard, planPref, setPlanPref } from '@/lib/hearth';
@@ -57,6 +58,12 @@ interface Extras {
   plan: Plan | null;
   planLoading: boolean;
   refreshPlan: () => void;
+  /** Files the thread made (null until read; filesSupported false on servers without them). */
+  files: FileItem[] | null;
+  filesSupported: boolean;
+  filesLoading: boolean;
+  refreshFiles: () => void;
+  readFile: (path: string) => Promise<FileContent>;
 }
 
 /** The thread's Hearth extras: its cards and its plan, kept live. A server without the extensions gives neither. */
@@ -67,6 +74,9 @@ function useThreadExtras(client: AcpClient): Extras {
   const [cards, setCards] = useState<Card[]>([]);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
+  const [files, setFiles] = useState<FileItem[] | null>(null);
+  const [filesSupported, setFilesSupported] = useState(true);
+  const [filesLoading, setFilesLoading] = useState(false);
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   useEffect(() => client.subscribeConnectionChange((s) => { setConnected(s === 'connected'); setSessionId(client.sessionId); }), [client]);
@@ -95,12 +105,22 @@ function useThreadExtras(client: AcpClient): Extras {
       .finally(() => setPlanLoading(false));
   }, [client, sessionId, connected]);
 
-  useEffect(() => { loadCards(); refreshPlan(); }, [loadCards, refreshPlan]);
+  const refreshFiles = useCallback(() => {
+    if (!sessionId || !connected) return;
+    setFilesLoading(true);
+    client.extRequest<{ files: FileItem[] }>('_hearth/files', { sessionId })
+      .then((r) => setFiles(r.files ?? []), (e) => { if ((e as { code?: number })?.code === -32601) setFilesSupported(false); })
+      .finally(() => setFilesLoading(false));
+  }, [client, sessionId, connected]);
+  const readFile = useCallback((path: string) => client.extRequest<FileContent>('_hearth/file', { sessionId: client.sessionId, path }), [client]);
+
+  useEffect(() => { loadCards(); refreshPlan(); refreshFiles(); }, [loadCards, refreshPlan, refreshFiles]);
   useEffect(() => client.subscribeExtNotification((method, params) => {
     const sid = (params as { sessionId?: string })?.sessionId;
     if (method === '_hearth/plan_changed' && sid === client.sessionId) refreshPlan();
     if (method === '_hearth/cards_changed') loadCards();
-  }), [client, refreshPlan, loadCards]);
+    if (method === '_hearth/files_changed' && sid === client.sessionId) refreshFiles();
+  }), [client, refreshPlan, loadCards, refreshFiles]);
   useEffect(() => client.subscribeSessionUpdate((_sid, update) => {
     const c = cardOf(update);
     if (!c || c.answerable === 'permission') return;
@@ -113,7 +133,7 @@ function useThreadExtras(client: AcpClient): Extras {
     if (r?.card) { setCards((cs) => mergeCard(cs, { ...card, ...r.card })); linger(r.card); }
   }, [client, linger]);
 
-  return { sessionId, supported, cards, answer, plan, planLoading, refreshPlan };
+  return { sessionId, supported, cards, answer, plan, planLoading, refreshPlan, files, filesSupported, filesLoading, refreshFiles, readFile };
 }
 
 const ExtrasContext = createContext<Extras | null>(null);
@@ -141,7 +161,11 @@ function Runtime({ client, events, actionsEl }: { client: AcpClient; events: Thr
   const wide = useWide();
   const hasPlan = !!extras.plan?.text;
   const planOpen = extras.supported && !!extras.sessionId && (pref ? pref === 'open' : hasPlan && wide);
-  const togglePlan = () => { const v = planOpen ? 'closed' : 'open'; setPref(v); setPlanPref(extras.sessionId, v); };
+  const [tab, setTab] = useState<'plan' | 'files'>('plan');
+  const setOpen = (v: 'open' | 'closed') => { setPref(v); setPlanPref(extras.sessionId, v); };
+  /** The header buttons: open the panel on that tab, or close it when it already shows that tab. */
+  const show = (t: 'plan' | 'files') => { if (planOpen && tab === t) setOpen('closed'); else { setTab(t); setOpen('open'); } };
+  const nFiles = extras.files?.length ?? 0;
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ExtrasContext.Provider value={extras}>
@@ -150,15 +174,24 @@ function Runtime({ client, events, actionsEl }: { client: AcpClient; events: Thr
           <div className="relative min-w-0 flex-1">
             <Thread components={components} />
           </div>
-          {planOpen && <PlanPanel extras={extras} onClose={togglePlan} />}
+          {planOpen && <SidePanel extras={extras} tab={extras.filesSupported ? tab : 'plan'} onTab={setTab} onClose={() => setOpen('closed')} />}
         </div>
         {actionsEl && extras.supported && extras.sessionId && createPortal(
-          <button onClick={togglePlan} aria-pressed={planOpen} title={planOpen ? 'Hide the plan' : 'Show the plan'}
-            className={cn('flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground', planOpen && 'text-foreground')}>
-            {planOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
-            <span className="max-sm:sr-only">Plan</span>
-            {hasPlan && !planOpen && <span className="size-1.5 rounded-full bg-primary" aria-label="has a plan" />}
-          </button>, actionsEl)}
+          <>
+            {extras.filesSupported && (
+              <button onClick={() => show('files')} aria-pressed={planOpen && tab === 'files'} title="Files this thread made"
+                className={cn('flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground', planOpen && tab === 'files' && 'bg-accent text-foreground')}>
+                <FolderOpen className="size-4" /><span className="max-sm:sr-only">Files</span>
+                {nFiles > 0 && <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium">{nFiles}</span>}
+              </button>
+            )}
+            <button onClick={() => show('plan')} aria-pressed={planOpen && tab === 'plan'} title={planOpen && tab === 'plan' ? 'Hide the plan' : 'Show the plan'}
+              className={cn('flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground', planOpen && tab === 'plan' && 'bg-accent text-foreground')}>
+              {planOpen && tab === 'plan' ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
+              <span className="max-sm:sr-only">Plan</span>
+              {hasPlan && !(planOpen && tab === 'plan') && <span className="size-1.5 rounded-full bg-primary" aria-label="has a plan" />}
+            </button>
+          </>, actionsEl)}
       </ExtrasContext.Provider>
     </AssistantRuntimeProvider>
   );
@@ -171,26 +204,52 @@ function useWide() {
   return wide;
 }
 
-/** The thread's living plan: the plan file in the project folder, rendered, updating when the agent changes it. */
-function PlanPanel({ extras, onClose }: { extras: Extras; onClose: () => void }) {
+/**
+ * Beside the chat: the thread's living plan (the plan file, rendered, updating when the agent changes it) and the
+ * files the thread made (artifacts), with a preview.
+ */
+function SidePanel({ extras, tab, onTab, onClose }: { extras: Extras; tab: 'plan' | 'files'; onTab: (t: 'plan' | 'files') => void; onClose: () => void }) {
   const { plan, planLoading, refreshPlan } = extras;
+  const [open, setOpen] = useState<FileItem | null>(null);
+  // A file reopens fresh when the agent changes it again.
+  const current = open ? extras.files?.find((f) => f.path === open.path) ?? open : null;
+  const wideFile = tab === 'files' && !!current;
   return (
-    <aside aria-label="Plan" className="flex w-[22rem] shrink-0 flex-col border-l bg-sidebar/40 max-lg:w-80 max-md:fixed max-md:inset-0 max-md:z-30 max-md:w-full max-md:border-l-0 max-md:bg-background max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)]">
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b px-4">
-        <ListChecks className="size-4 text-muted-foreground" />
-        <span className="text-sm font-medium">Plan</span>
-        {planLoading && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+    <aside aria-label={tab === 'plan' ? 'Plan' : 'Files'} className={cn(wideFile && 'lg:w-[34rem]', "flex w-[22rem] shrink-0 flex-col border-l bg-sidebar/40 max-lg:w-80 max-md:fixed max-md:inset-0 max-md:z-30 max-md:w-full max-md:border-l-0 max-md:bg-background max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)]")}>
+      <div className="flex h-11 shrink-0 items-center gap-1 border-b px-2">
+        <div role="tablist" className="flex items-center gap-0.5">
+          <TabBtn on={tab === 'plan'} onClick={() => onTab('plan')}><ListChecks className="size-4" />Plan</TabBtn>
+          {extras.filesSupported && <TabBtn on={tab === 'files'} onClick={() => onTab('files')}><FolderOpen className="size-4" />Files{extras.files?.length ? <span className="text-xs text-muted-foreground">{extras.files.length}</span> : null}</TabBtn>}
+        </div>
+        {(tab === 'plan' ? planLoading : extras.filesLoading) && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
         <div className="ml-auto flex items-center gap-0.5">
-          <button onClick={refreshPlan} title="Read the plan again" aria-label="Read the plan again" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><RefreshCw className="size-3.5" /></button>
-          <button onClick={onClose} title="Hide the plan" aria-label="Hide the plan" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><PanelRightClose className="size-4" /></button>
+          {tab === 'plan' && <button onClick={refreshPlan} title="Read the plan again" aria-label="Read the plan again" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><RefreshCw className="size-3.5" /></button>}
+          <button onClick={onClose} title="Hide the panel" aria-label="Hide the panel" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><PanelRightClose className="size-4" /></button>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        {plan?.text ? <Markdown text={plan.text} />
-          : <p className="text-sm text-muted-foreground">{plan?.note ?? (planLoading ? 'Reading the plan…' : 'No plan yet.')}</p>}
-      </div>
-      {plan?.path && <div className="truncate border-t px-4 py-2 font-mono text-[11px] text-muted-foreground" title={plan.path}>{plan.path}</div>}
+      {tab === 'plan' ? (
+        <>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+            {plan?.text ? <Markdown text={plan.text} />
+              : <p className="text-sm text-muted-foreground">{plan?.note ?? (planLoading ? 'Reading the plan…' : 'No plan yet.')}</p>}
+          </div>
+          {plan?.path && <div className="truncate border-t px-4 py-2 font-mono text-[11px] text-muted-foreground" title={plan.path}>{plan.path}</div>}
+        </>
+      ) : current ? (
+        <div className="min-h-0 flex-1"><FileView file={current} read={extras.readFile} onBack={() => setOpen(null)} /></div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto"><FilesList files={extras.files} loading={extras.filesLoading} onOpen={setOpen} onRefresh={extras.refreshFiles} /></div>
+      )}
     </aside>
+  );
+}
+
+function TabBtn({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button role="tab" aria-selected={on} onClick={onClick}
+      className={cn('flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm', on ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground')}>
+      {children}
+    </button>
   );
 }
 
