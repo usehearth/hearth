@@ -15,8 +15,17 @@ export interface ProjectView {
   planFirst: boolean;
   tools: string[];
   instructions: string | null;
+  /** Permission rules (servers with the `permissions` extension). */
+  permissions?: { mode: string; allow: string[]; deny: string[]; defaults: string[]; alwaysDenied: string[] };
   canEdit: boolean;
 }
+
+const MODES = [
+  { id: 'default', name: 'Ask', sub: 'Asks before anything not allowed below' },
+  { id: 'acceptEdits', name: 'Accept edits', sub: 'Edits inside the project without asking' },
+  { id: 'plan', name: 'Plan', sub: 'Reads and plans; changes nothing' },
+];
+const lines = (t: string) => t.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
 
 type Request = <T = unknown>(method: string, params?: unknown) => Promise<T>;
 
@@ -32,6 +41,9 @@ export function ProjectSettings({ project, request }: { project: string; request
   const [order, setOrder] = useState<string[]>([]);
   const [planFirst, setPlanFirst] = useState(false);
   const [instructions, setInstructions] = useState('');
+  const [mode, setMode] = useState('default');
+  const [allowText, setAllowText] = useState('');
+  const [denyText, setDenyText] = useState('');
 
   const fill = (v: ProjectView) => {
     setView(v);
@@ -41,6 +53,9 @@ export function ProjectSettings({ project, request }: { project: string; request
     setOrder(v.providers ?? v.availableProviders.map((p) => p.name));
     setPlanFirst(v.planFirst);
     setInstructions(v.instructions ?? '');
+    setMode(v.permissions?.mode ?? 'default');
+    setAllowText((v.permissions?.allow ?? []).join('\n'));
+    setDenyText((v.permissions?.deny ?? []).join('\n'));
   };
   useEffect(() => {
     setView(null); setErr(null); setSaved(false);
@@ -53,7 +68,8 @@ export function ProjectSettings({ project, request }: { project: string; request
     try {
       const m: Record<string, string | null> = {};
       for (const r of view!.roles) m[r.role] = models[r.role]?.trim() || null;
-      fill(await request<ProjectView>('_hearth/project/update', { project, name, models: m, providers: allProviders ? null : order, planFirst, ...(view!.instructions !== null ? { instructions } : {}) }));
+      fill(await request<ProjectView>('_hearth/project/update', { project, name, models: m, providers: allProviders ? null : order, planFirst, ...(view!.instructions !== null ? { instructions } : {}),
+        ...(view!.permissions ? { permissions: { mode, allow: lines(allowText), deny: lines(denyText) } } : {}) }));
       setSaved(true);
     } catch (e2) { setErr(errorText(e2)); } finally { setBusy(false); }
   };
@@ -135,6 +151,26 @@ export function ProjectSettings({ project, request }: { project: string; request
             <span>Plan first<span className="block text-xs text-muted-foreground">Workers write a spec for your OK before they build.</span></span>
           </label>
         </Section>
+
+        {view.permissions && (
+          <Section title="Permissions" sub="What agents may do without asking. Threads can change their own mode; “Always allow” on a prompt adds a rule here (project) or to the thread.">
+            <div role="radiogroup" aria-label="Mode new threads start in" className="grid grid-cols-3 gap-2 max-sm:grid-cols-1">
+              {MODES.map((m) => (
+                <button type="button" key={m.id} role="radio" aria-checked={mode === m.id} onClick={() => setMode(m.id)}
+                  className={cn('rounded-xl border bg-card px-3 py-2 text-left text-sm hover:bg-accent', mode === m.id && 'border-primary ring-2 ring-primary/20')}>
+                  <span className="font-medium">{m.name}</span><span className="block text-xs text-muted-foreground">{m.sub}</span>
+                </button>
+              ))}
+            </div>
+            <label className="mt-3 block text-xs font-medium text-muted-foreground" htmlFor="perm-allow">Also allowed (one rule per line)</label>
+            <textarea id="perm-allow" value={allowText} onChange={(e) => setAllowText(e.target.value)} rows={4} spellCheck={false}
+              placeholder={'Bash(npm test:*)\nWebFetch(domain:docs.example.com)\nmcp__server__tool'} className={cn(inputCls, 'font-mono text-xs')} />
+            <label className="mt-3 block text-xs font-medium text-muted-foreground" htmlFor="perm-deny">Never allowed (one rule per line)</label>
+            <textarea id="perm-deny" value={denyText} onChange={(e) => setDenyText(e.target.value)} rows={3} spellCheck={false}
+              placeholder="Bash(curl:*)" className={cn(inputCls, 'font-mono text-xs')} />
+            <p className="mt-2 text-xs text-muted-foreground">Always allowed: <span className="font-mono">{view.permissions.defaults.join(', ')}</span>. Always refused: <span className="font-mono">{view.permissions.alwaysDenied.join(', ')}</span>.</p>
+          </Section>
+        )}
 
         {view.tools.length > 0 && (
           <Section title="Tools" sub="Set on the server.">

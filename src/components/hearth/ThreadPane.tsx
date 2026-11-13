@@ -145,8 +145,8 @@ function useThreadExtras(client: AcpClient): Extras {
   const loadCards = useCallback(() => {
     if (!sessionId || !connected) return;
     client.extRequest<{ cards: CardEntry[] }>('_hearth/cards', { sessionId }).then((r) => {
-      // Permission prompts of this thread's own agent show in the chat (ACP request_permission), not as cards here.
-      const open = (r.cards ?? []).map((e) => e.card).filter((c) => c.answerable !== 'permission');
+      // Permission prompts are cards too: during this window's own turn they show in the chat instead (AboveComposer).
+      const open = (r.cards ?? []).map((e) => e.card);
       const ids = new Set(open.map((c) => c.id));
       setCards((prev) => [...open, ...prev.filter((c) => c.status !== 'open' && !ids.has(c.id))]);
     }, unsupported);
@@ -177,7 +177,7 @@ function useThreadExtras(client: AcpClient): Extras {
   }), [client, refreshPlan, loadCards, refreshFiles]);
   useEffect(() => client.subscribeSessionUpdate((_sid, update) => {
     const c = cardOf(update);
-    if (!c || c.answerable === 'permission') return;
+    if (!c) return;
     setCards((cs) => mergeCard(cs, c));
     linger(c);
   }), [client, linger]);
@@ -323,7 +323,10 @@ function TabBtn({ on, onClick, children }: { on: boolean; onClick: () => void; c
 /** Above the composer: the thread's open cards, then this turn's checklist. */
 function AboveComposer() {
   const x = useContext(ExtrasContext);
-  const cards = x?.cards ?? [];
+  // A permission prompt shows in the chat while this window runs the turn; otherwise (another window's turn, after a
+  // reload or reconnect) it shows here as a card, with the same answers, Always allow included.
+  const running = useAuiState((s) => s.thread.isRunning);
+  const cards = (x?.cards ?? []).filter((c) => c.answerable !== 'permission' || !running || c.status !== 'open');
   return (
     <>
       {cards.length > 0 && (
