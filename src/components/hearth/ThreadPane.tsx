@@ -4,7 +4,7 @@
 // the thread's open cards (`_meta.hearth.card`, answered with `_hearth/card/answer`) and this turn's checklist (ACP plan).
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AssistantRuntimeProvider, useAuiState } from '@assistant-ui/react';
+import { AssistantRuntimeProvider, useAuiState, WebSpeechDictationAdapter, WebSpeechSynthesisAdapter } from '@assistant-ui/react';
 import { Bot, ChevronDown, Circle, FolderOpen, CircleCheck, CircleDot, ListChecks, Loader2, PanelRightClose, PanelRightOpen, RefreshCw } from 'lucide-react';
 import { AcpClient, useAcpPlan, useAcpRuntime, useAcpSessionTitle } from '@/vendor/acp';
 import type { AcpWebSocketLike } from '@/vendor/acp/AcpClient';
@@ -12,6 +12,7 @@ import { Thread, type ThreadComponents } from '@/components/assistant-ui/element
 import { CardView } from '@/components/hearth/CardView';
 import { UsageMeter } from '@/components/hearth/UsageMeter';
 import { TasksList } from '@/components/hearth/TasksPanel';
+import { ExportThread } from '@/components/hearth/ExportThread';
 import { ComposerBar } from '@/components/hearth/ComposerBar';
 import { notify } from '@/lib/notify';
 import { MessageActionsContext } from '@/components/hearth/messageActions';
@@ -271,6 +272,12 @@ function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClie
       await fork(turn, message ? textOf(message.content) : '', false, restoreFiles, replace);
     },
   }), [fork]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Voice: dictation into the composer and reading answers aloud, where the browser or webview has Web Speech.
+  const speech = useMemo(() => ({
+    ...(WebSpeechDictationAdapter.isSupported?.() ? { dictation: new WebSpeechDictationAdapter() } : {}),
+    ...(typeof window !== 'undefined' && 'speechSynthesis' in window ? { speech: new WebSpeechSynthesisAdapter() } : {}),
+  }), []);
+  const title = useAcpSessionTitle();
   // "!command": a shell command in this thread (servers with the shell extension; the thread must exist).
   const shell = useMemo(() => {
     const ext = client.initializeMeta?.hearth?.extensions;
@@ -290,7 +297,7 @@ function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClie
   // Messages typed while the agent works, sent in order when it finishes.
   const [queue, setQueue] = useState<string[]>([]);
   const queueApi = useMemo(() => ({ items: queue, add: (t: string) => setQueue((q) => [...q, t]), remove: (i: number) => setQueue((q) => q.filter((_, j) => j !== i)) }), [queue]);
-  const runtime = useAcpRuntime({ client, permissions: 'ask', onError: (e) => ev.current.onError(e.message), adapters: { attachments }, onEdit, onReload });
+  const runtime = useAcpRuntime({ client, permissions: 'ask', onError: (e) => ev.current.onError(e.message), adapters: { attachments, ...speech }, onEdit, onReload });
   runtimeRef.current = runtime;
   // When the agent finishes, the next queued message goes (once: a send in flight waits until the run has started).
   const queueRef = useRef(queue);
@@ -360,6 +367,7 @@ function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClie
         </MessageActionsContext.Provider>
         {actionsEl && extras.supported && extras.sessionId && createPortal(
           <>
+            <ExportThread title={title ?? ''} />
             {extras.filesSupported && (
               <button onClick={() => show('files')} aria-pressed={planOpen && tab === 'files'} title="Files this thread made"
                 className={cn('flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground', planOpen && tab === 'files' && 'bg-accent text-foreground')}>

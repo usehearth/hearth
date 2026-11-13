@@ -55,3 +55,19 @@ describe('slash menu', () => {
     expect(matchCommands(cmds, '').length).toBe(4);
   });
 });
+
+import { threadMarkdown } from './ExportThread';
+describe('export', () => {
+  it('writes the thread as Markdown, with tool calls and diffs', () => {
+    const md = threadMarkdown('Greet', [
+      { role: 'user', content: [{ type: 'text', text: 'add a flag' }] },
+      { role: 'assistant', content: [{ type: 'tool-call', toolName: 'edit', providerMetadata: { acp: { title: 'Edit a.ts', content: [{ type: 'diff', path: 'a.ts', oldText: 'one\n', newText: 'two\n' }] } } }, { type: 'text', text: 'Done.' }] },
+    ]);
+    expect(md).toContain('# Greet');
+    expect(md).toContain('## You');
+    expect(md).toContain('- **Edit a.ts**');
+    expect(md).toContain('-one');
+    expect(md).toContain('+two');
+    expect(md).toContain('Done.');
+  });
+});

@@ -108,6 +108,7 @@ export function ExtensionsPage({ request }: { request: Request }) {
       <SectionHead title="Extensions" sub="Your own skills, slash commands, subagents, hooks and output styles. They reach every project's agents (or one project's). A repo's own .claude folder is never used."
         action={<Button size="sm" onClick={() => setEdit({ kind: 'command', scope: 'global', enabled: true, name: '', content: '' })}>Add</Button>} />
       {error && <p className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
+      <PluginImport request={request} onDone={load} onError={setError} />
       {edit && (
         <div className="mb-4 space-y-2 rounded-xl border bg-card p-3 text-sm">
           <div className="flex flex-wrap gap-2">
@@ -293,6 +294,50 @@ export function SchedulesPage({ request }: { request: Request }) {
           </ul>
         </>
       )}
+    </div>
+  );
+}
+
+/** Install a Claude Code plugin from GitHub: preview what it holds, then install (hooks need their own tick). */
+function PluginImport({ request, onDone, onError }: { request: Request; onDone: () => void; onError: (m: string) => void }) {
+  const [url, setUrl] = useState('');
+  const [scope, setScope] = useState('global');
+  const [preview, setPreview] = useState<{ plugin: string; found: { kind: string; name: string; description: string | null }[] } | null>(null);
+  const [hooks, setHooks] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const look = async () => {
+    setBusy(true); setPreview(null); setDone(null);
+    try { setPreview(await request('_hearth/extensions/import', { url: url.trim() })); } catch (e) { onError(errorText(e)); } finally { setBusy(false); }
+  };
+  const install = async () => {
+    if (hooks && !window.confirm('This plugin\'s hooks run shell commands as the agent on every matching tool call. Install them?')) return;
+    setBusy(true);
+    try {
+      const r = await request<{ saved: string[]; skipped: string[] }>('_hearth/extensions/import', { url: url.trim(), install: true, scope, confirmHooks: hooks });
+      setDone(`Installed ${r.saved.length}${r.skipped.length ? `, left out ${r.skipped.length}` : ''}.`); setPreview(null); onDone();
+    } catch (e) { onError(errorText(e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="mb-4 rounded-xl border bg-card p-3 text-sm">
+      <div className="font-medium">Install a plugin from GitHub</div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/owner/repo" aria-label="Plugin repository" className="h-9 min-w-56 flex-1 rounded-md border bg-background px-3 font-mono text-xs" />
+        <Button size="sm" variant="outline" disabled={!url.trim() || busy} onClick={() => void look()}>{busy && !preview && <Loader2 className="size-3.5 animate-spin" />}Look</Button>
+      </div>
+      {preview && (
+        <div className="mt-2 space-y-2">
+          <p className="text-xs text-muted-foreground">{preview.plugin}: {preview.found.length ? preview.found.map((f) => `${KIND_LABEL[f.kind] ?? f.kind} ${f.name}`).join(', ') : 'nothing Hearth can use'}</p>
+          {preview.found.some((f) => f.kind === 'hook') && (
+            <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={hooks} onChange={(e) => setHooks(e.target.checked)} className="size-4 accent-primary" />Also install its hooks (they run commands)</label>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <input value={scope} onChange={(e) => setScope(e.target.value)} aria-label="For" placeholder="global or a project" className="h-8 w-40 rounded-md border bg-background px-2 text-xs" />
+            <Button size="sm" disabled={!preview.found.length || busy} onClick={() => void install()}>{busy && <Loader2 className="size-3.5 animate-spin" />}Install</Button>
+          </div>
+        </div>
+      )}
+      {done && <p className="mt-2 text-xs text-muted-foreground">{done}</p>}
     </div>
   );
 }

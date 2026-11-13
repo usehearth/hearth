@@ -66,6 +66,8 @@ import {
   PlayIcon,
   ThumbsDownIcon,
   ThumbsUpIcon,
+  Volume2Icon,
+  VolumeXIcon,
 } from "lucide-react";
 import {
   createContext,
@@ -827,6 +829,17 @@ const AssistantActionBar: FC = () => {
           </AuiIf>
         </TooltipIconButton>
       </ActionBarPrimitive.Copy>
+      {/* Hearth: read the answer aloud (Web Speech), and stop. */}
+      <AuiIf condition={(s) => s.thread.capabilities.speech && s.message.speech == null}>
+        <ActionBarPrimitive.Speak asChild>
+          <TooltipIconButton tooltip="Read aloud"><Volume2Icon /></TooltipIconButton>
+        </ActionBarPrimitive.Speak>
+      </AuiIf>
+      <AuiIf condition={(s) => s.thread.capabilities.speech && s.message.speech != null}>
+        <ActionBarPrimitive.StopSpeaking asChild>
+          <TooltipIconButton tooltip="Stop reading"><VolumeXIcon /></TooltipIconButton>
+        </ActionBarPrimitive.StopSpeaking>
+      </AuiIf>
       <AuiIf condition={(s) => s.thread.capabilities.feedback}>
         <ActionBarPrimitive.FeedbackPositive asChild>
           <TooltipIconButton
