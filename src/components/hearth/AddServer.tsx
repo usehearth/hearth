@@ -1,3 +1,4 @@
+import { assetUrl } from '@/lib/hostBridge';
 import { useState } from 'react';
 import { KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 import { ClientApp, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
@@ -41,7 +42,7 @@ export function AddServer({ first, onDone, onCancel }: { first: boolean; onDone:
   return (
     <div className="grid h-full place-items-center bg-background p-6">
       <form onSubmit={submit} className="w-full max-w-md">
-        <img src="/logo.svg" alt="" className="mx-auto size-16 rounded-2xl shadow-md" />
+        <img src={assetUrl('logo.svg')} alt="" className="mx-auto size-16 rounded-2xl shadow-md" />
         <h1 className="mt-5 text-center text-2xl font-semibold tracking-tight">{first ? 'Welcome to Hearth' : 'Add a server'}</h1>
         <p className="mt-1.5 text-center text-sm text-muted-foreground">Connect to the server that keeps your chats. Any ACP server works.</p>
         <div className="mt-7 space-y-4 rounded-2xl border bg-card p-5 shadow-sm">

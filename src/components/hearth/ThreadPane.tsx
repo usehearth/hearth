@@ -58,8 +58,10 @@ export interface ThreadEvents {
 /** What a fork opens with: a message sent at once (Edit, Regenerate) or put in the composer (Rewind). */
 export interface FirstMessage { text: string; send: boolean }
 
-export function ThreadPane({ url, serverKey, target, events, actionsEl, first }: {
+export function ThreadPane({ url, serverKey, target, events, actionsEl, first, insert }: {
   url: string; serverKey: string; target: ThreadTarget; events: ThreadEvents; first?: FirstMessage;
+  /** Text from the editor (VS Code: Send selection) to add to the composer; n changes for each new one. */
+  insert?: { text: string; n: number } | null;
   /** Where the thread's header buttons go (the plan toggle). */
   actionsEl?: HTMLElement | null;
 }) {
@@ -115,7 +117,7 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first }:
             : <><Loader2 className="size-3 animate-spin" />Reconnecting…</>}
         </div>
       )}
-      <Runtime key={gen} client={client} events={events} actionsEl={actionsEl} first={gen === 0 ? first : undefined} />
+      <Runtime key={gen} client={client} events={events} actionsEl={actionsEl} first={gen === 0 ? first : undefined} insert={insert} />
     </div>
   );
 }
@@ -224,7 +226,7 @@ function ComposerExtra() {
   return <ComposerBar client={x.client} onError={x.onError} />;
 }
 
-function Runtime({ client, events, actionsEl, first }: { client: AcpClient; events: ThreadEvents; actionsEl?: HTMLElement | null; first?: FirstMessage }) {
+function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClient; events: ThreadEvents; actionsEl?: HTMLElement | null; first?: FirstMessage; insert?: { text: string; n: number } | null }) {
   const ev = useRef(events);
   ev.current = events;
   // Images and text files, as this server takes them (its promptCapabilities); a refused file says why.
@@ -271,6 +273,12 @@ function Runtime({ client, events, actionsEl, first }: { client: AcpClient; even
   const runtime = useAcpRuntime({ client, permissions: 'ask', onError: (e) => ev.current.onError(e.message), adapters: { attachments }, onEdit, onReload });
   runtimeRef.current = runtime;
   // A fork opens with its first message: sent (Edit, Regenerate) or ready in the composer (Rewind).
+  // Text from the editor goes at the end of whatever is being typed.
+  useEffect(() => {
+    if (!insert) return;
+    const cur = runtime.thread.composer.getState().text;
+    runtime.thread.composer.setText(cur ? `${cur.replace(/\s*$/, '')}\n\n${insert.text}` : insert.text);
+  }, [insert?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   const firstDone = useRef(false);
   const loaded = useAuiStateOf(runtime, client);
   useEffect(() => {

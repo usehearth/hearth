@@ -2,6 +2,7 @@
 // being looked at, and only if the owner turned them on (Settings > Appearance). The desktop app uses the OS
 // notification centre (Tauri plugin); the web build uses the browser's Notification API.
 import { isDesktop } from './servers';
+import { assetUrl } from './hostBridge';
 
 const PREF = 'hearth.notify.v1';
 
@@ -46,6 +47,6 @@ export async function notify(title: string, body: string, tag?: string, onClick?
     n.sendNotification({ title, body: text });
     return;
   }
-  const note = new Notification(title, { body: text, tag, icon: '/logo.svg' });
+  const note = new Notification(title, { body: text, tag, icon: assetUrl('logo.svg') });
   note.onclick = () => { window.focus(); onClick?.(); note.close(); };
 }

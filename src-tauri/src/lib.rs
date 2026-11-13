@@ -37,11 +37,36 @@ fn key_delete(server_id: String) -> Result<(), String> {
     }
 }
 
+/// Release builds: look for a newer signed release once at start; install it in the background and say so (the new
+/// version runs from the next start). Any failure is quiet: the app works the same without it.
+#[cfg(feature = "updater")]
+fn check_for_update(app: tauri::AppHandle) {
+    use tauri_plugin_notification::NotificationExt;
+    use tauri_plugin_updater::UpdaterExt;
+    tauri::async_runtime::spawn(async move {
+        let Ok(updater) = app.updater() else { return };
+        let Ok(Some(update)) = updater.check().await else { return };
+        let version = update.version.clone();
+        if update.download_and_install(|_, _| {}, || {}).await.is_ok() {
+            let _ = app.notification().builder().title("Hearth updated")
+                .body(format!("Version {version} is ready. Restart Hearth to use it.")).show();
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_opener::init());
+    #[cfg(feature = "updater")]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    builder
+        .setup(|_app| {
+            #[cfg(feature = "updater")]
+            check_for_update(_app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![key_get, key_set, key_delete])
         .run(tauri::generate_context!())
         .expect("error while running Hearth");

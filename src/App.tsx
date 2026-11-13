@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { notify } from '@/lib/notify';
+import { assetUrl, hostReady, onHostEvent } from '@/lib/hostBridge';
 import { Archive, BellDot, Briefcase, ChevronDown, Lock, Menu, Settings as SettingsIcon, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -85,6 +86,16 @@ export default function App() {
     open(known ?? { sessionId: h.sessionId, title: h.title, cwd: '', updatedAt: h.updatedAt, project: h.project, projectName: h.project, kind: 'work', status: null, runnerOnline: null, pinned: false, openCards: 0 });
   }, [dir, open]);
   const refresh = dir.state === 'ready' ? dir.refresh : undefined;
+  // VS Code: the editor opens a thread or puts a selection in the composer (packages/vscode).
+  const [insert, setInsert] = useState<{ text: string; n: number } | null>(null);
+  useEffect(() => {
+    const off = onHostEvent((e) => {
+      if (e.type === 'hearth.openThread') setTarget({ id: e.sessionId, sessionId: e.sessionId, t: { kind: 'open', sessionId: e.sessionId, cwd: '' }, title: 'Thread' });
+      else setInsert((cur) => ({ text: e.text, n: (cur?.n ?? 0) + 1 }));
+    });
+    hostReady();
+    return off;
+  }, []);
   const events = useMemo(() => ({
     onError: (m: string) => setError(m),
     onSession: (sessionId: string) => setTarget((t) => {
@@ -115,7 +126,7 @@ export default function App() {
           'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-[85vw] max-md:max-w-80 max-md:shadow-2xl max-md:transition-transform max-md:duration-200',
           !navOpen && 'max-md:-translate-x-full')} aria-label="Threads">
           <div className="flex items-center gap-2.5 px-4 pt-4 pb-3">
-            <img src="/logo.svg" alt="" className="size-7 rounded-lg shadow-sm" />
+            <img src={assetUrl('logo.svg')} alt="" className="size-7 rounded-lg shadow-sm" />
             <span className="text-[15px] font-semibold tracking-tight">Hearth</span>
             <div className="ml-auto flex items-center gap-0.5">
               <IconBtn label={dark ? 'Light mode' : 'Dark mode'} onClick={toggle}>{dark ? <Sun className="size-4" /> : <MoonStar className="size-4" />}</IconBtn>
@@ -233,7 +244,7 @@ export default function App() {
           {/* The open thread stays mounted behind the needs-you view, so going back keeps its place. */}
           <div className={cn('min-h-0 flex-1', view !== 'thread' && 'hidden')}>
             {target && server && key
-              ? <ThreadPane key={target.id} url={server.url} serverKey={key} target={target.t} events={events} actionsEl={actionsEl} first={target.first} />
+              ? <ThreadPane key={target.id} url={server.url} serverKey={key} target={target.t} events={events} actionsEl={actionsEl} first={target.first} insert={insert} />
               : <Welcome />}
           </div>
         </main>
@@ -351,7 +362,7 @@ function Welcome() {
   return (
     <div className="grid h-full place-items-center p-8 text-center">
       <div>
-        <img src="/logo.svg" alt="" className="mx-auto size-14 rounded-2xl shadow-md" />
+        <img src={assetUrl('logo.svg')} alt="" className="mx-auto size-14 rounded-2xl shadow-md" />
         <h1 className="mt-4 text-xl font-semibold tracking-tight">Your AI, at home</h1>
         <p className="mt-1 text-sm text-muted-foreground">Pick a thread from the list, or start a new one with the + next to a project.</p>
       </div>

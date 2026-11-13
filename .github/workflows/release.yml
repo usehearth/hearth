@@ -1,0 +1,78 @@
+# Desktop release: a tag v* builds Hearth for Windows, macOS and Linux and makes a draft GitHub release with the
+# installers and the signed update manifest (latest.json) the app's updater reads.
+#
+# Secrets (repository settings > Secrets and variables > Actions). Without them the builds still work, unsigned:
+#   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD   updater key (npx tauri signer generate); its public
+#                                                                  half goes in src-tauri/tauri.release.conf.json
+#   WINDOWS_CERTIFICATE (base64 .pfx), WINDOWS_CERTIFICATE_PASSWORD  code signing for Windows (also set
+#                                                                  bundle.windows.certificateThumbprint in tauri.release.conf.json)
+#   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+#   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID                           signing and notarizing for macOS
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: ''
+          - os: macos-latest
+            args: '--target universal-apple-darwin'
+          - os: ubuntu-22.04
+            args: ''
+    runs-on: ${{ matrix.os }}
+    env:
+      # Secrets can't be read in an 'if', so say here whether one is set.
+      HAS_WIN_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - name: Linux packages
+        if: matrix.os == 'ubuntu-22.04'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libsecret-1-dev
+      - name: Windows code signing certificate
+        if: matrix.os == 'windows-latest' && env.HAS_WIN_CERT == 'true'
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'cert.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force) | Out-Null
+          Remove-Item $pfx
+      - run: npm ci
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Hearth ${{ github.ref_name }}'
+          releaseBody: 'See the changelog in the repository.'
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+          args: ${{ matrix.args }} --features updater --config src-tauri/tauri.release.conf.json
