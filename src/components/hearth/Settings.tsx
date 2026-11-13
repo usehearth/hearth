@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Check, CircleAlert, KeyRound, Laptop, Loader2, MoonStar, Palette, Pencil, Plus, Radio, RefreshCw, Server as ServerIcon, Sparkles, Sun, Trash2, X, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { KeyPrompt } from '@/components/hearth/AddServer';
+import { DeviceKeys, ProviderForm } from '@/components/hearth/AdminSettings';
 import type { DirectoryState } from '@/lib/directory';
 import { forgetKey, isDesktop, keyFor, removeServer, renameServer, type Server } from '@/lib/servers';
 import { setThemeMode, useThemeMode, type ThemeMode } from '@/lib/theme';
@@ -57,11 +58,11 @@ function H({ title, sub }: { title: string; sub?: string }) {
 // ---------- servers and keys ----------
 
 function Servers({ servers, server, dir, onAdd, onUse, onKeyChanged }: { servers: Server[]; server?: Server; dir: DirectoryState; onAdd: () => void; onUse: (id: string) => void; onKeyChanged: () => void }) {
-  const [device, setDevice] = useState<{ name: string; workDevice: boolean } | null>(null);
+  const [device, setDevice] = useState<{ name: string; workDevice: boolean; admin?: boolean } | null>(null);
   const ready = dir.state === 'ready' ? dir : null;
   useEffect(() => {
     setDevice(null);
-    if (ready?.extensions.includes('device')) void ready.request<{ name: string; workDevice: boolean }>('_hearth/device').then(setDevice, () => {});
+    if (ready?.extensions.includes('device')) void ready.request<{ name: string; workDevice: boolean; admin?: boolean }>('_hearth/device').then(setDevice, () => {});
   }, [ready?.request]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
@@ -71,12 +72,14 @@ function Servers({ servers, server, dir, onAdd, onUse, onKeyChanged }: { servers
           device={s.id === server?.id ? device : null} onUse={() => onUse(s.id)} onKeyChanged={onKeyChanged} />)}
       </div>
       <Button variant="outline" className="mt-4" onClick={onAdd}><Plus className="size-4" />Add a server</Button>
-      <p className="mt-6 text-xs text-muted-foreground">Device keys are made and revoked on the server. Revoking one there disconnects it here at once.</p>
+      {device?.admin && ready ? <DeviceKeys request={ready.request} /> : (
+        <p className="mt-6 text-xs text-muted-foreground">Device keys are made and revoked on the server's page (or from an admin device). Revoking one disconnects it at once.</p>
+      )}
     </>
   );
 }
 
-function ServerRow({ s, current, dir, device, onUse, onKeyChanged }: { s: Server; current: boolean; dir?: DirectoryState; device: { name: string; workDevice: boolean } | null; onUse: () => void; onKeyChanged: () => void }) {
+function ServerRow({ s, current, dir, device, onUse, onKeyChanged }: { s: Server; current: boolean; dir?: DirectoryState; device: { name: string; workDevice: boolean; admin?: boolean } | null; onUse: () => void; onKeyChanged: () => void }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(s.name);
   const [keyOpen, setKeyOpen] = useState(false);
@@ -106,7 +109,7 @@ function ServerRow({ s, current, dir, device, onUse, onKeyChanged }: { s: Server
             {state && <><dt className="text-muted-foreground">Status</dt><dd>{state}</dd></>}
             <dt className="text-muted-foreground">Device key</dt>
             <dd className="flex items-center gap-1.5">{hasKey ? <><KeyRound className="size-3.5 text-muted-foreground" />{isDesktop ? 'In the system keychain' : 'In memory for this window'}</> : <span className="text-muted-foreground">Not set</span>}</dd>
-            {device && <><dt className="text-muted-foreground">This device</dt><dd className="flex items-center gap-1.5"><Laptop className="size-3.5 text-muted-foreground" />{device.name}{device.workDevice && <span className="text-xs text-muted-foreground">· work device</span>}</dd></>}
+            {device && <><dt className="text-muted-foreground">This device</dt><dd className="flex items-center gap-1.5"><Laptop className="size-3.5 text-muted-foreground" />{device.name}{device.workDevice && <span className="text-xs text-muted-foreground">· work device</span>}{device.admin && <span className="text-xs text-muted-foreground">· admin device</span>}</dd></>}
           </dl>
           {keyOpen && <div className="-mx-1"><KeyPrompt server={s} onSaved={() => { setKeyOpen(false); onKeyChanged(); }} /></div>}
           <div className="mt-3 flex flex-wrap gap-2">
@@ -139,12 +142,24 @@ function Providers({ dir, server }: { dir: DirectoryState; server?: Server }) {
   const ready = dir.state === 'ready' ? dir : null;
   const supported = !!ready?.extensions.includes('providers');
   const [rows, setRows] = useState<ProviderRow[] | null>(null);
+  const [canEdit, setCanEdit] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Admin devices: which provider is being changed ('' = a new one), and which removal waits for a yes.
+  const [editing, setEditing] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
   const load = useCallback(() => {
     if (!ready || !supported) return;
     setErr(null);
-    ready.request<{ providers: ProviderRow[] }>('_hearth/providers').then((r) => setRows(r.providers ?? []), (e) => setErr(errorText(e)));
+    ready.request<{ providers: ProviderRow[]; canEdit?: boolean }>('_hearth/providers').then((r) => { setRows(r.providers ?? []); setCanEdit(!!r.canEdit); }, (e) => setErr(errorText(e)));
   }, [ready?.request, supported]); // eslint-disable-line react-hooks/exhaustive-deps
+  const remove = async (name: string) => {
+    try { const r = await ready!.request<{ providers: ProviderRow[] }>('_hearth/providers/delete', { name }); setRows(r.providers ?? []); setRemoving(null); }
+    catch (e) { setErr(errorText(e)); }
+  };
+  const form = (p?: ProviderRow) => (
+    <ProviderForm initial={p ? { ...p, kind: p.kind as 'anthropic' | 'openai' } : undefined} request={ready!.request}
+      onSaved={(list) => { setRows(list as ProviderRow[]); setEditing(null); }} onCancel={() => setEditing(null)} />
+  );
   useEffect(load, [load]);
   return (
     <>
@@ -154,20 +169,41 @@ function Providers({ dir, server }: { dir: DirectoryState; server?: Server }) {
       {err && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{err}</p>}
       {ready && supported && !rows && !err && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
       {rows && rows.length === 0 && <p className="rounded-xl border bg-card p-4 text-sm">No providers yet: the server waits until one is added.</p>}
-      {rows && rows.length > 0 && (
+      {rows && (
         <>
-          <div className="space-y-3">{rows.map((p, i) => <ProviderCard key={p.name} p={p} n={i + 1} test={(name) => ready!.request<{ ok: boolean; status?: number; error?: string; ms: number }>('_hearth/providers/test', { name })} onTested={load} />)}</div>
+          <div className="space-y-3">{rows.map((p, i) => editing === p.name ? <div key={p.name}>{form(p)}</div> : (
+            <ProviderCard key={p.name} p={p} n={i + 1} test={(name) => ready!.request<{ ok: boolean; status?: number; error?: string; ms: number }>('_hearth/providers/test', { name })} onTested={load}
+              admin={canEdit ? (
+                removing === p.name ? (
+                  <span className="flex items-center gap-2 text-sm">Remove {p.name}?
+                    <Button size="sm" variant="destructive" onClick={() => void remove(p.name)}>Remove</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setRemoving(null)}>Keep</Button>
+                  </span>
+                ) : (
+                  <>
+                    <Button size="sm" variant="outline" onClick={() => setEditing(p.name)}><Pencil className="size-3.5" />Change</Button>
+                    <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setRemoving(p.name)}><Trash2 className="size-3.5" />Remove</Button>
+                  </>
+                )
+              ) : undefined} />
+          ))}</div>
+          {canEdit && editing === '' && <div className="mt-3">{form()}</div>}
           <div className="mt-4 flex items-center gap-2">
+            {canEdit && editing === null && <Button size="sm" variant="outline" onClick={() => setEditing('')}><Plus className="size-3.5" />Add a provider</Button>}
             <Button size="sm" variant="ghost" onClick={load}><RefreshCw className="size-3.5" />Refresh</Button>
           </div>
-          <p className="mt-4 text-xs text-muted-foreground">Keys are never shown, only whether one is set. Providers are added and changed by the server's owner on the server; this device can view and test them.</p>
+          <p className="mt-4 text-xs text-muted-foreground">
+            Keys are never shown, only whether one is set.{' '}
+            {canEdit ? 'This is an admin device, so it can add and change providers; every change is recorded on the server.'
+              : "Change providers on the page. To change them here, tick \u201cadmin device\u201d for this device on the server's page."}
+          </p>
         </>
       )}
     </>
   );
 }
 
-function ProviderCard({ p, n, test, onTested }: { p: ProviderRow; n: number; test: (name: string) => Promise<{ ok: boolean; status?: number; error?: string; ms: number }>; onTested: () => void }) {
+function ProviderCard({ p, n, test, onTested, admin }: { p: ProviderRow; n: number; test: (name: string) => Promise<{ ok: boolean; status?: number; error?: string; ms: number }>; onTested: () => void; admin?: React.ReactNode }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [bad, setBad] = useState(false);
@@ -197,6 +233,7 @@ function ProviderCard({ p, n, test, onTested }: { p: ProviderRow; n: number; tes
       <div className="mt-3 flex items-center gap-3">
         <Button size="sm" variant="outline" onClick={run} disabled={busy}>{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Zap className="size-3.5" />}Test</Button>
         {result && <span className={cn('text-sm', bad ? 'text-destructive' : 'text-emerald-700 dark:text-emerald-400')}>{result}</span>}
+        {admin && <span className="ml-auto flex items-center gap-2">{admin}</span>}
       </div>
     </div>
   );
