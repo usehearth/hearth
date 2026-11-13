@@ -143,6 +143,7 @@ function Runtime({ client, events, actionsEl }: { client: AcpClient; events: Thr
   const ev = useRef(events);
   ev.current = events;
   // Images and text files, as this server takes them (its promptCapabilities); a refused file says why.
+  const runtimeRef = useRef<ReturnType<typeof useAcpRuntime> | null>(null);
   const attachments = useMemo(() => {
     const a = new HearthAttachments(() => {
       const pc = client.agentCapabilities?.promptCapabilities;
@@ -150,12 +151,13 @@ function Runtime({ client, events, actionsEl }: { client: AcpClient; events: Thr
       const h = client.initializeMeta?.hearth;
       const uploads = Array.isArray(h?.extensions) && h.extensions.includes('uploads') ? Number(h.uploadMaxBytes) || 15 * 1024 * 1024 : undefined;
       return { image: !!pc.image, embeddedContext: !!pc.embeddedContext, uploadMaxBytes: uploads };
-    });
+    }, () => runtimeRef.current?.thread.composer.getState().attachments.filter((x) => x.type === 'image').length ?? 0);
     const add = a.add.bind(a);
     a.add = async (st) => { try { return await add(st); } catch (e) { ev.current.onError((e as Error).message); throw e; } };
     return a;
   }, [client]);
   const runtime = useAcpRuntime({ client, permissions: 'ask', onError: (e) => ev.current.onError(e.message), adapters: { attachments } });
+  runtimeRef.current = runtime;
   useEffect(() => client.subscribeConnectionChange(() => { if (client.sessionId) ev.current.onSession(client.sessionId); }), [client]);
   const extras = useThreadExtras(client);
   // Open or closed, remembered per thread; by default open when the thread has a plan, on a wide enough window.
