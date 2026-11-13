@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BellDot, ChevronDown, Settings as SettingsIcon, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
+import { BellDot, ChevronDown, Settings as SettingsIcon, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { ThreadPane, type ThreadTarget } from '@/components/hearth/ThreadPane';
 import { AddServer, KeyPrompt } from '@/components/hearth/AddServer';
 import { NeedsYou } from '@/components/hearth/NeedsYou';
 import { Settings } from '@/components/hearth/Settings';
+import { ProjectSettings } from '@/components/hearth/ProjectSettings';
 import type { CardEntry } from '@/lib/hearth';
 import { useDirectory, type ProjectGroup, type ThreadItem } from '@/lib/directory';
 import { keyFor, keysReady, useServers } from '@/lib/servers';
@@ -23,7 +24,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   // The main pane shows the open thread, or the needs-you view.
-  const [view, setView] = useState<'thread' | 'needs' | 'settings'>('thread');
+  const [view, setView] = useState<'thread' | 'needs' | 'settings' | 'project'>('thread');
+  const [projectView, setProjectView] = useState<{ slug: string; name: string } | null>(null);
   const [actionsEl, setActionsEl] = useState<HTMLElement | null>(null);
   const { dark, toggle } = useTheme();
 
@@ -120,7 +122,9 @@ export default function App() {
                 </div>
                 {dir.groups.length === 0 && <p className="px-2 py-3 text-sm text-muted-foreground">No threads on this server yet.</p>}
                 {dir.groups.map((g) => (
-                  <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)} />
+                  <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)}
+                    onSettings={dir.extensions.includes('project') ? () => { setProjectView({ slug: g.project, name: g.name }); setView('project'); } : undefined}
+                    settingsOpen={view === 'project' && projectView?.slug === g.project} />
                 ))}
               </>
             )}
@@ -133,7 +137,7 @@ export default function App() {
         {/* Main: the open thread */}
         <main className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-12 shrink-0 items-center gap-2 border-b px-5">
-            {view === 'settings' ? <span className="text-sm font-medium">Settings</span> : view === 'needs' ? <span className="text-sm font-medium">Needs you</span> : target ? (
+            {view === 'project' && projectView ? <><span className="truncate text-sm font-medium">{projectView.name}</span><span className="text-sm text-muted-foreground">· Project settings</span></> : view === 'settings' ? <span className="text-sm font-medium">Settings</span> : view === 'needs' ? <span className="text-sm font-medium">Needs you</span> : target ? (
               <>
                 <span className="truncate text-sm font-medium">{target.title}</span>
                 {target.project && <span className="truncate text-sm text-muted-foreground">· {target.project}</span>}
@@ -152,6 +156,9 @@ export default function App() {
                 onUse={(id) => { setServerId(id); setTarget(null); setView('thread'); }} onKeyChanged={() => setKeyVersion((v) => v + 1)} />
             </div>
           )}
+          {view === 'project' && projectView && dir.state === 'ready' && (
+            <div className="min-h-0 flex-1"><ProjectSettings project={projectView.slug} request={dir.request} /></div>
+          )}
           {view === 'needs' && dir.state === 'ready' && (
             <div className="min-h-0 flex-1"><NeedsYou cards={dir.cards} onAnswer={dir.answer} onOpen={openCard} /></div>
           )}
@@ -167,7 +174,7 @@ export default function App() {
   );
 }
 
-function ProjectSection({ g, activeId, onOpen, onNew }: { g: ProjectGroup; activeId?: string; onOpen: (t: ThreadItem) => void; onNew: () => void }) {
+function ProjectSection({ g, activeId, onOpen, onNew, onSettings, settingsOpen }: { g: ProjectGroup; activeId?: string; onOpen: (t: ThreadItem) => void; onNew: () => void; onSettings?: () => void; settingsOpen?: boolean }) {
   const [openSec, setOpenSec] = useState(true);
   const [all, setAll] = useState(false);
   // Pinned first, then most recent.
@@ -183,6 +190,7 @@ function ProjectSection({ g, activeId, onOpen, onNew }: { g: ProjectGroup; activ
           <span className="truncate">{g.name}</span>
           {!openSec && needs > 0 && <span className="ml-auto rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary" title="Threads that need you">{needs}</span>}
         </button>
+        {onSettings && <IconBtn label={`Settings for ${g.name}`} onClick={onSettings} className={cn('opacity-0 group-hover:opacity-100 focus-visible:opacity-100', settingsOpen && 'bg-sidebar-accent text-foreground opacity-100')}><SlidersHorizontal className="size-3.5" /></IconBtn>}
         <IconBtn label={`New thread in ${g.name}`} onClick={onNew} className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"><Plus className="size-3.5" /></IconBtn>
       </div>
       {openSec && (
