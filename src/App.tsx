@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BellDot, ChevronDown, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
+import { BellDot, ChevronDown, Settings as SettingsIcon, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { ThreadPane, type ThreadTarget } from '@/components/hearth/ThreadPane';
 import { AddServer, KeyPrompt } from '@/components/hearth/AddServer';
 import { NeedsYou } from '@/components/hearth/NeedsYou';
+import { Settings } from '@/components/hearth/Settings';
 import type { CardEntry } from '@/lib/hearth';
 import { useDirectory, type ProjectGroup, type ThreadItem } from '@/lib/directory';
 import { keyFor, keysReady, useServers } from '@/lib/servers';
@@ -22,7 +23,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   // The main pane shows the open thread, or the needs-you view.
-  const [view, setView] = useState<'thread' | 'needs'>('thread');
+  const [view, setView] = useState<'thread' | 'needs' | 'settings'>('thread');
   const [actionsEl, setActionsEl] = useState<HTMLElement | null>(null);
   const { dark, toggle } = useTheme();
 
@@ -81,9 +82,10 @@ export default function App() {
             <span className="text-[15px] font-semibold tracking-tight">Hearth</span>
             <div className="ml-auto flex items-center gap-0.5">
               <IconBtn label={dark ? 'Light mode' : 'Dark mode'} onClick={toggle}>{dark ? <Sun className="size-4" /> : <MoonStar className="size-4" />}</IconBtn>
+              <IconBtn label="Settings" onClick={() => setView('settings')} className={view === 'settings' ? 'bg-sidebar-accent text-foreground' : undefined}><SettingsIcon className="size-4" /></IconBtn>
             </div>
           </div>
-          <button onClick={() => setAdding(true)} className="mx-3 mb-2 flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-sidebar-accent" title="Servers">
+          <button onClick={() => setView('settings')} className="mx-3 mb-2 flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-sidebar-accent" title="Servers">
             <ServerIcon className="size-4 text-muted-foreground" />
             <span className="truncate font-medium">{server?.name}</span>
             <StatusDot state={dir.state === 'ready' && dir.reconnecting ? 'reconnecting' : dir.state} />
@@ -131,7 +133,7 @@ export default function App() {
         {/* Main: the open thread */}
         <main className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-12 shrink-0 items-center gap-2 border-b px-5">
-            {view === 'needs' ? <span className="text-sm font-medium">Needs you</span> : target ? (
+            {view === 'settings' ? <span className="text-sm font-medium">Settings</span> : view === 'needs' ? <span className="text-sm font-medium">Needs you</span> : target ? (
               <>
                 <span className="truncate text-sm font-medium">{target.title}</span>
                 {target.project && <span className="truncate text-sm text-muted-foreground">· {target.project}</span>}
@@ -142,6 +144,12 @@ export default function App() {
           {error && (
             <div className="mx-5 mt-3 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
               <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" /><span className="text-foreground/90">{error}</span>
+            </div>
+          )}
+          {view === 'settings' && (
+            <div className="min-h-0 flex-1">
+              <Settings servers={servers} server={server} dir={dir} onAdd={() => setAdding(true)}
+                onUse={(id) => { setServerId(id); setTarget(null); setView('thread'); }} onKeyChanged={() => setKeyVersion((v) => v + 1)} />
             </div>
           )}
           {view === 'needs' && dir.state === 'ready' && (

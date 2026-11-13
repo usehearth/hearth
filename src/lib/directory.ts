@@ -31,7 +31,11 @@ export type DirectoryState =
   | { state: 'ready'; agent: string; groups: ProjectGroup[]; refresh: () => void; reconnecting?: boolean;
       /** Every open card this device may see (`_hearth/cards`); empty on servers without it. */
       cards: CardEntry[];
-      answer: (e: CardEntry, a: CardAnswer) => Promise<unknown> }
+      answer: (e: CardEntry, a: CardAnswer) => Promise<unknown>;
+      /** The `_hearth` extensions the server says it has (from initialize). */
+      extensions: string[];
+      /** A request on the list connection (settings use it). */
+      request: <T = unknown>(method: string, params?: unknown) => Promise<T> }
   | { state: 'error'; message: string; retry: () => void };
 
 const folderName = (cwd: string) => cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || cwd;
@@ -135,11 +139,13 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
         const first = await list();
         if (!live) return;
         const agent = String(init.agentInfo?.title ?? init.agentInfo?.name ?? 'ACP server');
-        refresh = () => { void list().then((l) => live && setSt({ state: 'ready', agent, ...l, refresh, answer })).catch(() => { /* a drop reconnects */ }); };
+        const extensions: string[] = Array.isArray(init?._meta?.hearth?.extensions) ? init._meta.hearth.extensions : [];
+        const request = <T,>(method: string, params?: unknown) => conn.agent.request(method as any, (params ?? {}) as any) as Promise<T>;
+        refresh = () => { void list().then((l) => live && setSt({ state: 'ready', agent, ...l, refresh, answer, extensions, request })).catch(() => { /* a drop reconnects */ }); };
         ready = true;
         wasReady.current = true;
         fails.current = 0;
-        setSt({ state: 'ready', agent, ...first, refresh, answer });
+        setSt({ state: 'ready', agent, ...first, refresh, answer, extensions, request });
       } catch (e) {
         if (!live) return;
         if (wasReady.current && fails.current < GIVE_UP_AFTER) { reconnectLater(); return; } // keep the list, keep trying

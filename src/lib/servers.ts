@@ -62,6 +62,16 @@ export function removeServer(id: string) {
 }
 
 export const keyFor = (id: string) => keys.get(id);
+export function renameServer(id: string, name: string) {
+  servers = servers.map((s) => (s.id === id ? { ...s, name: name.trim() || s.name } : s));
+  save();
+}
+/** Forget this device's key for a server (the keychain entry too); the server asks for it again. */
+export function forgetKey(id: string) {
+  keys.delete(id);
+  if (isDesktop) void invoke('key_delete', { serverId: id }).catch(() => {});
+  notify();
+}
 export function setKey(id: string, key: string) { storeKey(id, key.trim()); notify(); }
 
 /** Accepts http(s)://host[:port] or ws(s)://... and returns the ACP WebSocket address. */

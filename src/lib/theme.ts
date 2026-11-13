@@ -1,19 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 
 const KEY = 'hearth.theme';
-const systemDark = () => window.matchMedia('(prefers-color-scheme: dark)').matches;
-const saved = () => { try { return localStorage.getItem(KEY); } catch { return null; } };
+export type ThemeMode = 'system' | 'light' | 'dark';
+const mq = () => window.matchMedia('(prefers-color-scheme: dark)');
+const read = (): ThemeMode => { try { const v = localStorage.getItem(KEY); return v === 'light' || v === 'dark' ? v : 'system'; } catch { return 'system'; } };
+let mode: ThemeMode = typeof window === 'undefined' ? 'system' : read();
+const listeners = new Set<() => void>();
+export function setThemeMode(m: ThemeMode) {
+  mode = m;
+  try { if (m === 'system') localStorage.removeItem(KEY); else localStorage.setItem(KEY, m); } catch { /* */ }
+  for (const l of listeners) l();
+}
+export const useThemeMode = () => useSyncExternalStore((cb) => { listeners.add(cb); return () => listeners.delete(cb); }, () => mode);
 
 /** Follows the system until the user picks; the choice is remembered on this device. */
 export function useTheme() {
-  const [dark, setDark] = useState(() => (saved() ? saved() === 'dark' : systemDark()));
+  const m = useThemeMode();
+  const [sysDark, setSysDark] = useState(() => mq().matches);
+  useEffect(() => { const q = mq(); const on = () => setSysDark(q.matches); q.addEventListener('change', on); return () => q.removeEventListener('change', on); }, []);
+  const dark = m === 'system' ? sysDark : m === 'dark';
   useEffect(() => { document.documentElement.classList.toggle('dark', dark); }, [dark]);
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const on = () => { if (!saved()) setDark(mq.matches); };
-    mq.addEventListener('change', on);
-    return () => mq.removeEventListener('change', on);
-  }, []);
-  const toggle = () => setDark((d) => { try { localStorage.setItem(KEY, d ? 'light' : 'dark'); } catch { /* */ } return !d; });
+  const toggle = () => setThemeMode(dark ? 'light' : 'dark');
   return { dark, toggle };
 }
