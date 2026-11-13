@@ -80,7 +80,7 @@ export function HistoryView({ request, scope, onOpen }: { request: Request; scop
             className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70" autoFocus={!('name' in scope)} />
           {searching && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
         </label>
-        {note.titlesOnly && hits && <p className="mt-2 text-xs text-muted-foreground">This server searches titles and folders only.</p>}
+        {note.titlesOnly && hits && <p className="mt-2 text-xs text-muted-foreground">The search index isn't reachable right now, so only titles and folder names were searched.</p>}
         {note.clientUnavailable && <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground"><Laptop className="size-3.5" />Client conversations weren't searched: they're kept on the work laptop, which is off right now.</p>}
         {err && <p className="mt-3 text-sm text-destructive">{err}</p>}
         {!shown && !err && <Loader2 className="mt-4 size-4 animate-spin text-muted-foreground" />}
