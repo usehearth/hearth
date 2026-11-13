@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BellDot, Briefcase, ChevronDown, Lock, Menu, Settings as SettingsIcon, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
+import { BellDot, Briefcase, ChevronDown, FolderPlus, History as HistoryIcon, Lock, Menu, Settings as SettingsIcon, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { ThreadPane, type ThreadTarget } from '@/components/hearth/ThreadPane';
@@ -7,6 +7,8 @@ import { AddServer, KeyPrompt } from '@/components/hearth/AddServer';
 import { NeedsYou } from '@/components/hearth/NeedsYou';
 import { Settings } from '@/components/hearth/Settings';
 import { ProjectSettings } from '@/components/hearth/ProjectSettings';
+import { HistoryView, ImportedThread, type Continued, type ImportedSummary } from '@/components/hearth/History';
+import { NewProject, type Made } from '@/components/hearth/NewProject';
 import type { CardEntry } from '@/lib/hearth';
 import { useDirectory, type ClientLine, type ProjectGroup, type ThreadItem } from '@/lib/directory';
 import { keyFor, keysReady, useServers } from '@/lib/servers';
@@ -20,16 +22,20 @@ export default function App() {
   const [keyVersion, setKeyVersion] = useState(0);
   const dir = useDirectory(server, keyVersion);
   // `id` keys the open pane (stable for its lifetime); `sessionId` is the server's id once known.
-  const [target, setTarget] = useState<{ id: string; sessionId?: string; t: ThreadTarget; title: string; project?: string; client?: string } | null>(null);
+  const [target, setTarget] = useState<{ id: string; sessionId?: string; t: ThreadTarget; title: string; project?: string; client?: string; seed?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   // The main pane shows the open thread, or the needs-you view.
-  const [view, setView] = useState<'thread' | 'needs' | 'settings' | 'project'>('thread');
+  type View = 'thread' | 'needs' | 'settings' | 'project' | 'history' | 'imported' | 'newproject';
+  const [view, setView] = useState<View>('thread');
+  // History: a project's imported conversations (or all of them, to search), and the one open.
+  const [historyOf, setHistoryOf] = useState<{ project?: string; name?: string } | null>(null);
+  const [imported, setImported] = useState<ImportedSummary | null>(null);
   const [projectView, setProjectView] = useState<{ slug: string; name: string } | null>(null);
   const [actionsEl, setActionsEl] = useState<HTMLElement | null>(null);
   // Phones: the sidebar is a drawer, closed whenever something is picked in it.
   const [navOpen, setNavOpen] = useState(false);
-  const go = useCallback((v: 'thread' | 'needs' | 'settings' | 'project') => { setView(v); setNavOpen(false); }, []);
+  const go = useCallback((v: View) => { setView(v); setNavOpen(false); }, []);
   const { dark, toggle } = useTheme();
 
   useEffect(() => { if (!serverId && servers[0]) setServerId(servers[0].id); }, [servers, serverId]);
@@ -63,6 +69,21 @@ export default function App() {
     const id = `new-${crypto.randomUUID()}`;
     setTarget({ id, t: { kind: 'new', cwd: g.cwd, meta: { hearth: { project: g.project } } }, title: 'New thread', project: g.name, client: g.client });
   }, []);
+  const openHistory = useCallback((g?: ProjectGroup) => { setHistoryOf(g ? { project: g.project, name: g.name } : {}); setView('history'); setNavOpen(false); }, []);
+  const openImported = useCallback((s: ImportedSummary) => { setImported(s); setView('imported'); setNavOpen(false); }, []);
+  const groupOf = (slug: string) => (dir.state === 'ready' ? dir.groups.find((g) => g.project === slug) : undefined);
+  // Continue in Hearth: the server made the thread; open it with the summary in the composer, ready to add to.
+  const continued = (c: Continued) => {
+    setError(null); setView('thread');
+    setTarget({ id: c.sessionId, sessionId: c.sessionId, t: { kind: 'open', sessionId: c.sessionId, cwd: c.cwd }, title: c.title, project: c.projectName, client: groupOf(c.project)?.client, seed: c.seed });
+    if (dir.state === 'ready') dir.refresh();
+  };
+  const made = (m: Made) => {
+    setError(m.tools.ok ? null : `Project made, but its tools aren't wired yet (${m.tools.error ?? 'unknown error'}). Finish that on the page.`);
+    setView('thread');
+    setTarget({ id: m.sessionId, sessionId: m.sessionId, t: { kind: 'open', sessionId: m.sessionId, cwd: m.cwd }, title: 'Main thread', project: m.name });
+    if (dir.state === 'ready') dir.refresh();
+  };
   const refresh = dir.state === 'ready' ? dir.refresh : undefined;
   const events = useMemo(() => ({
     onError: (m: string) => setError(m),
@@ -111,6 +132,12 @@ export default function App() {
               {dir.cards.length === 0 && dir.clients.some((c) => c.needsYou > 0) && <span className="ml-auto text-[11px] text-muted-foreground">client work waits</span>}
             </button>
           )}
+          {dir.state === 'ready' && dir.extensions.includes('history') && (
+            <button onClick={() => openHistory()} aria-current={view === 'history' && !historyOf?.project ? 'page' : undefined}
+              className={cn('mx-3 mb-1 flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] hover:bg-sidebar-accent', view === 'history' && !historyOf?.project && 'bg-sidebar-accent font-medium')}>
+              <HistoryIcon className="size-4 text-muted-foreground" /><span>Search history</span>
+            </button>
+          )}
           <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
             {dir.state === 'connecting' && <SidebarSkeleton />}
             {dir.state === 'no-key' && server && <KeyPrompt server={server} onSaved={() => setKeyVersion((v) => v + 1)} />}
@@ -128,19 +155,22 @@ export default function App() {
               <>
                 <div className="flex items-center justify-between px-2 pt-2 pb-1">
                   <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Projects</span>
-                  <IconBtn label="Refresh" onClick={dir.refresh}><RefreshCw className="size-3.5" /></IconBtn>
+                  <span className="flex items-center gap-0.5">
+                    {dir.admin && dir.extensions.includes('new_project') && <IconBtn label="New project" onClick={() => go('newproject')} className={view === 'newproject' ? 'bg-sidebar-accent text-foreground' : undefined}><FolderPlus className="size-3.5" /></IconBtn>}
+                    <IconBtn label="Refresh" onClick={dir.refresh}><RefreshCw className="size-3.5" /></IconBtn>
+                  </span>
                 </div>
                 {dir.groups.length === 0 && <p className="px-2 py-3 text-sm text-muted-foreground">No threads on this server yet.</p>}
                 {dir.groups.filter((g) => !g.client).map((g) => (
                   <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)}
                     onSettings={dir.extensions.includes('project') ? () => { setProjectView({ slug: g.project, name: g.name }); go('project'); } : undefined}
-                    settingsOpen={view === 'project' && projectView?.slug === g.project} />
+                    settingsOpen={view === 'project' && projectView?.slug === g.project} onHistory={() => openHistory(g)} historyOpen={(view === 'history' || view === 'imported') && historyOf?.project === g.project} />
                 ))}
                 <ClientsSection groups={dir.groups.filter((g) => !!g.client)} lines={dir.clients} workDevice={dir.workDevice}
                   render={(g) => (
                     <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)}
                       onSettings={dir.extensions.includes('project') ? () => { setProjectView({ slug: g.project, name: g.name }); go('project'); } : undefined}
-                      settingsOpen={view === 'project' && projectView?.slug === g.project} />
+                      settingsOpen={view === 'project' && projectView?.slug === g.project} onHistory={() => openHistory(g)} historyOpen={(view === 'history' || view === 'imported') && historyOf?.project === g.project} />
                   )} />
               </>
             )}
@@ -157,7 +187,7 @@ export default function App() {
               <Menu className="size-5" />
               {dir.state === 'ready' && dir.cards.length > 0 && <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-primary" aria-label="Something needs you" />}
             </button>
-            {view === 'project' && projectView ? <><span className="truncate text-sm font-medium">{projectView.name}</span><span className="text-sm text-muted-foreground">· Project settings</span></> : view === 'settings' ? <span className="text-sm font-medium">Settings</span> : view === 'needs' ? <span className="text-sm font-medium">Needs you</span> : target ? (
+            {view === 'newproject' ? <span className="text-sm font-medium">New project</span> : view === 'history' ? <span className="truncate text-sm font-medium">{historyOf?.project ? <>{historyOf.name}<span className="text-muted-foreground"> · History</span></> : 'Imported history'}</span> : view === 'imported' && imported ? <><span className="truncate text-sm font-medium">{imported.title}</span><span className="shrink-0 text-sm text-muted-foreground">· Imported</span></> : view === 'project' && projectView ? <><span className="truncate text-sm font-medium">{projectView.name}</span><span className="text-sm text-muted-foreground">· Project settings</span></> : view === 'settings' ? <span className="text-sm font-medium">Settings</span> : view === 'needs' ? <span className="text-sm font-medium">Needs you</span> : target ? (
               <>
                 <span className="truncate text-sm font-medium">{target.title}</span>
                 {target.project && <span className="truncate text-sm text-muted-foreground">· {target.project}</span>}
@@ -165,6 +195,12 @@ export default function App() {
             ) : <span className="text-sm text-muted-foreground">Pick a thread</span>}
             <div ref={setActionsEl} className={cn('ml-auto flex items-center gap-1', view !== 'thread' && 'hidden')} />
           </header>
+          {view === 'imported' && imported?.client && (
+            <div className="flex items-center gap-2 border-b bg-amber-500/10 px-5 py-1.5 text-xs text-amber-900 max-md:px-3 dark:text-amber-200" role="note">
+              <Lock className="size-3.5 shrink-0" />
+              <span><span className="font-semibold">Client conversation.</span> Read live from the work laptop; the server keeps only a one-line index.</span>
+            </div>
+          )}
           {view === 'thread' && target?.client && (
             <div className="flex items-center gap-2 border-b bg-amber-500/10 px-5 py-1.5 text-xs text-amber-900 max-md:px-3 dark:text-amber-200" role="note">
               <Lock className="size-3.5 shrink-0" />
@@ -185,13 +221,22 @@ export default function App() {
           {view === 'project' && projectView && dir.state === 'ready' && (
             <div className="min-h-0 flex-1"><ProjectSettings project={projectView.slug} request={dir.request} /></div>
           )}
+          {view === 'history' && historyOf && dir.state === 'ready' && (
+            <div className="min-h-0 flex-1"><HistoryView request={dir.request} project={historyOf.project} projectName={historyOf.name} onOpen={openImported} /></div>
+          )}
+          {view === 'imported' && imported && dir.state === 'ready' && (
+            <div className="min-h-0 flex-1"><ImportedThread key={imported.id} request={dir.request} id={imported.id} onContinue={continued} /></div>
+          )}
+          {view === 'newproject' && dir.state === 'ready' && (
+            <div className="min-h-0 flex-1"><NewProject request={dir.request} onDone={made} /></div>
+          )}
           {view === 'needs' && dir.state === 'ready' && (
             <div className="min-h-0 flex-1"><NeedsYou cards={dir.cards} onAnswer={dir.answer} onOpen={openCard} /></div>
           )}
           {/* The open thread stays mounted behind the needs-you view, so going back keeps its place. */}
           <div className={cn('min-h-0 flex-1', view !== 'thread' && 'hidden')}>
             {target && server && key
-              ? <ThreadPane key={target.id} url={server.url} serverKey={key} target={target.t} events={events} actionsEl={actionsEl} />
+              ? <ThreadPane key={target.id} url={server.url} serverKey={key} target={target.t} events={events} actionsEl={actionsEl} seed={target.seed} />
               : <Welcome />}
           </div>
         </main>
@@ -200,7 +245,7 @@ export default function App() {
   );
 }
 
-function ProjectSection({ g, activeId, onOpen, onNew, onSettings, settingsOpen }: { g: ProjectGroup; activeId?: string; onOpen: (t: ThreadItem) => void; onNew: () => void; onSettings?: () => void; settingsOpen?: boolean }) {
+function ProjectSection({ g, activeId, onOpen, onNew, onSettings, settingsOpen, onHistory, historyOpen }: { g: ProjectGroup; activeId?: string; onOpen: (t: ThreadItem) => void; onNew: () => void; onSettings?: () => void; settingsOpen?: boolean; onHistory?: () => void; historyOpen?: boolean }) {
   const [openSec, setOpenSec] = useState(true);
   const [all, setAll] = useState(false);
   // Pinned first, then most recent.
@@ -217,12 +262,23 @@ function ProjectSection({ g, activeId, onOpen, onNew, onSettings, settingsOpen }
           {!openSec && needs > 0 && <span className="ml-auto rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary" title="Threads that need you">{needs}</span>}
         </button>
         {onSettings && <IconBtn label={`Settings for ${g.name}`} onClick={onSettings} className={cn('opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100', settingsOpen && 'bg-sidebar-accent text-foreground opacity-100')}><SlidersHorizontal className="size-3.5" /></IconBtn>}
-        <IconBtn label={`New thread in ${g.name}`} onClick={onNew} className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"><Plus className="size-3.5" /></IconBtn>
+        {/* Always shown: on hover only, it was easy to miss. */}
+        <IconBtn label={`New thread in ${g.name}`} onClick={onNew}><Plus className="size-3.5" /></IconBtn>
       </div>
       {openSec && (
         <ul className="ml-2 border-l border-sidebar-border pl-1.5">
           {g.main && <ThreadRow t={g.main} active={activeId === g.main.sessionId} onOpen={onOpen} main />}
           {shown.map((t) => <ThreadRow key={t.sessionId} t={t} active={activeId === t.sessionId} onOpen={onOpen} />)}
+          {!!g.imported && onHistory && (
+            <li>
+              <button onClick={onHistory} className={cn('flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors',
+                historyOpen ? 'bg-sidebar-accent font-medium text-foreground' : 'text-sidebar-foreground/85 hover:bg-sidebar-accent/60')}>
+                <HistoryIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate">History</span>
+                <span className="ml-auto text-[11px] text-muted-foreground">{g.imported}</span>
+              </button>
+            </li>
+          )}
           {recent.length > SHOW && (
             <li>
               <button onClick={() => setAll((v) => !v)} className="w-full rounded-lg px-2 py-1 pl-7.5 text-left text-[12px] text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground">

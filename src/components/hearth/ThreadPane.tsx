@@ -4,7 +4,7 @@
 // the thread's open cards (`_meta.hearth.card`, answered with `_hearth/card/answer`) and this turn's checklist (ACP plan).
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AssistantRuntimeProvider, useAuiState } from '@assistant-ui/react';
+import { AssistantRuntimeProvider, useAui, useAuiState } from '@assistant-ui/react';
 import { ChevronDown, Circle, FolderOpen, CircleCheck, CircleDot, ListChecks, Loader2, PanelRightClose, PanelRightOpen, RefreshCw } from 'lucide-react';
 import { AcpClient, useAcpPlan, useAcpRuntime, useAcpSessionTitle } from '@/vendor/acp';
 import type { AcpWebSocketLike } from '@/vendor/acp/AcpClient';
@@ -31,8 +31,10 @@ export interface ThreadEvents {
   onTurnEnd: () => void;
 }
 
-export function ThreadPane({ url, serverKey, target, events, actionsEl }: {
+export function ThreadPane({ url, serverKey, target, events, actionsEl, seed }: {
   url: string; serverKey: string; target: ThreadTarget; events: ThreadEvents;
+  /** Text to put in the composer once the thread is open (Continue in Hearth's summary). */
+  seed?: string;
   /** Where the thread's header buttons go (the plan toggle). */
   actionsEl?: HTMLElement | null;
 }) {
@@ -44,7 +46,7 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl }: {
     ...(target.kind === 'open' ? { sessionId: target.sessionId } : { newSessionMeta: target.meta }),
   }), [url, serverKey, target]);
   useEffect(() => () => client.dispose(), [client]);
-  return <Runtime client={client} events={events} actionsEl={actionsEl} />;
+  return <Runtime client={client} events={events} actionsEl={actionsEl} seed={seed} />;
 }
 
 /** How long an answered card stays on screen (greyed, with who answered) before it goes. */
@@ -139,7 +141,7 @@ function useThreadExtras(client: AcpClient): Extras {
 const ExtrasContext = createContext<Extras | null>(null);
 const components: ThreadComponents = { AboveComposer: () => <AboveComposer /> };
 
-function Runtime({ client, events, actionsEl }: { client: AcpClient; events: ThreadEvents; actionsEl?: HTMLElement | null }) {
+function Runtime({ client, events, actionsEl, seed }: { client: AcpClient; events: ThreadEvents; actionsEl?: HTMLElement | null; seed?: string }) {
   const ev = useRef(events);
   ev.current = events;
   // Images and text files, as this server takes them (its promptCapabilities); a refused file says why.
@@ -173,6 +175,7 @@ function Runtime({ client, events, actionsEl }: { client: AcpClient; events: Thr
     <AssistantRuntimeProvider runtime={runtime}>
       <ExtrasContext.Provider value={extras}>
         <Watch events={ev} />
+        {seed && <Seed text={seed} />}
         <div className="flex h-full">
           <div className="relative min-w-0 flex-1">
             <Thread components={components} />
@@ -303,6 +306,19 @@ function TurnChecklist() {
       )}
     </div>
   );
+}
+
+/** Puts text in the composer once, after the thread has loaded (Continue in Hearth). */
+function Seed({ text }: { text: string }) {
+  const aui = useAui();
+  const loading = useAuiState((s) => s.thread.isLoading);
+  const done = useRef(false);
+  useEffect(() => {
+    if (done.current || loading) return;
+    done.current = true;
+    if (!aui.composer.getState().text) aui.composer.setText(`${text}\n\n`);
+  }, [loading, aui, text]);
+  return null;
 }
 
 /** Reports title changes and turn ends from inside the runtime. */

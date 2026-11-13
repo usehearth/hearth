@@ -25,7 +25,21 @@ export interface ThreadItem {
   client?: string;
 }
 
-export interface ProjectGroup { project: string; name: string; cwd: string; main?: ThreadItem; threads: ThreadItem[]; client?: string }
+export interface ProjectGroup { project: string; name: string; cwd: string; main?: ThreadItem; threads: ThreadItem[]; client?: string;
+  /** Conversations imported from Claude into this project (`_hearth/history/counts`). */
+  imported?: number }
+
+/** `_hearth/history/counts`: per project. */
+interface HistoryCount { project: string; name: string; cwd: string; count: number; client?: string }
+
+/** Adds the imported counts, and a group for a project that has only imported conversations. */
+export function withHistory(groups: ProjectGroup[], counts: HistoryCount[]): ProjectGroup[] {
+  if (!counts.length) return groups;
+  const by = new Map(counts.map((c) => [c.project, c]));
+  const out = groups.map((g) => (by.has(g.project) ? { ...g, imported: by.get(g.project)!.count } : g));
+  for (const c of counts) if (!groups.some((g) => g.project === c.project)) out.push({ project: c.project, name: c.name, cwd: c.cwd, threads: [], imported: c.count, ...(c.client ? { client: c.client } : {}) });
+  return out;
+}
 
 /** H5: one content-free line per client, for a device that may not open client threads. */
 export interface ClientLine { client: string; needsYou: number }
@@ -42,6 +56,8 @@ export type DirectoryState =
       /** H5: client lines for this device (empty on a work device, which lists client threads instead). */
       clients: ClientLine[];
       workDevice: boolean;
+      /** An admin device (may make projects, change providers). */
+      admin: boolean;
       /** A request on the list connection (settings use it). */
       request: <T = unknown>(method: string, params?: unknown) => Promise<T> }
   | { state: 'error'; message: string; retry: () => void };
@@ -118,6 +134,8 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
     const conn = app.connect(createWebSocketStream(server.url, { protocols: ['acp', `bearer.${key}`] }));
     let hasCards = true;
     let hasClients = false;
+    let hasHistory = false;
+    let admin = false;
     const list = async () => {
       const [res, cards] = await Promise.all([
         conn.agent.request('session/list', {}) as Promise<any>,
@@ -126,8 +144,11 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
           return [] as CardEntry[];
         }) : Promise.resolve([] as CardEntry[]),
       ]);
-      const cl = hasClients ? await (conn.agent.request('_hearth/clients' as any, {}) as Promise<any>).catch(() => null) : null;
-      return { groups: group((res.sessions ?? []).map(toItem)), cards, clients: (cl?.clients ?? []) as ClientLine[], workDevice: !!cl?.workDevice };
+      const [cl, hc] = await Promise.all([
+        hasClients ? (conn.agent.request('_hearth/clients' as any, {}) as Promise<any>).catch(() => null) : null,
+        hasHistory ? (conn.agent.request('_hearth/history/counts' as any, {}) as Promise<any>).catch(() => null) : null,
+      ]);
+      return { groups: withHistory(group((res.sessions ?? []).map(toItem)), (hc?.projects ?? []) as HistoryCount[]), cards, clients: (cl?.clients ?? []) as ClientLine[], workDevice: !!cl?.workDevice, admin };
     };
     const answer = async (e: CardEntry, a: CardAnswer) => {
       const r = await conn.agent.request('_hearth/card/answer' as any, { sessionId: e.sessionId, itemId: e.card.id, ...a });
@@ -147,7 +168,10 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
           clientInfo: { name: 'hearth', version: '0.1.0' },
         });
         if (!init?.agentCapabilities?.sessionCapabilities?.list) throw new Error('This server does not list its chats (no session/list).');
-        hasClients = Array.isArray(init?._meta?.hearth?.extensions) && init._meta.hearth.extensions.includes('clients');
+        const ext: string[] = Array.isArray(init?._meta?.hearth?.extensions) ? init._meta.hearth.extensions : [];
+        hasClients = ext.includes('clients');
+        hasHistory = ext.includes('history');
+        if (ext.includes('new_project')) admin = !!(await (conn.agent.request('_hearth/device' as any, {}) as Promise<any>).catch(() => null))?.admin;
         const first = await list();
         if (!live) return;
         const agent = String(init.agentInfo?.title ?? init.agentInfo?.name ?? 'ACP server');
