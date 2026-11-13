@@ -1,17 +1,18 @@
 // Settings: servers and this device's key, the server's model providers (read-only here, with health and a Test),
 // and appearance. Channels come when the server has them. Nothing here is chat content; keys are never shown.
 import { useCallback, useEffect, useState } from 'react';
-import { Check, CircleAlert, KeyRound, Laptop, Loader2, MoonStar, Palette, Pencil, Plus, Radio, RefreshCw, Server as ServerIcon, Sparkles, Sun, Trash2, X, Zap } from 'lucide-react';
+import { Check, CircleAlert, KeyRound, Laptop, Loader2, MoonStar, Palette, Pencil, Plus, Radio, RefreshCw, ScrollText, Server as ServerIcon, Sparkles, Sun, Trash2, X, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { KeyPrompt } from '@/components/hearth/AddServer';
 import { DeviceKeys, ProviderForm } from '@/components/hearth/AdminSettings';
+import { AuditLog } from '@/components/hearth/ServerSettings';
 import type { DirectoryState } from '@/lib/directory';
 import { forgetKey, isDesktop, keyFor, removeServer, renameServer, type Server } from '@/lib/servers';
 import { setThemeMode, useThemeMode, type ThemeMode } from '@/lib/theme';
 import { errorText } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
 
-type Section = 'servers' | 'providers' | 'appearance';
+type Section = 'servers' | 'providers' | 'appearance' | 'audit';
 
 export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged }: {
   servers: Server[];
@@ -26,6 +27,8 @@ export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged }: {
     { id: 'servers', label: 'Servers and keys', icon: ServerIcon },
     { id: 'providers', label: 'Model providers', icon: Sparkles },
     { id: 'appearance', label: 'Appearance', icon: Palette },
+    // Server sections, when the server has them.
+    ...(dir.state === 'ready' && dir.extensions.includes('audit') ? [{ id: 'audit' as const, label: 'Audit log', icon: ScrollText }] : []),
   ];
   return (
     <div className="flex h-full min-h-0 max-md:flex-col">
@@ -45,6 +48,7 @@ export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged }: {
           {section === 'servers' && <Servers servers={servers} server={server} dir={dir} onAdd={onAdd} onUse={onUse} onKeyChanged={onKeyChanged} />}
           {section === 'providers' && <Providers dir={dir} server={server} />}
           {section === 'appearance' && <Appearance />}
+          {section === 'audit' && dir.state === 'ready' && <AuditLog request={dir.request} />}
         </div>
       </div>
     </div>

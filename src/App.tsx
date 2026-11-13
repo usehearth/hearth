@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BellDot, Briefcase, ChevronDown, Lock, Menu, Settings as SettingsIcon, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
+import { Archive, BellDot, Briefcase, ChevronDown, Lock, Menu, Settings as SettingsIcon, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { ThreadPane, type ThreadTarget } from '@/components/hearth/ThreadPane';
@@ -7,6 +7,7 @@ import { AddServer, KeyPrompt } from '@/components/hearth/AddServer';
 import { NeedsYou } from '@/components/hearth/NeedsYou';
 import { Settings } from '@/components/hearth/Settings';
 import { ProjectSettings } from '@/components/hearth/ProjectSettings';
+import { ArchivedList, SearchResults, SidebarSearch, ThreadMenu, type SearchHit } from '@/components/hearth/ThreadTools';
 import type { CardEntry } from '@/lib/hearth';
 import { useDirectory, type ClientLine, type ProjectGroup, type ThreadItem } from '@/lib/directory';
 import { keyFor, keysReady, useServers } from '@/lib/servers';
@@ -31,6 +32,11 @@ export default function App() {
   const [navOpen, setNavOpen] = useState(false);
   const go = useCallback((v: 'thread' | 'needs' | 'settings' | 'project') => { setView(v); setNavOpen(false); }, []);
   const { dark, toggle } = useTheme();
+  // Thread management (server extension `threads`): search, the archived list, a menu on each thread.
+  const [query, setQuery] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
+  const threadsExt = dir.state === 'ready' && dir.extensions.includes('threads');
+  const menu = threadsExt && dir.state === 'ready' ? (t: ThreadItem) => <ThreadMenu t={t} request={dir.request} onError={setError} /> : undefined;
 
   useEffect(() => { if (!serverId && servers[0]) setServerId(servers[0].id); }, [servers, serverId]);
   // Desktop: keys arrive from the keychain shortly after start.
@@ -63,6 +69,10 @@ export default function App() {
     const id = `new-${crypto.randomUUID()}`;
     setTarget({ id, t: { kind: 'new', cwd: g.cwd, meta: { hearth: { project: g.project } } }, title: 'New thread', project: g.name, client: g.client });
   }, []);
+  const openHit = useCallback((h: SearchHit) => {
+    const known = dir.state === 'ready' ? dir.groups.flatMap((g) => [g.main, ...g.threads]).find((t) => t?.sessionId === h.sessionId) : undefined;
+    open(known ?? { sessionId: h.sessionId, title: h.title, cwd: '', updatedAt: h.updatedAt, project: h.project, projectName: h.project, kind: 'work', status: null, runnerOnline: null, pinned: false, openCards: 0 });
+  }, [dir, open]);
   const refresh = dir.state === 'ready' ? dir.refresh : undefined;
   const events = useMemo(() => ({
     onError: (m: string) => setError(m),
@@ -111,6 +121,7 @@ export default function App() {
               {dir.cards.length === 0 && dir.clients.some((c) => c.needsYou > 0) && <span className="ml-auto text-[11px] text-muted-foreground">client work waits</span>}
             </button>
           )}
+          {threadsExt && <SidebarSearch query={query} onQuery={(q) => { setQuery(q); if (q) setShowArchived(false); }} />}
           <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
             {dir.state === 'connecting' && <SidebarSkeleton />}
             {dir.state === 'no-key' && server && <KeyPrompt server={server} onSaved={() => setKeyVersion((v) => v + 1)} />}
@@ -124,7 +135,17 @@ export default function App() {
                 </div>
               </div>
             )}
-            {dir.state === 'ready' && (
+            {dir.state === 'ready' && threadsExt && query && <SearchResults query={query} request={dir.request} onOpen={openHit} />}
+            {dir.state === 'ready' && threadsExt && !query && showArchived && (
+              <>
+                <div className="flex items-center justify-between px-2 pt-2 pb-1">
+                  <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Archived</span>
+                  <button onClick={() => setShowArchived(false)} className="rounded px-1.5 text-[12px] text-muted-foreground hover:text-foreground">Back</button>
+                </div>
+                <ArchivedList request={dir.request} onOpen={open} onError={setError} />
+              </>
+            )}
+            {dir.state === 'ready' && !(threadsExt && (query || showArchived)) && (
               <>
                 <div className="flex items-center justify-between px-2 pt-2 pb-1">
                   <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Projects</span>
@@ -132,16 +153,21 @@ export default function App() {
                 </div>
                 {dir.groups.length === 0 && <p className="px-2 py-3 text-sm text-muted-foreground">No threads on this server yet.</p>}
                 {dir.groups.filter((g) => !g.client).map((g) => (
-                  <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)}
+                  <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)} menu={menu}
                     onSettings={dir.extensions.includes('project') ? () => { setProjectView({ slug: g.project, name: g.name }); go('project'); } : undefined}
                     settingsOpen={view === 'project' && projectView?.slug === g.project} />
                 ))}
                 <ClientsSection groups={dir.groups.filter((g) => !!g.client)} lines={dir.clients} workDevice={dir.workDevice}
                   render={(g) => (
-                    <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)}
+                    <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)} menu={menu}
                       onSettings={dir.extensions.includes('project') ? () => { setProjectView({ slug: g.project, name: g.name }); go('project'); } : undefined}
                       settingsOpen={view === 'project' && projectView?.slug === g.project} />
                   )} />
+                {threadsExt && (
+                  <button onClick={() => setShowArchived(true)} className="mt-3 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground">
+                    <Archive className="size-3.5" />Archived threads
+                  </button>
+                )}
               </>
             )}
           </nav>
@@ -200,7 +226,7 @@ export default function App() {
   );
 }
 
-function ProjectSection({ g, activeId, onOpen, onNew, onSettings, settingsOpen }: { g: ProjectGroup; activeId?: string; onOpen: (t: ThreadItem) => void; onNew: () => void; onSettings?: () => void; settingsOpen?: boolean }) {
+function ProjectSection({ g, activeId, onOpen, onNew, onSettings, settingsOpen, menu }: { g: ProjectGroup; activeId?: string; onOpen: (t: ThreadItem) => void; onNew: () => void; onSettings?: () => void; settingsOpen?: boolean; menu?: (t: ThreadItem) => React.ReactNode }) {
   const [openSec, setOpenSec] = useState(true);
   const [all, setAll] = useState(false);
   // Pinned first, then most recent.
@@ -222,7 +248,7 @@ function ProjectSection({ g, activeId, onOpen, onNew, onSettings, settingsOpen }
       {openSec && (
         <ul className="ml-2 border-l border-sidebar-border pl-1.5">
           {g.main && <ThreadRow t={g.main} active={activeId === g.main.sessionId} onOpen={onOpen} main />}
-          {shown.map((t) => <ThreadRow key={t.sessionId} t={t} active={activeId === t.sessionId} onOpen={onOpen} />)}
+          {shown.map((t) => <ThreadRow key={t.sessionId} t={t} active={activeId === t.sessionId} onOpen={onOpen} menu={menu} />)}
           {recent.length > SHOW && (
             <li>
               <button onClick={() => setAll((v) => !v)} className="w-full rounded-lg px-2 py-1 pl-7.5 text-left text-[12px] text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground">
@@ -265,18 +291,20 @@ function ClientsSection({ groups, lines, workDevice, render }: { groups: Project
 const SHOW = 12;
 const needsYou = (t: ThreadItem) => t.status === 'needs_permission' || t.openCards > 0;
 
-function ThreadRow({ t, active, onOpen, main }: { t: ThreadItem; active: boolean; onOpen: (t: ThreadItem) => void; main?: boolean }) {
+function ThreadRow({ t, active, onOpen, main, menu }: { t: ThreadItem; active: boolean; onOpen: (t: ThreadItem) => void; main?: boolean; menu?: (t: ThreadItem) => React.ReactNode }) {
   const running = t.status === 'running' || t.status === 'starting';
   const needs = needsYou(t);
   return (
-    <li>
+    <li className="group/row relative">
       <button onClick={() => onOpen(t)} className={cn('flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors',
+        menu && !main && 'pr-8',
         active ? 'bg-sidebar-accent font-medium text-foreground' : 'text-sidebar-foreground/85 hover:bg-sidebar-accent/60')}>
         {main ? <Flame className="size-3.5 shrink-0 text-ember" /> : t.pinned ? <Pin className="size-3.5 shrink-0 p-px text-muted-foreground" aria-label="Pinned" /> : <span className="size-3.5 shrink-0" />}
         <span className="truncate">{main ? 'Main thread' : t.title}</span>
         {needs && <span className="ml-auto rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">needs you</span>}
         {running && !needs && <Loader2 className="ml-auto size-3 shrink-0 animate-spin text-muted-foreground" />}
       </button>
+      {menu && !main && <div className="absolute top-1/2 right-1 -translate-y-1/2">{menu(t)}</div>}
     </li>
   );
 }

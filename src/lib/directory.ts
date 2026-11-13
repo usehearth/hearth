@@ -21,6 +21,8 @@ export interface ThreadItem {
   pinned: boolean;
   /** Open cards in this thread (questions, approvals, permission prompts). */
   openCards: number;
+  /** Archived (server extension `threads`): out of the list until put back. */
+  archived?: boolean;
   /** Set for a client project's thread (H5): the client's name. Only a work device is sent these. */
   client?: string;
 }
@@ -62,6 +64,7 @@ export function toItem(s: any): ThreadItem {
     runnerOnline: h.runnerOnline ?? null,
     pinned: !!h.pinned,
     openCards: Number(h.openCards ?? 0) || 0,
+    ...(h.archived ? { archived: true } : {}),
     ...(typeof h.client === 'string' && h.client ? { client: h.client } : {}),
   };
 }
@@ -78,6 +81,7 @@ export function group(items: ThreadItem[]): ProjectGroup[] {
 }
 
 const RELIST_MS = 200;
+const MAX_PAGES = 5;
 const RECONNECT_MS = [1000, 2000, 5000, 10000, 30000];
 /** Failed reconnects before the list gives way to the error (and the key prompt: the key may have been revoked). */
 const GIVE_UP_AFTER = 2; // each refused try counts toward the server's bad-key lockout (5 per 15 min), so stay well under
@@ -117,10 +121,22 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
       });
     const conn = app.connect(createWebSocketStream(server.url, { protocols: ['acp', `bearer.${key}`] }));
     let hasCards = true;
+    // Every page (servers that page send nextCursor), up to MAX_PAGES so a huge server can't stall the sidebar.
+    const listAll = async () => {
+      const sessions: any[] = [];
+      let cursor: string | undefined;
+      for (let n = 0; n < MAX_PAGES; n++) {
+        const r: any = await conn.agent.request('session/list', cursor ? { cursor } : {});
+        sessions.push(...(r?.sessions ?? []));
+        cursor = typeof r?.nextCursor === 'string' ? r.nextCursor : undefined;
+        if (!cursor) break;
+      }
+      return { sessions };
+    };
     let hasClients = false;
     const list = async () => {
       const [res, cards] = await Promise.all([
-        conn.agent.request('session/list', {}) as Promise<any>,
+        listAll(),
         hasCards ? (conn.agent.request('_hearth/cards' as any, {}) as Promise<any>).then((r) => (r?.cards ?? []) as CardEntry[], (e: any) => {
           if (e?.code === -32601) hasCards = false; // a plain ACP server: no cards
           return [] as CardEntry[];

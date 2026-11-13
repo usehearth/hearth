@@ -36,16 +36,65 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl }: {
   /** Where the thread's header buttons go (the plan toggle). */
   actionsEl?: HTMLElement | null;
 }) {
-  const client = useMemo(() => new AcpClient({
-    url,
-    cwd: target.cwd || '/',
-    clientInfo: { name: 'hearth', version: '0.1.0' },
-    webSocketFactory: (u) => openSocket(u, serverKey) as unknown as AcpWebSocketLike,
-    ...(target.kind === 'open' ? { sessionId: target.sessionId } : { newSessionMeta: target.meta }),
-  }), [url, serverKey, target]);
+  // A dropped socket reconnects by itself: a fresh connection opens the thread again with session/load, so everything
+  // said meanwhile (another window, a turn that kept running on the server) shows up. `gen` makes that new connection.
+  const [gen, setGen] = useState(0);
+  const [reconnecting, setReconnecting] = useState<boolean | 'stopped'>(false);
+  const known = useRef<string | undefined>(target.kind === 'open' ? target.sessionId : undefined);
+  const fails = useRef(0);
+  const client = useMemo(() => {
+    const sid = known.current;
+    return new AcpClient({
+      url,
+      cwd: target.cwd || '/',
+      clientInfo: { name: 'hearth', version: '0.1.0' },
+      webSocketFactory: (u) => openSocket(u, serverKey) as unknown as AcpWebSocketLike,
+      ...(sid ? { sessionId: sid } : target.kind === 'new' ? { newSessionMeta: target.meta } : {}),
+    });
+  }, [url, serverKey, target, gen]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => client.dispose(), [client]);
-  return <Runtime client={client} events={events} actionsEl={actionsEl} />;
+  useEffect(() => {
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let wasUp = false;
+    const off = client.subscribeConnectionChange((s) => {
+      if (!live) return;
+      if (client.sessionId) known.current = client.sessionId;
+      if (s === 'connected' && client.sessionId) { wasUp = true; fails.current = 0; setReconnecting(false); }
+      if (s === 'disconnected' && known.current && !timer && (wasUp || fails.current > 0)) {
+        // Each refused try counts toward the server's bad-key lockout, so stop after a few and offer a button.
+        if (fails.current >= GIVE_UP_AFTER) { setReconnecting('stopped'); return; }
+        setReconnecting(true);
+        const wait = RECONNECT_MS[Math.min(fails.current++, RECONNECT_MS.length - 1)];
+        timer = setTimeout(() => { if (live) setGen((g) => g + 1); }, wait);
+      }
+    });
+    return () => { live = false; off(); if (timer) clearTimeout(timer); };
+  }, [client]);
+  // Back online or back to the window: try now rather than wait out the backoff.
+  useEffect(() => {
+    if (reconnecting !== true) return;
+    const now = () => setGen((g) => g + 1);
+    window.addEventListener('online', now);
+    window.addEventListener('focus', now);
+    return () => { window.removeEventListener('online', now); window.removeEventListener('focus', now); };
+  }, [reconnecting]);
+  return (
+    <div className="relative h-full">
+      {reconnecting && (
+        <div role="status" className="absolute top-2 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border bg-background/95 px-3 py-1 text-xs text-muted-foreground shadow-sm">
+          {reconnecting === 'stopped'
+            ? <>Disconnected.<button onClick={() => { fails.current = 0; setReconnecting(true); setGen((g) => g + 1); }} className="font-medium text-foreground underline-offset-2 hover:underline">Reconnect</button></>
+            : <><Loader2 className="size-3 animate-spin" />Reconnecting…</>}
+        </div>
+      )}
+      <Runtime key={gen} client={client} events={events} actionsEl={actionsEl} />
+    </div>
+  );
 }
+
+const RECONNECT_MS = [1000, 2000, 5000, 10000, 30000];
+const GIVE_UP_AFTER = 6;
 
 /** How long an answered card stays on screen (greyed, with who answered) before it goes. */
 const ANSWERED_LINGER_MS = 6000;
