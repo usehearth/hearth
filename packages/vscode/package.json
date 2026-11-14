@@ -1,0 +1,99 @@
+{
+  "name": "hearth",
+  "displayName": "Hearth",
+  "description": "Hearth inside VS Code: your threads, chat and settings in a panel, plus sending editor selections to a thread.",
+  "version": "0.1.0",
+  "publisher": "usehearth",
+  "license": "Apache-2.0",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/usehearth/hearth.git",
+    "directory": "packages/vscode"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "hearth.open",
+        "title": "Open",
+        "category": "Hearth"
+      },
+      {
+        "command": "hearth.sendSelection",
+        "title": "Send selection to thread",
+        "category": "Hearth"
+      },
+      {
+        "command": "hearth.openProjectThread",
+        "title": "Open project thread",
+        "category": "Hearth"
+      },
+      {
+        "command": "hearth.openThread",
+        "title": "Open thread by session id",
+        "category": "Hearth"
+      },
+      {
+        "command": "hearth.setKey",
+        "title": "Set device key for a server",
+        "category": "Hearth"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "hearth.sendSelection",
+          "when": "editorHasSelection",
+          "group": "9_hearth"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "hearth.sendSelection",
+          "when": "editorHasSelection"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "hearth",
+          "title": "Hearth",
+          "icon": "media/activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "hearth": [
+        {
+          "type": "webview",
+          "id": "hearth.view",
+          "name": "Hearth"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "copy-app": "node scripts/copy-app.mjs",
+    "vscode:prepublish": "npm run build && npm run copy-app",
+    "package": "vsce package --no-dependencies",
+    "test": "npm run build && node --test test/html.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "@types/vscode": "1.95.0",
+    "@vscode/vsce": "4.1.0",
+    "typescript": "5.9.3"
+  }
+}

@@ -29,13 +29,17 @@ const id = () => `att-${Date.now().toString(36)}-${(n++).toString(36)}`;
 export class HearthAttachments implements AttachmentAdapter {
   // Any file can be picked or dropped: one the server can't take is refused with a reason, never dropped silently.
   accept = '*';
-  /** caps: what the connected server takes (undefined until connected: assume images and text). */
-  constructor(private caps: () => Caps | undefined) {}
+  /**
+   * caps: what the connected server takes (undefined until connected: assume images and text).
+   * imagesPending: how many images the composer already holds, so a message never carries more than MAX_IMAGES.
+   */
+  constructor(private caps: () => Caps | undefined, private imagesPending: () => number = () => 0) {}
 
   async add({ file }: { file: File }): Promise<PendingAttachment> {
     const caps = this.caps() ?? { image: true, embeddedContext: true };
     if (file.type.startsWith('image/')) {
       if (!caps.image) throw new AttachmentRefused("This server doesn't take images.");
+      if (this.imagesPending() >= MAX_IMAGES) throw new AttachmentRefused(`Up to ${MAX_IMAGES} images per message.`);
       return { id: id(), type: 'image', name: file.name || 'image', contentType: file.type, file, status: { type: 'requires-action', reason: 'composer-send' } };
     }
     if (isTextFile(file)) {

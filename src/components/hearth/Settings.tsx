@@ -1,17 +1,19 @@
 // Settings: servers and this device's key, the server's model providers (read-only here, with health and a Test),
 // and appearance. Channels come when the server has them. Nothing here is chat content; keys are never shown.
 import { useCallback, useEffect, useState } from 'react';
-import { Check, CircleAlert, KeyRound, Laptop, Loader2, MoonStar, Palette, Pencil, Plus, Radio, RefreshCw, Server as ServerIcon, Sparkles, Sun, Trash2, X, Zap } from 'lucide-react';
+import { BarChart3, CalendarClock, Check, CircleAlert, Plug, Puzzle, KeyRound, Laptop, Loader2, MoonStar, Palette, Pencil, Plus, Radio, RefreshCw, ScrollText, Server as ServerIcon, Sparkles, Sun, Trash2, X, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { KeyPrompt } from '@/components/hearth/AddServer';
 import { DeviceKeys, ProviderForm } from '@/components/hearth/AdminSettings';
+import { AuditLog, ConnectorsPage, ExtensionsPage, SchedulesPage, UsagePage } from '@/components/hearth/ServerSettings';
 import type { DirectoryState } from '@/lib/directory';
 import { forgetKey, isDesktop, keyFor, removeServer, renameServer, type Server } from '@/lib/servers';
 import { setThemeMode, useThemeMode, type ThemeMode } from '@/lib/theme';
 import { errorText } from '@/lib/hearth';
+import { notifyPref, setNotifyPref } from '@/lib/notify';
 import { cn } from '@/lib/utils';
 
-type Section = 'servers' | 'providers' | 'appearance';
+type Section = 'servers' | 'providers' | 'appearance' | 'audit' | 'usage' | 'extensions' | 'connectors' | 'schedules';
 
 export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged }: {
   servers: Server[];
@@ -26,6 +28,12 @@ export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged }: {
     { id: 'servers', label: 'Servers and keys', icon: ServerIcon },
     { id: 'providers', label: 'Model providers', icon: Sparkles },
     { id: 'appearance', label: 'Appearance', icon: Palette },
+    // Server sections, when the server has them.
+    ...(dir.state === 'ready' && dir.extensions.includes('usage') ? [{ id: 'usage' as const, label: 'Usage', icon: BarChart3 }] : []),
+    ...(dir.state === 'ready' && dir.extensions.includes('schedules') ? [{ id: 'schedules' as const, label: 'Schedules', icon: CalendarClock }] : []),
+    ...(dir.state === 'ready' && dir.extensions.includes('mcp') ? [{ id: 'connectors' as const, label: 'Connectors', icon: Plug }] : []),
+    ...(dir.state === 'ready' && dir.extensions.includes('extensions') ? [{ id: 'extensions' as const, label: 'Extensions', icon: Puzzle }] : []),
+    ...(dir.state === 'ready' && dir.extensions.includes('audit') ? [{ id: 'audit' as const, label: 'Audit log', icon: ScrollText }] : []),
   ];
   return (
     <div className="flex h-full min-h-0 max-md:flex-col">
@@ -45,6 +53,11 @@ export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged }: {
           {section === 'servers' && <Servers servers={servers} server={server} dir={dir} onAdd={onAdd} onUse={onUse} onKeyChanged={onKeyChanged} />}
           {section === 'providers' && <Providers dir={dir} server={server} />}
           {section === 'appearance' && <Appearance />}
+          {section === 'audit' && dir.state === 'ready' && <AuditLog request={dir.request} />}
+          {section === 'usage' && dir.state === 'ready' && <UsagePage request={dir.request} />}
+          {section === 'extensions' && dir.state === 'ready' && <ExtensionsPage request={dir.request} />}
+          {section === 'connectors' && dir.state === 'ready' && <ConnectorsPage request={dir.request} />}
+          {section === 'schedules' && dir.state === 'ready' && <SchedulesPage request={dir.request} />}
         </div>
       </div>
     </div>
@@ -257,6 +270,28 @@ function Appearance() {
           </button>
         ))}
       </div>
+      <Notifications />
     </>
+  );
+}
+
+function Notifications() {
+  const [on, setOn] = useState(notifyPref);
+  const [note, setNote] = useState<string | null>(null);
+  return (
+    <div className="mt-6">
+      <h3 className="text-sm font-semibold">Notifications</h3>
+      <label className="mt-2 flex items-start gap-3 rounded-xl border bg-card px-3 py-3 text-sm">
+        <input type="checkbox" checked={on} className="mt-0.5 size-4 accent-primary" onChange={async (e) => {
+          const want = e.target.checked;
+          const got = await setNotifyPref(want);
+          setOn(got);
+          setNote(want && !got ? 'Notifications are blocked for Hearth. Allow them in your system or browser settings, then try again.' : null);
+        }} />
+        <span><span className="font-medium">Tell me when a turn finishes or something needs me</span>
+          <span className="block text-xs text-muted-foreground">Only when Hearth isn't the window in front. On this device only.</span></span>
+      </label>
+      {note && <p className="mt-2 text-sm text-destructive">{note}</p>}
+    </div>
   );
 }

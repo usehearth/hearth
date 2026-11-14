@@ -78,6 +78,10 @@ export type UseAcpRuntimeOptions = ExternalStoreSharedOptions &
     onError?: (error: Error) => void;
     /** Called when a run is cancelled. */
     onCancel?: () => void;
+    /** Hearth (parity): Edit on a user message (the server owns the thread, so the app forks it). Enables the button. */
+    onEdit?: (message: AppendMessage) => Promise<void>;
+    /** Hearth (parity): Regenerate an answer (parentId: the user message it answered). Enables the button. */
+    onReload?: (parentId: string | null) => Promise<void>;
 
     /**
      * There is deliberately no `history` adapter: the agent owns an ACP
@@ -203,6 +207,8 @@ export function useAcpRuntime(options: UseAcpRuntimeOptions): AssistantRuntime {
   }, [controller, registry]);
 
   const permissions = options.permissions;
+  const onEdit = options.onEdit;
+  const onReload = options.onReload;
   const autoConnect = options.autoConnect;
   const onError = options.onError;
   const onCancel = options.onCancel;
@@ -268,6 +274,8 @@ export function useAcpRuntime(options: UseAcpRuntimeOptions): AssistantRuntime {
         extras,
         onNew: (message: AppendMessage) => controller.append(message),
         onCancel: () => controller.cancel(),
+        ...(onEdit ? { onEdit } : {}),
+        ...(onReload ? { onReload: (parentId: string | null) => onReload(parentId) } : {}),
         onRespondToToolApproval: (approval: RespondToToolApprovalOptions) =>
           controller.respondToApproval(approval),
         adapters: storeAdapters,
@@ -280,6 +288,8 @@ export function useAcpRuntime(options: UseAcpRuntimeOptions): AssistantRuntime {
       messageRepository,
       shared,
       storeAdapters,
+      onEdit,
+      onReload,
     ],
   );
 

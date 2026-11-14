@@ -3,6 +3,7 @@
 // in the web build it is held in memory for this tab only.
 import { useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { hostDeleteKey, hostGetKey, hostSetKey, inVsCode } from './hostBridge';
 
 /** True inside the desktop app (Tauri), where keys live in the OS keychain. */
 export const isDesktop = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -25,8 +26,15 @@ export const keysReady: Promise<void> = isDesktop
   ? Promise.all(servers.map(async (s) => {
       try { const k = await invoke<string | null>('key_get', { serverId: s.id }); if (k) keys.set(s.id, k); } catch { /* ask for it */ }
     })).then(notify)
-  : Promise.resolve();
-const storeKey = (id: string, key: string) => { keys.set(id, key); if (isDesktop) void invoke('key_set', { serverId: id, key }).catch(() => {}); };
+  : inVsCode
+    // VS Code: keys are in the editor's secret storage (packages/vscode).
+    ? Promise.all(servers.map(async (s) => { const k = await hostGetKey(s.id); if (k) keys.set(s.id, k); })).then(notify)
+    : Promise.resolve();
+const storeKey = (id: string, key: string) => {
+  keys.set(id, key);
+  if (isDesktop) void invoke('key_set', { serverId: id, key }).catch(() => {});
+  if (inVsCode) hostSetKey(id, key);
+};
 
 function load(): Server[] {
   try {
@@ -57,6 +65,7 @@ export function addServer(s: { name: string; url: string; key: string }): Server
 export function removeServer(id: string) {
   keys.delete(id);
   if (isDesktop) void invoke('key_delete', { serverId: id }).catch(() => {});
+  if (inVsCode) hostDeleteKey(id);
   servers = servers.filter((s) => s.id !== id);
   save();
 }
@@ -70,6 +79,7 @@ export function renameServer(id: string, name: string) {
 export function forgetKey(id: string) {
   keys.delete(id);
   if (isDesktop) void invoke('key_delete', { serverId: id }).catch(() => {});
+  if (inVsCode) hostDeleteKey(id);
   notify();
 }
 export function setKey(id: string, key: string) { storeKey(id, key.trim()); notify(); }

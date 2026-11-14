@@ -16,7 +16,9 @@ export interface Card {
   why: string;
   status: string;
   /** 'permission': pick an option; 'approve_deny'; 'text': a typed answer. */
-  answerable: 'permission' | 'approve_deny' | 'text';
+  answerable: 'permission' | 'approve_deny' | 'text' | 'form';
+  /** A question the agent asked with a form (answerable 'form'): the message and the JSON schema of its fields. */
+  form?: { message: string; schema: unknown };
   createdAt?: string;
   decidedBy?: string | null;
   answer?: string | null;
@@ -36,7 +38,7 @@ export interface CardEntry {
 
 export interface Plan { path: string | null; text: string | null; note?: string }
 
-export type CardAnswer = { decision: 'approve' | 'deny' | 'answer'; text?: string; optionId?: string };
+export type CardAnswer = { decision: 'approve' | 'deny' | 'answer'; text?: string; optionId?: string; content?: Record<string, unknown> };
 
 /** Reads a card from a session/update, if it carries one. */
 export function cardOf(update: unknown): Card | undefined {

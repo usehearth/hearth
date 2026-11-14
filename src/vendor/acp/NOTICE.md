@@ -15,3 +15,6 @@ It matches `@assistant-ui/core` 0.3.35, `@assistant-ui/react` 0.15.36 and `assis
 - `AcpClient.ts` (uploads): `initializeMeta`, the server's `_meta` from `initialize` (Hearth reads its extensions and upload limit).
 - `acpThreadState.ts` (uploads): `[attached: <path>]` lines in a user message become file chips too.
 - `globals.d.ts`: declares the build-time version constant.
+- `AcpClient.ts` (parity): `setMode`, `setConfigOption` and `sessionMeta` (the session answer's `_meta.hearth`), for the mode, model and settings pickers.
+- `conversions.ts` (parity): a tool call keeps the agent's last `content` collection in `providerMetadata.acp.content` (diffs with old and new text, shell output), and the text fallback for a diff is a real unified diff.
+- `useAcpRuntime.ts` (parity): optional `onEdit` and `onReload`, passed to the external store (Hearth forks the thread on the server for both).

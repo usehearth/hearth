@@ -8,4 +8,6 @@ export default defineConfig({
   resolve: { alias: { '@': path.resolve(import.meta.dirname, 'src') } },
   server: { port: 5178, strictPort: true },
   clearScreen: false,
-});
+  // Unit tests are the app's own (packages/* have their own test runners).
+  test: { include: ['src/**/*.test.ts'] },
+} as never);

@@ -14,13 +14,34 @@ export interface ProjectView {
   availableProviders: { name: string; kind: string; priority: number }[];
   planFirst: boolean;
   tools: string[];
+  /** MCP servers that can be picked (admin devices change them; servers with `mcp`). */
+  toolChoices?: string[];
+  /** The repo's own .mcp.json (personal projects). */
+  repoMcp?: { enabled: boolean; found: { name: string; type: string; url: string | null; command: string | null; hash: string; usable: boolean }[]; approved: string[] } | null;
   instructions: string | null;
+  /** Permission rules (servers with the `permissions` extension). */
+  permissions?: { mode: string; allow: string[]; deny: string[]; defaults: string[]; alwaysDenied: string[]; allowAuto?: boolean };
+  /** Monthly budget (servers with `usage`), and what this month cost so far. */
+  budget?: { monthlyUsd: number; warnAt: number } | null;
+  monthCost?: number;
+  /** The git remote (servers with `git`): its URL and whether a token is set (never the token). */
+  remote?: { url: string; hasToken: boolean } | null;
+  /** More folders the agents may use (servers that have them; admin devices change them). */
+  extraFolders?: string[];
   canEdit: boolean;
 }
 
+const MODES = [
+  { id: 'default', name: 'Ask', sub: 'Asks before anything not allowed below' },
+  { id: 'acceptEdits', name: 'Accept edits', sub: 'Edits inside the project without asking' },
+  { id: 'plan', name: 'Plan', sub: 'Reads and plans; changes nothing' },
+  { id: 'auto', name: 'Auto', sub: 'Goes ahead; asks only for risky things' },
+];
+const lines = (t: string) => t.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+
 type Request = <T = unknown>(method: string, params?: unknown) => Promise<T>;
 
-export function ProjectSettings({ project, request }: { project: string; request: Request }) {
+export function ProjectSettings({ project, request, extensions = [] }: { project: string; request: Request; extensions?: string[] }) {
   const [view, setView] = useState<ProjectView | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -32,6 +53,18 @@ export function ProjectSettings({ project, request }: { project: string; request
   const [order, setOrder] = useState<string[]>([]);
   const [planFirst, setPlanFirst] = useState(false);
   const [instructions, setInstructions] = useState('');
+  const [mode, setMode] = useState('default');
+  const [allowAuto, setAllowAuto] = useState(false);
+  const [allowText, setAllowText] = useState('');
+  const [denyText, setDenyText] = useState('');
+  const [budget, setBudget] = useState('');
+  const [tools, setTools] = useState<string[]>([]);
+  const [remoteUrl, setRemoteUrl] = useState('');
+  const [folders, setFolders] = useState('');
+  const [remoteToken, setRemoteToken] = useState('');
+  const [repoMcp, setRepoMcp] = useState(false);
+  const [repoApproved, setRepoApproved] = useState<string[]>([]);
+  const [warnAt, setWarnAt] = useState('80');
 
   const fill = (v: ProjectView) => {
     setView(v);
@@ -41,6 +74,18 @@ export function ProjectSettings({ project, request }: { project: string; request
     setOrder(v.providers ?? v.availableProviders.map((p) => p.name));
     setPlanFirst(v.planFirst);
     setInstructions(v.instructions ?? '');
+    setMode(v.permissions?.mode ?? 'default');
+    setAllowAuto(!!v.permissions?.allowAuto);
+    setAllowText((v.permissions?.allow ?? []).join('\n'));
+    setDenyText((v.permissions?.deny ?? []).join('\n'));
+    setBudget(v.budget ? String(v.budget.monthlyUsd) : '');
+    setTools(v.tools);
+    setRemoteUrl(v.remote?.url ?? '');
+    setFolders((v.extraFolders ?? []).join('\n'));
+    setRemoteToken('');
+    setRepoMcp(!!v.repoMcp?.enabled);
+    setRepoApproved(v.repoMcp?.approved ?? []);
+    setWarnAt(v.budget ? String(Math.round(v.budget.warnAt * 100)) : '80');
   };
   useEffect(() => {
     setView(null); setErr(null); setSaved(false);
@@ -53,7 +98,13 @@ export function ProjectSettings({ project, request }: { project: string; request
     try {
       const m: Record<string, string | null> = {};
       for (const r of view!.roles) m[r.role] = models[r.role]?.trim() || null;
-      fill(await request<ProjectView>('_hearth/project/update', { project, name, models: m, providers: allProviders ? null : order, planFirst, ...(view!.instructions !== null ? { instructions } : {}) }));
+      fill(await request<ProjectView>('_hearth/project/update', { project, name, models: m, providers: allProviders ? null : order, planFirst, ...(view!.instructions !== null ? { instructions } : {}),
+        ...(view!.permissions ? { permissions: { mode: mode === 'auto' && !allowAuto ? 'default' : mode, allow: lines(allowText), deny: lines(denyText), ...(allowAuto !== !!view!.permissions.allowAuto ? { allowAuto } : {}) } } : {}),
+        ...(view!.toolChoices && (tools.join() !== view!.tools.join()) ? { tools } : {}),
+        ...(view!.extraFolders && lines(folders).join('\n') !== view!.extraFolders.join('\n') ? { extraFolders: lines(folders) } : {}),
+        ...(extensions.includes('git') && (remoteUrl.trim() !== (view!.remote?.url ?? '') || remoteToken) ? { remote: remoteUrl.trim() ? { url: remoteUrl.trim(), ...(remoteToken ? { token: remoteToken } : {}) } : null } : {}),
+        ...(view!.repoMcp && (repoMcp !== view!.repoMcp.enabled || repoApproved.join() !== view!.repoMcp.approved.join()) ? { repoMcp, repoMcpApproved: repoApproved } : {}),
+        ...(view!.monthCost !== undefined ? { budget: budget.trim() ? { monthlyUsd: Number(budget), warnAt: Number(warnAt) / 100 } : null } : {}) }));
       setSaved(true);
     } catch (e2) { setErr(errorText(e2)); } finally { setBusy(false); }
   };
@@ -136,7 +187,89 @@ export function ProjectSettings({ project, request }: { project: string; request
           </label>
         </Section>
 
-        {view.tools.length > 0 && (
+        {view.extraFolders && (
+          <Section title="Extra folders" sub="More folders this project's agents may read and edit, one per line (they must be on the runner's machine, in its folders). Needs an admin device.">
+            <textarea value={folders} onChange={(e) => setFolders(e.target.value)} rows={2} spellCheck={false} aria-label="Extra folders"
+              placeholder="/workspace/shared-lib" className={cn(inputCls, 'font-mono text-xs')} />
+          </Section>
+        )}
+
+        {extensions.includes('git') && (
+          <Section title="Git remote" sub="Where branches are pushed and pull requests opened (GitHub). Agents never push; you do, here. Changing it needs an admin device.">
+            <input value={remoteUrl} onChange={(e) => setRemoteUrl(e.target.value)} placeholder="https://github.com/owner/repo.git" aria-label="Remote URL" className={cn(inputCls, 'font-mono')} />
+            <input value={remoteToken} onChange={(e) => setRemoteToken(e.target.value)} type="password" autoComplete="off" aria-label="Remote token"
+              placeholder={view.remote?.hasToken ? 'Token set (type to replace)' : 'Token (a fine-grained token for this repo)'} className={cn(inputCls, 'mt-2')} />
+            {view.remote && <PullRequests project={project} request={request} />}
+          </Section>
+        )}
+
+        {view.permissions && (
+          <Section title="Permissions" sub="What agents may do without asking. Threads can change their own mode; “Always allow” on a prompt adds a rule here (project) or to the thread.">
+            <div role="radiogroup" aria-label="Mode new threads start in" className={cn('grid gap-2 max-sm:grid-cols-1', allowAuto ? 'grid-cols-4' : 'grid-cols-3')}>
+              {MODES.filter((m) => m.id !== 'auto' || allowAuto).map((m) => (
+                <button type="button" key={m.id} role="radio" aria-checked={mode === m.id} onClick={() => setMode(m.id)}
+                  className={cn('rounded-xl border bg-card px-3 py-2 text-left text-sm hover:bg-accent', mode === m.id && 'border-primary ring-2 ring-primary/20')}>
+                  <span className="font-medium">{m.name}</span><span className="block text-xs text-muted-foreground">{m.sub}</span>
+                </button>
+              ))}
+            </div>
+            {!view.client && (
+              <label className="mt-3 flex items-start gap-2 text-sm">
+                <input type="checkbox" checked={allowAuto} onChange={(e) => setAllowAuto(e.target.checked)} className="mt-0.5 size-4 accent-(--primary)" />
+                <span>Allow auto mode<span className="block text-xs text-muted-foreground">Threads may then go ahead without asking, except for risky things (the network, deleting, secrets, git history). The runner still checks every call. Needs an admin device.</span></span>
+              </label>
+            )}
+            <label className="mt-3 block text-xs font-medium text-muted-foreground" htmlFor="perm-allow">Also allowed (one rule per line)</label>
+            <textarea id="perm-allow" value={allowText} onChange={(e) => setAllowText(e.target.value)} rows={4} spellCheck={false}
+              placeholder={'Bash(npm test:*)\nWebFetch(domain:docs.example.com)\nmcp__server__tool'} className={cn(inputCls, 'font-mono text-xs')} />
+            <label className="mt-3 block text-xs font-medium text-muted-foreground" htmlFor="perm-deny">Never allowed (one rule per line)</label>
+            <textarea id="perm-deny" value={denyText} onChange={(e) => setDenyText(e.target.value)} rows={3} spellCheck={false}
+              placeholder="Bash(curl:*)" className={cn(inputCls, 'font-mono text-xs')} />
+            <p className="mt-2 text-xs text-muted-foreground">Always allowed: <span className="font-mono">{view.permissions.defaults.join(', ')}</span>. Always refused: <span className="font-mono">{view.permissions.alwaysDenied.join(', ')}</span>.</p>
+          </Section>
+        )}
+
+        {view.monthCost !== undefined && (
+          <Section title="Budget" sub={`This month so far: $${view.monthCost.toFixed(2)}. Leave empty for no budget.`}>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <label className="flex items-center gap-1.5">$<input value={budget} onChange={(e) => setBudget(e.target.value)} inputMode="decimal" placeholder="none" aria-label="Monthly budget in US dollars" className={cn(inputCls, 'w-28')} /> a month</label>
+              <label className="flex items-center gap-1.5">warn at <input value={warnAt} onChange={(e) => setWarnAt(e.target.value)} inputMode="numeric" aria-label="Warning level in percent" className={cn(inputCls, 'w-16')} />%</label>
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">At the warning level you get a note; at the budget, new work in this project stops until you raise it.</p>
+          </Section>
+        )}
+
+        {view.toolChoices && (
+          <Section title="Tools" sub="The MCP servers this project's agents get (changing them needs an admin device). Add servers in Settings > Connectors.">
+            <div className="flex flex-wrap gap-1.5">
+              {[...new Set([...view.toolChoices, ...tools])].map((t) => (
+                <button type="button" key={t} aria-pressed={tools.includes(t)} onClick={() => setTools((x) => (x.includes(t) ? x.filter((y) => y !== t) : [...x, t]))}
+                  className={cn('flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs', tools.includes(t) ? 'border-primary bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-accent')}>
+                  <Wrench className="size-3" />{t}{tools.includes(t) && <Check className="size-3" />}
+                </button>
+              ))}
+            </div>
+            {view.repoMcp && (
+              <div className="mt-3 rounded-lg border p-2.5 text-sm">
+                <label className="flex items-start gap-2">
+                  <input type="checkbox" checked={repoMcp} onChange={(e) => setRepoMcp(e.target.checked)} className="mt-0.5 size-4 accent-(--primary)" />
+                  <span>Use the repo's own .mcp.json<span className="block text-xs text-muted-foreground">Only servers you allow below, only http ones (a command in the repo never runs), and their tools still ask.</span></span>
+                </label>
+                {repoMcp && (view.repoMcp.found.length === 0
+                  ? <p className="mt-2 text-xs text-muted-foreground">Nothing found yet: the file is read when a session starts.</p>
+                  : <ul className="mt-2 space-y-1">{view.repoMcp.found.map((f) => (
+                      <li key={f.hash} className="flex items-center gap-2 text-xs">
+                        <input type="checkbox" disabled={!f.usable} checked={repoApproved.includes(f.hash)} aria-label={`Allow ${f.name}`}
+                          onChange={(e) => setRepoApproved((a) => (e.target.checked ? [...a, f.hash] : a.filter((h) => h !== f.hash)))} className="size-3.5 accent-(--primary)" />
+                        <span className="font-mono">{f.name}</span>
+                        <span className="min-w-0 flex-1 truncate text-muted-foreground">{f.usable ? f.url : f.command ? `command: ${f.command} (never run)` : 'not usable'}</span>
+                      </li>))}</ul>)}
+              </div>
+            )}
+          </Section>
+        )}
+
+        {!view.toolChoices && view.tools.length > 0 && (
           <Section title="Tools" sub="Set on the server.">
             <div className="flex flex-wrap gap-1.5">{view.tools.map((t) => <span key={t} className="flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-xs"><Wrench className="size-3" />{t}</span>)}</div>
           </Section>
@@ -149,6 +282,49 @@ export function ProjectSettings({ project, request }: { project: string; request
           {err && <span className="text-sm text-destructive">{err}</span>}
         </div>
       </form>
+    </div>
+  );
+}
+
+/** Push a branch and open a pull request; the project's pull requests with their CI. */
+function PullRequests({ project, request }: { project: string; request: Request }) {
+  const [prs, setPrs] = useState<{ number: number; url: string; branch: string; base: string; state: string; ci: string | null; ci_detail: string | null }[] | null>(null);
+  const [branch, setBranch] = useState('');
+  const [title, setTitle] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = () => request<{ prs: NonNullable<typeof prs> }>('_hearth/git/prs', { project }).then((r) => setPrs(r.prs), () => setPrs([]));
+  useEffect(() => { void load(); }, [project]); // eslint-disable-line react-hooks/exhaustive-deps
+  const go = async (what: 'push' | 'pr') => {
+    setBusy(what); setMsg(null);
+    try {
+      if (what === 'push') { await request('_hearth/git/push', { project, branch }); setMsg(`Pushed ${branch}.`); }
+      else { const r = await request<{ number: number; url: string; existing: boolean }>('_hearth/git/pr', { project, branch, title: title || branch }); setMsg(`${r.existing ? 'Already open' : 'Opened'}: PR #${r.number}`); void load(); }
+    } catch (e) { setMsg(errorText(e)); } finally { setBusy(null); }
+  };
+  return (
+    <div className="mt-3 rounded-lg border p-2.5 text-sm">
+      <div className="flex flex-wrap gap-2">
+        <input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="branch" aria-label="Branch" className={cn(inputCls, 'w-44 font-mono')} />
+        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Pull request title" aria-label="Pull request title" className={cn(inputCls, 'min-w-40 flex-1')} />
+      </div>
+      <div className="mt-2 flex gap-2">
+        <Button type="button" size="sm" variant="outline" disabled={!branch || !!busy} onClick={() => void go('push')}>{busy === 'push' && <Loader2 className="size-3.5 animate-spin" />}Push</Button>
+        <Button type="button" size="sm" disabled={!branch || !!busy} onClick={() => void go('pr')}>{busy === 'pr' && <Loader2 className="size-3.5 animate-spin" />}Push and open PR</Button>
+      </div>
+      {msg && <p className="mt-2 text-xs text-muted-foreground">{msg}</p>}
+      {prs && prs.length > 0 && (
+        <ul className="mt-2 space-y-1 text-xs">
+          {prs.map((p) => (
+            <li key={p.number} className="flex items-center gap-2">
+              <a href={p.url} target="_blank" rel="noreferrer" className="font-medium underline-offset-2 hover:underline">#{p.number}</a>
+              <span className="font-mono">{p.branch} → {p.base}</span>
+              <span className={cn('ml-auto rounded px-1.5', p.ci === 'failure' ? 'bg-destructive/15 text-destructive' : p.ci === 'success' ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-muted text-muted-foreground')}>
+                {p.state !== 'open' ? p.state : p.ci === 'failure' ? `CI failed: ${p.ci_detail ?? ''}` : p.ci ?? 'no checks'}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

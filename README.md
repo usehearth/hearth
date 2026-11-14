@@ -6,7 +6,13 @@
 
 Hearth is a window onto your AI server. It keeps nothing itself: the sidebar is the server's own chat list (`session/list`), opening a thread replays it from the server (`session/load`), and a thread you start on one device is the same thread on every other one.
 
-> **Status: early (v0.1).** Connects to an ACP server over WebSocket, lists its threads by project, opens and replays a thread, chats, and answers permission prompts. The live sidebar, plan panel and cards are next.
+> **Status: v0.1, in daily use.** What it does today:
+> - **Threads:** a live sidebar by project (pinned first), search, rename, pin, archive, delete; Edit, Regenerate and Rewind fork a thread at any turn (Rewind can also put the project's files back as they were).
+> - **Chat:** streaming answers, slash commands from the agent (a `/` menu), edits as real diffs, shell commands as a terminal, a context and cost meter, the mode (Ask, Accept edits, Plan) and the model (provider, model, effort) per thread, live.
+> - **Approvals:** permission prompts in the chat or as cards, with "Always allow" for a thread or a project; a Needs-you view; notifications when a turn ends or something needs you.
+> - **Beside the chat:** the thread's living plan, the files it made (with previews), its subagents and running tasks.
+> - **Settings:** servers and keys, model providers, connectors (MCP, OAuth sign-in), extensions (skills, slash commands, subagents, hooks), schedules, usage and budgets, the audit log, project settings (instructions, models, rules, tools, git remote, pull requests).
+> - **Everywhere:** web, desktop (Windows, macOS, Linux), phone layout, a VS Code extension (`packages/vscode`), a command-line tool and an ACP bridge for editors (`packages/cli`), and a TypeScript SDK (`packages/sdk`).
 
 ## Run it
 
@@ -29,8 +35,13 @@ Add a server: its address (for example `wss://ai.home.example`, or `host:port`; 
 ## How it talks to a server
 
 - **Transport:** ACP over one WebSocket, per the ACP remote transport RFD. The key goes as a `bearer.<key>` WebSocket subprotocol, because browsers can't set headers.
-- **Methods used:** `initialize`, `session/list`, `session/new`, `session/load`, `session/prompt`, `session/cancel`, plus `session/request_permission` from the server.
+- **Methods used:** `initialize`, `session/list` (paged), `session/new`, `session/load`, `session/prompt`, `session/cancel`, `session/set_mode`, `session/set_config_option`, plus `session/request_permission` from the server.
+- **Hearth extensions:** a server lists the `_hearth/*` methods it has in `initialize` (`_meta.hearth.extensions`): plan, cards, files, threads (rename, pin, archive, delete, search, fork), modes, permissions (always allow, rules), usage, extensions, mcp (connectors, OAuth), git (push, pull requests), schedules, audit, project and device settings. Each screen shows only when its server has it.
 - **Optional extras:** servers may add `_meta.hearth` on list items and updates (`project`, `projectName`, `kind: main | work`, `status`). Hearth groups threads by project with them; plain ACP servers still work, grouped by folder. `session/new` sends `_meta.hearth { project, main?, title? }`.
+
+## Releases
+
+A tag `v*` builds Windows, macOS and Linux installers on GitHub Actions (`.github/workflows/release.yml`) as a draft release, with signed self-updates when the signing secrets are set (see the workflow's header). Local builds don't need them.
 
 ## Privacy
 

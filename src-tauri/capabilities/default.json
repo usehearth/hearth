@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window may call Hearth's own commands (the keychain ones) and nothing else.",
+  "description": "The main window may call Hearth's own commands (the keychain ones), show notifications and open sign-in pages in the browser, nothing else.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "notification:default", "opener:allow-open-url"]
 }

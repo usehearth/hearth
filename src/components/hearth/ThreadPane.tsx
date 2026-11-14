@@ -4,12 +4,36 @@
 // the thread's open cards (`_meta.hearth.card`, answered with `_hearth/card/answer`) and this turn's checklist (ACP plan).
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AssistantRuntimeProvider, useAui, useAuiState } from '@assistant-ui/react';
-import { ChevronDown, Circle, FolderOpen, CircleCheck, CircleDot, ListChecks, Loader2, PanelRightClose, PanelRightOpen, RefreshCw } from 'lucide-react';
+import { AssistantRuntimeProvider, useAuiState, WebSpeechDictationAdapter, WebSpeechSynthesisAdapter } from '@assistant-ui/react';
+import { Bot, ChevronDown, Circle, FolderOpen, CircleCheck, CircleDot, ListChecks, Loader2, PanelRightClose, PanelRightOpen, RefreshCw } from 'lucide-react';
 import { AcpClient, useAcpPlan, useAcpRuntime, useAcpSessionTitle } from '@/vendor/acp';
 import type { AcpWebSocketLike } from '@/vendor/acp/AcpClient';
 import { Thread, type ThreadComponents } from '@/components/assistant-ui/elements/thread.aui';
 import { CardView } from '@/components/hearth/CardView';
+import { UsageMeter } from '@/components/hearth/UsageMeter';
+import { TasksList } from '@/components/hearth/TasksPanel';
+import { ExportThread } from '@/components/hearth/ExportThread';
+import { ComposerBar } from '@/components/hearth/ComposerBar';
+import { notify } from '@/lib/notify';
+import { MessageActionsProvider } from '@/components/hearth/messageActions';
+import { MentionContext, QueueContext, ShellContext } from '@/components/hearth/SlashMenu';
+import type { AppendMessage } from '@assistant-ui/react';
+
+const textOf = (content: readonly { type: string; text?: string }[] | undefined) =>
+  (content ?? []).map((p) => (p.type === 'text' ? p.text ?? '' : '')).join('').trim();
+
+/** True once the thread has finished opening: session/load answered (so its whole history is shown) and not loading. */
+function useAuiStateOf(runtime: { thread: { getState: () => { isLoading: boolean }; subscribe: (cb: () => void) => () => void } }, client: AcpClient) {
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    const check = () => setLoaded(!!client.sessionId && !runtime.thread.getState().isLoading);
+    check();
+    const a = runtime.thread.subscribe(check);
+    const b = client.subscribeConnectionChange(check);
+    return () => { a(); b(); };
+  }, [runtime, client]);
+  return loaded;
+}
 import { Markdown } from '@/components/hearth/Markdown';
 import { FilesList, FileView, type FileContent, type FileItem } from '@/components/hearth/FilesPanel';
 import { openSocket } from '@/lib/servers';
@@ -29,30 +53,86 @@ export interface ThreadEvents {
   onTitle: (title: string) => void;
   /** A turn finished: the sidebar may have changed. */
   onTurnEnd: () => void;
+  /** The thread was forked (Edit, Regenerate, Rewind): open the fork, then send or prefill its first message. */
+  onFork?: (sessionId: string, title: string, first: FirstMessage) => void;
 }
 
-export function ThreadPane({ url, serverKey, target, events, actionsEl, seed }: {
-  url: string; serverKey: string; target: ThreadTarget; events: ThreadEvents;
-  /** Text to put in the composer once the thread is open (Continue in Hearth's summary). */
-  seed?: string;
+/** What a fork opens with: a message sent at once (Edit, Regenerate) or put in the composer (Rewind). */
+export interface FirstMessage { text: string; send: boolean }
+
+export function ThreadPane({ url, serverKey, target, events, actionsEl, first, insert }: {
+  url: string; serverKey: string; target: ThreadTarget; events: ThreadEvents; first?: FirstMessage;
+  /** Text from the editor (VS Code: Send selection) to add to the composer; n changes for each new one. */
+  insert?: { text: string; n: number } | null;
   /** Where the thread's header buttons go (the plan toggle). */
   actionsEl?: HTMLElement | null;
 }) {
-  const client = useMemo(() => new AcpClient({
-    url,
-    cwd: target.cwd || '/',
-    clientInfo: { name: 'hearth', version: '0.1.0' },
-    webSocketFactory: (u) => openSocket(u, serverKey) as unknown as AcpWebSocketLike,
-    ...(target.kind === 'open' ? { sessionId: target.sessionId } : { newSessionMeta: target.meta }),
-  }), [url, serverKey, target]);
+  // A dropped socket reconnects by itself: a fresh connection opens the thread again with session/load, so everything
+  // said meanwhile (another window, a turn that kept running on the server) shows up. `gen` makes that new connection.
+  const [gen, setGen] = useState(0);
+  const [reconnecting, setReconnecting] = useState<boolean | 'stopped'>(false);
+  const known = useRef<string | undefined>(target.kind === 'open' ? target.sessionId : undefined);
+  const fails = useRef(0);
+  const client = useMemo(() => {
+    const sid = known.current;
+    return new AcpClient({
+      url,
+      cwd: target.cwd || '/',
+      clientInfo: { name: 'hearth', version: '0.1.0' },
+      webSocketFactory: (u) => openSocket(u, serverKey) as unknown as AcpWebSocketLike,
+      ...(sid ? { sessionId: sid } : target.kind === 'new' ? { newSessionMeta: target.meta } : {}),
+    });
+  }, [url, serverKey, target, gen]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => client.dispose(), [client]);
-  return <Runtime client={client} events={events} actionsEl={actionsEl} seed={seed} />;
+  useEffect(() => {
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let wasUp = false;
+    const off = client.subscribeConnectionChange((s) => {
+      if (!live) return;
+      if (client.sessionId) known.current = client.sessionId;
+      if (s === 'connected' && client.sessionId) { wasUp = true; fails.current = 0; setReconnecting(false); }
+      if (s === 'disconnected' && known.current && !timer && (wasUp || fails.current > 0)) {
+        // Each refused try counts toward the server's bad-key lockout, so stop after a few and offer a button.
+        if (fails.current >= GIVE_UP_AFTER) { setReconnecting('stopped'); return; }
+        setReconnecting(true);
+        const wait = RECONNECT_MS[Math.min(fails.current++, RECONNECT_MS.length - 1)];
+        timer = setTimeout(() => { if (live) setGen((g) => g + 1); }, wait);
+      }
+    });
+    return () => { live = false; off(); if (timer) clearTimeout(timer); };
+  }, [client]);
+  // Back online or back to the window: try now rather than wait out the backoff.
+  useEffect(() => {
+    if (reconnecting !== true) return;
+    const now = () => setGen((g) => g + 1);
+    window.addEventListener('online', now);
+    window.addEventListener('focus', now);
+    return () => { window.removeEventListener('online', now); window.removeEventListener('focus', now); };
+  }, [reconnecting]);
+  return (
+    <div className="relative h-full">
+      {reconnecting && (
+        <div role="status" className="absolute top-2 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border bg-background/95 px-3 py-1 text-xs text-muted-foreground shadow-sm">
+          {reconnecting === 'stopped'
+            ? <>Disconnected.<button onClick={() => { fails.current = 0; setReconnecting(true); setGen((g) => g + 1); }} className="font-medium text-foreground underline-offset-2 hover:underline">Reconnect</button></>
+            : <><Loader2 className="size-3 animate-spin" />Reconnecting…</>}
+        </div>
+      )}
+      <Runtime key={gen} client={client} events={events} actionsEl={actionsEl} first={gen === 0 ? first : undefined} insert={insert} />
+    </div>
+  );
 }
+
+const RECONNECT_MS = [1000, 2000, 5000, 10000, 30000];
+const GIVE_UP_AFTER = 6;
 
 /** How long an answered card stays on screen (greyed, with who answered) before it goes. */
 const ANSWERED_LINGER_MS = 6000;
 
 interface Extras {
+  client: AcpClient;
+  onError: (message: string) => void;
   sessionId?: string;
   supported: boolean;
   cards: Card[];
@@ -93,8 +173,8 @@ function useThreadExtras(client: AcpClient): Extras {
   const loadCards = useCallback(() => {
     if (!sessionId || !connected) return;
     client.extRequest<{ cards: CardEntry[] }>('_hearth/cards', { sessionId }).then((r) => {
-      // Permission prompts of this thread's own agent show in the chat (ACP request_permission), not as cards here.
-      const open = (r.cards ?? []).map((e) => e.card).filter((c) => c.answerable !== 'permission');
+      // Permission prompts are cards too: during this window's own turn they show in the chat instead (AboveComposer).
+      const open = (r.cards ?? []).map((e) => e.card);
       const ids = new Set(open.map((c) => c.id));
       setCards((prev) => [...open, ...prev.filter((c) => c.status !== 'open' && !ids.has(c.id))]);
     }, unsupported);
@@ -125,7 +205,7 @@ function useThreadExtras(client: AcpClient): Extras {
   }), [client, refreshPlan, loadCards, refreshFiles]);
   useEffect(() => client.subscribeSessionUpdate((_sid, update) => {
     const c = cardOf(update);
-    if (!c || c.answerable === 'permission') return;
+    if (!c) return;
     setCards((cs) => mergeCard(cs, c));
     linger(c);
   }), [client, linger]);
@@ -135,16 +215,24 @@ function useThreadExtras(client: AcpClient): Extras {
     if (r?.card) { setCards((cs) => mergeCard(cs, { ...card, ...r.card })); linger(r.card); }
   }, [client, linger]);
 
-  return { sessionId, supported, cards, answer, plan, planLoading, refreshPlan, files, filesSupported, filesLoading, refreshFiles, readFile };
+  return { client, onError: () => {}, sessionId, supported, cards, answer, plan, planLoading, refreshPlan, files, filesSupported, filesLoading, refreshFiles, readFile };
 }
 
 const ExtrasContext = createContext<Extras | null>(null);
-const components: ThreadComponents = { AboveComposer: () => <AboveComposer /> };
+const components: ThreadComponents = { AboveComposer: () => <AboveComposer />, ComposerExtra: () => <ComposerExtra /> };
 
-function Runtime({ client, events, actionsEl, seed }: { client: AcpClient; events: ThreadEvents; actionsEl?: HTMLElement | null; seed?: string }) {
+/** Beside the attach button: mode, model and usage. */
+function ComposerExtra() {
+  const x = useContext(ExtrasContext);
+  if (!x) return <UsageMeter />;
+  return <ComposerBar client={x.client} onError={x.onError} />;
+}
+
+function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClient; events: ThreadEvents; actionsEl?: HTMLElement | null; first?: FirstMessage; insert?: { text: string; n: number } | null }) {
   const ev = useRef(events);
   ev.current = events;
   // Images and text files, as this server takes them (its promptCapabilities); a refused file says why.
+  const runtimeRef = useRef<ReturnType<typeof useAcpRuntime> | null>(null);
   const attachments = useMemo(() => {
     const a = new HearthAttachments(() => {
       const pc = client.agentCapabilities?.promptCapabilities;
@@ -152,38 +240,133 @@ function Runtime({ client, events, actionsEl, seed }: { client: AcpClient; event
       const h = client.initializeMeta?.hearth;
       const uploads = Array.isArray(h?.extensions) && h.extensions.includes('uploads') ? Number(h.uploadMaxBytes) || 15 * 1024 * 1024 : undefined;
       return { image: !!pc.image, embeddedContext: !!pc.embeddedContext, uploadMaxBytes: uploads };
-    });
+    }, () => runtimeRef.current?.thread.composer.getState().attachments.filter((x) => x.type === 'image').length ?? 0);
     const add = a.add.bind(a);
     a.add = async (st) => { try { return await add(st); } catch (e) { ev.current.onError((e as Error).message); throw e; } };
     return a;
   }, [client]);
-  const runtime = useAcpRuntime({ client, permissions: 'ask', onError: (e) => ev.current.onError(e.message), adapters: { attachments } });
+  // Edit, Regenerate and Rewind: the server owns the thread, so each forks it at that turn and opens the fork.
+  const fork = useCallback(async (keepTurns: number, text: string, send: boolean, restoreFiles = false, replace = true) => {
+    const ext = client.initializeMeta?.hearth?.extensions;
+    if (!Array.isArray(ext) || !ext.includes('fork')) throw new Error("This server can't fork threads.");
+    const r = await client.extRequest<{ sessionId: string; title: string }>('_hearth/thread/fork', { sessionId: client.sessionId, keepTurns, restoreFiles, replace });
+    ev.current.onFork?.(r.sessionId, r.title, { text, send });
+  }, [client]);
+  const userTurn = (messageId: string | null, inclusive: boolean) => {
+    const msgs = runtimeRef.current?.thread.getState().messages ?? [];
+    const i = messageId ? msgs.findIndex((m) => m.id === messageId) : -1;
+    return { turn: msgs.slice(0, inclusive ? i + 1 : Math.max(i, 0)).filter((m) => m.role === 'user').length, message: i >= 0 ? msgs[i] : undefined };
+  };
+  const onEdit = useCallback(async (m: AppendMessage) => {
+    const { turn } = userTurn(m.parentId, true);
+    await fork(turn, textOf(m.content), true).catch((e) => ev.current.onError((e as Error).message));
+  }, [fork]); // eslint-disable-line react-hooks/exhaustive-deps
+  const onReload = useCallback(async (parentId: string | null) => {
+    const { turn, message } = userTurn(parentId, false);
+    if (!message) return;
+    await fork(turn, textOf(message.content), true).catch((e) => ev.current.onError((e as Error).message));
+  }, [fork]); // eslint-disable-line react-hooks/exhaustive-deps
+  const messageActions = useMemo(() => ({
+    rewind: async (messageId: string, restoreFiles: boolean, replace: boolean) => {
+      const { turn, message } = userTurn(messageId, false);
+      await fork(turn, message ? textOf(message.content) : '', false, restoreFiles, replace);
+    },
+  }), [fork]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Voice: dictation into the composer and reading answers aloud, where the browser or webview has Web Speech.
+  const speech = useMemo(() => ({
+    ...(WebSpeechDictationAdapter.isSupported?.() ? { dictation: new WebSpeechDictationAdapter() } : {}),
+    ...(typeof window !== 'undefined' && 'speechSynthesis' in window ? { speech: new WebSpeechSynthesisAdapter() } : {}),
+  }), []);
+  // "!command": a shell command in this thread (servers with the shell extension; the thread must exist).
+  const shell = useMemo(() => {
+    const ext = client.initializeMeta?.hearth?.extensions;
+    if (!Array.isArray(ext) || !ext.includes('shell')) return null;
+    return async (command: string) => {
+      if (!client.sessionId) { ev.current.onError('Send a first message, then run commands in this thread.'); return; }
+      try { await client.extRequest('_hearth/shell', { sessionId: client.sessionId, command }); }
+      catch (e) { ev.current.onError((e as Error).message); }
+    };
+  }, [client, client.initializeMeta]); // eslint-disable-line react-hooks/exhaustive-deps
+  // @-mentions: the project's files (servers with the mentions extension).
+  const findFiles = useMemo(() => {
+    const ext = client.initializeMeta?.hearth?.extensions;
+    if (!Array.isArray(ext) || !ext.includes('mentions')) return null;
+    return async (query: string) => (client.sessionId ? (await client.extRequest<{ files: string[] }>('_hearth/files/find', { sessionId: client.sessionId, query })).files : []);
+  }, [client, client.initializeMeta]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Messages typed while the agent works, sent in order when it finishes.
+  const [queue, setQueue] = useState<string[]>([]);
+  const queueApi = useMemo(() => ({ items: queue, add: (t: string) => setQueue((q) => [...q, t]), remove: (i: number) => setQueue((q) => q.filter((_, j) => j !== i)) }), [queue]);
+  const runtime = useAcpRuntime({ client, permissions: 'ask', onError: (e) => ev.current.onError(e.message), adapters: { attachments, ...speech }, onEdit, onReload });
+  runtimeRef.current = runtime;
+  // When the agent finishes, the next queued message goes (once: a send in flight waits until the run has started).
+  const queueRef = useRef(queue);
+  queueRef.current = queue;
+  const sending = useRef(false);
+  useEffect(() => {
+    const tick = () => {
+      const st = runtime.thread.getState();
+      if (st.isRunning) { sending.current = false; return; }
+      if (st.isLoading || sending.current || !queueRef.current.length) return;
+      const [next, ...rest] = queueRef.current;
+      queueRef.current = rest;
+      setQueue(rest);
+      sending.current = true;
+      void runtime.thread.append({ role: 'user', content: [{ type: 'text', text: next }] });
+      setTimeout(() => { sending.current = false; }, 3000); // a send that never started a run does not block the queue
+    };
+    tick();
+    return runtime.thread.subscribe(tick);
+  }, [runtime, queue.length]);
+  // A fork opens with its first message: sent (Edit, Regenerate) or ready in the composer (Rewind).
+  // Text from the editor goes at the end of whatever is being typed.
+  useEffect(() => {
+    if (!insert) return;
+    const cur = runtime.thread.composer.getState().text;
+    runtime.thread.composer.setText(cur ? `${cur.replace(/\s*$/, '')}\n\n${insert.text}` : insert.text);
+  }, [insert?.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  const firstDone = useRef(false);
+  const loaded = useAuiStateOf(runtime, client);
+  useEffect(() => {
+    if (!first || firstDone.current || !loaded) return;
+    firstDone.current = true;
+    if (first.send && first.text.trim()) void runtime.thread.append({ role: 'user', content: [{ type: 'text', text: first.text }] });
+    else runtime.thread.composer.setText(first.text);
+  }, [first, loaded, runtime]);
   useEffect(() => client.subscribeConnectionChange(() => { if (client.sessionId) ev.current.onSession(client.sessionId); }), [client]);
-  const extras = useThreadExtras(client);
+  const base = useThreadExtras(client);
+  const extras = useMemo(() => ({ ...base, onError: (m: string) => ev.current.onError(m) }), [base]);
   // Open or closed, remembered per thread; by default open when the thread has a plan, on a wide enough window.
   const [pref, setPref] = useState(() => planPref(extras.sessionId));
   useEffect(() => { setPref(planPref(extras.sessionId)); }, [extras.sessionId]);
   const wide = useWide();
   const hasPlan = !!extras.plan?.text;
   const planOpen = extras.supported && !!extras.sessionId && (pref ? pref === 'open' : hasPlan && wide);
-  const [tab, setTab] = useState<'plan' | 'files'>('plan');
+  const [tab, setTab] = useState<'plan' | 'files' | 'tasks'>('plan');
   const setOpen = (v: 'open' | 'closed') => { setPref(v); setPlanPref(extras.sessionId, v); };
   /** The header buttons: open the panel on that tab, or close it when it already shows that tab. */
-  const show = (t: 'plan' | 'files') => { if (planOpen && tab === t) setOpen('closed'); else { setTab(t); setOpen('open'); } };
+  const show = (t: 'plan' | 'files' | 'tasks') => { if (planOpen && tab === t) setOpen('closed'); else { setTab(t); setOpen('open'); } };
   const nFiles = extras.files?.length ?? 0;
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ExtrasContext.Provider value={extras}>
         <Watch events={ev} />
-        {seed && <Seed text={seed} />}
+        <MessageActionsProvider value={messageActions}>
+        <ShellContext.Provider value={shell}>
+        <MentionContext.Provider value={findFiles}>
+        <QueueContext.Provider value={queueApi}>
         <div className="flex h-full">
           <div className="relative min-w-0 flex-1">
             <Thread components={components} />
           </div>
-          {planOpen && <SidePanel extras={extras} tab={extras.filesSupported ? tab : 'plan'} onTab={setTab} onClose={() => setOpen('closed')} />}
+          {planOpen && <SidePanel extras={extras} tab={!extras.filesSupported && tab === 'files' ? 'plan' : tab} onTab={setTab} onClose={() => setOpen('closed')} />}
         </div>
+        </QueueContext.Provider>
+        </MentionContext.Provider>
+        </ShellContext.Provider>
+        </MessageActionsProvider>
         {actionsEl && extras.supported && extras.sessionId && createPortal(
           <>
+            <ExportThread />
             {extras.filesSupported && (
               <button onClick={() => show('files')} aria-pressed={planOpen && tab === 'files'} title="Files this thread made"
                 className={cn('flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground', planOpen && tab === 'files' && 'bg-accent text-foreground')}>
@@ -214,18 +397,19 @@ function useWide() {
  * Beside the chat: the thread's living plan (the plan file, rendered, updating when the agent changes it) and the
  * files the thread made (artifacts), with a preview.
  */
-function SidePanel({ extras, tab, onTab, onClose }: { extras: Extras; tab: 'plan' | 'files'; onTab: (t: 'plan' | 'files') => void; onClose: () => void }) {
+function SidePanel({ extras, tab, onTab, onClose }: { extras: Extras; tab: 'plan' | 'files' | 'tasks'; onTab: (t: 'plan' | 'files' | 'tasks') => void; onClose: () => void }) {
   const { plan, planLoading, refreshPlan } = extras;
   const [open, setOpen] = useState<FileItem | null>(null);
   // A file reopens fresh when the agent changes it again.
   const current = open ? extras.files?.find((f) => f.path === open.path) ?? open : null;
   const wideFile = tab === 'files' && !!current;
   return (
-    <aside aria-label={tab === 'plan' ? 'Plan' : 'Files'} className={cn(wideFile && 'lg:w-[34rem]', "flex w-[22rem] shrink-0 flex-col border-l bg-sidebar/40 max-lg:w-80 max-md:fixed max-md:inset-0 max-md:z-30 max-md:w-full max-md:border-l-0 max-md:bg-background max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)]")}>
+    <aside aria-label={tab === 'plan' ? 'Plan' : tab === 'tasks' ? 'Tasks' : 'Files'} className={cn(wideFile && 'lg:w-[34rem]', "flex w-[22rem] shrink-0 flex-col border-l bg-sidebar/40 max-lg:w-80 max-md:fixed max-md:inset-0 max-md:z-30 max-md:w-full max-md:border-l-0 max-md:bg-background max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)]")}>
       <div className="flex h-11 shrink-0 items-center gap-1 border-b px-2">
         <div role="tablist" className="flex items-center gap-0.5">
           <TabBtn on={tab === 'plan'} onClick={() => onTab('plan')}><ListChecks className="size-4" />Plan</TabBtn>
           {extras.filesSupported && <TabBtn on={tab === 'files'} onClick={() => onTab('files')}><FolderOpen className="size-4" />Files{extras.files?.length ? <span className="text-xs text-muted-foreground">{extras.files.length}</span> : null}</TabBtn>}
+          <TabBtn on={tab === 'tasks'} onClick={() => onTab('tasks')}><Bot className="size-4" />Tasks</TabBtn>
         </div>
         {(tab === 'plan' ? planLoading : extras.filesLoading) && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
         <div className="ml-auto flex items-center gap-0.5">
@@ -233,7 +417,9 @@ function SidePanel({ extras, tab, onTab, onClose }: { extras: Extras; tab: 'plan
           <button onClick={onClose} title="Hide the panel" aria-label="Hide the panel" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><PanelRightClose className="size-4" /></button>
         </div>
       </div>
-      {tab === 'plan' ? (
+      {tab === 'tasks' ? (
+        <div className="min-h-0 flex-1 overflow-y-auto"><TasksList /></div>
+      ) : tab === 'plan' ? (
         <>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
             {plan?.text ? <Markdown text={plan.text} />
@@ -262,7 +448,10 @@ function TabBtn({ on, onClick, children }: { on: boolean; onClick: () => void; c
 /** Above the composer: the thread's open cards, then this turn's checklist. */
 function AboveComposer() {
   const x = useContext(ExtrasContext);
-  const cards = x?.cards ?? [];
+  // A permission prompt shows in the chat while this window runs the turn; otherwise (another window's turn, after a
+  // reload or reconnect) it shows here as a card, with the same answers, Always allow included.
+  const running = useAuiState((s) => s.thread.isRunning);
+  const cards = (x?.cards ?? []).filter((c) => c.answerable !== 'permission' || !running || c.status !== 'open');
   return (
     <>
       {cards.length > 0 && (
@@ -308,25 +497,23 @@ function TurnChecklist() {
   );
 }
 
-/** Puts text in the composer once, after the thread has loaded (Continue in Hearth). */
-function Seed({ text }: { text: string }) {
-  const aui = useAui();
-  const loading = useAuiState((s) => s.thread.isLoading);
-  const done = useRef(false);
-  useEffect(() => {
-    if (done.current || loading) return;
-    done.current = true;
-    if (!aui.composer.getState().text) aui.composer.setText(`${text}\n\n`);
-  }, [loading, aui, text]);
-  return null;
-}
-
 /** Reports title changes and turn ends from inside the runtime. */
 function Watch({ events }: { events: React.RefObject<ThreadEvents> }) {
   const title = useAcpSessionTitle();
   const running = useAuiState((s) => s.thread.isRunning);
   const was = useRef(running);
   useEffect(() => { if (title) events.current.onTitle(title); }, [title, events]);
-  useEffect(() => { if (was.current && !running) events.current.onTurnEnd(); was.current = running; }, [running, events]);
+  const lastText = useAuiState((s) => {
+    const m = s.thread.messages.at(-1);
+    if (!m || m.role !== 'assistant') return '';
+    return m.content.map((p) => (p.type === 'text' ? p.text : '')).join(' ').trim();
+  });
+  useEffect(() => {
+    if (was.current && !running) {
+      events.current.onTurnEnd();
+      void notify(title ? `Done · ${title}` : 'Hearth: turn finished', lastText || 'The answer is ready.');
+    }
+    was.current = running;
+  }, [running, events]); // eslint-disable-line react-hooks/exhaustive-deps
   return null;
 }
