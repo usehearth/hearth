@@ -1,7 +1,8 @@
 // Settings: servers and this device's key, the server's model providers (read-only here, with health and a Test),
 // and appearance. Channels come when the server has them. Nothing here is chat content; keys are never shown.
 import { useCallback, useEffect, useState } from 'react';
-import { BarChart3, CalendarClock, Check, CircleAlert, Plug, Puzzle, KeyRound, Laptop, Loader2, MoonStar, Palette, Pencil, Plus, Radio, RefreshCw, ScrollText, Server as ServerIcon, Sparkles, Sun, Trash2, X, Zap } from 'lucide-react';
+import { BarChart3, CalendarClock, Check, CircleAlert, Plug, Puzzle, KeyRound, Laptop, Loader2, MoonStar, Palette, Pencil, Plus, Radio, RefreshCw, ScrollText, Server as ServerIcon, ShieldAlert, Sparkles, Sun, Trash2, X, Zap } from 'lucide-react';
+import { AdminKeySettings } from '@/components/hearth/Admin';
 import { Button } from '@/components/ui/button';
 import { KeyPrompt } from '@/components/hearth/AddServer';
 import { DeviceKeys, ProviderForm } from '@/components/hearth/AdminSettings';
@@ -13,7 +14,7 @@ import { errorText } from '@/lib/hearth';
 import { notifyPref, setNotifyPref } from '@/lib/notify';
 import { cn } from '@/lib/utils';
 
-type Section = 'servers' | 'providers' | 'appearance' | 'audit' | 'usage' | 'extensions' | 'connectors' | 'schedules';
+type Section = 'servers' | 'providers' | 'appearance' | 'audit' | 'usage' | 'extensions' | 'connectors' | 'schedules' | 'admin';
 
 export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged }: {
   servers: Server[];
@@ -34,6 +35,7 @@ export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged }: {
     ...(dir.state === 'ready' && dir.extensions.includes('mcp') ? [{ id: 'connectors' as const, label: 'Connectors', icon: Plug }] : []),
     ...(dir.state === 'ready' && dir.extensions.includes('extensions') ? [{ id: 'extensions' as const, label: 'Extensions', icon: Puzzle }] : []),
     ...(dir.state === 'ready' && dir.extensions.includes('audit') ? [{ id: 'audit' as const, label: 'Audit log', icon: ScrollText }] : []),
+    ...(dir.state === 'ready' && dir.extensions.includes('admin_threads') ? [{ id: 'admin' as const, label: 'Admin threads', icon: ShieldAlert }] : []),
   ];
   return (
     <div className="flex h-full min-h-0 max-md:flex-col">
@@ -54,6 +56,7 @@ export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged }: {
           {section === 'providers' && <Providers dir={dir} server={server} />}
           {section === 'appearance' && <Appearance />}
           {section === 'audit' && dir.state === 'ready' && <AuditLog request={dir.request} />}
+          {section === 'admin' && dir.state === 'ready' && <AdminKeySettings request={dir.request} />}
           {section === 'usage' && dir.state === 'ready' && <UsagePage request={dir.request} />}
           {section === 'extensions' && dir.state === 'ready' && <ExtensionsPage request={dir.request} />}
           {section === 'connectors' && dir.state === 'ready' && <ConnectorsPage request={dir.request} />}

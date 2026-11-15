@@ -7,6 +7,7 @@ import { ClientApp, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 import { createWebSocketStream } from '@agentclientprotocol/sdk/experimental/ws-client';
 import { keyFor, type Server } from './servers';
 import type { CardAnswer, CardEntry } from './hearth';
+import { adminAnswerSig } from './admin';
 
 export interface ThreadItem {
   sessionId: string;
@@ -25,6 +26,8 @@ export interface ThreadItem {
   archived?: boolean;
   /** Set for a client project's thread (H5): the client's name. Only a work device is sent these. */
   client?: string;
+  /** An admin thread (server extension `admin_threads`): runs as the owner; only the admin key can type in it. */
+  admin?: boolean;
 }
 
 export interface ProjectGroup { project: string; name: string; cwd: string; main?: ThreadItem; threads: ThreadItem[]; client?: string;
@@ -87,6 +90,7 @@ export function toItem(s: any): ThreadItem {
     openCards: Number(h.openCards ?? 0) || 0,
     ...(h.archived ? { archived: true } : {}),
     ...(typeof h.client === 'string' && h.client ? { client: h.client } : {}),
+    ...(h.admin ? { admin: true } : {}),
   };
 }
 
@@ -172,7 +176,9 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
       return { groups: withHistory(group((res.sessions ?? []).map(toItem)), (hc?.projects ?? []) as HistoryCount[]), cards, clients: (cl?.clients ?? []) as ClientLine[], workDevice: !!cl?.workDevice, admin, importedGroups: (hc?.groups ?? []) as ImportedGroup[] };
     };
     const answer = async (e: CardEntry, a: CardAnswer) => {
-      const r = await conn.agent.request('_hearth/card/answer' as any, { sessionId: e.sessionId, itemId: e.card.id, ...a });
+      // An admin card counts only with this install's signature (the runner checks it).
+      const adminSig = e.card.admin?.requestId && a.optionId ? await adminAnswerSig(e.sessionId, e.card.admin.requestId, a.optionId) : undefined;
+      const r = await conn.agent.request('_hearth/card/answer' as any, { sessionId: e.sessionId, itemId: e.card.id, ...a, ...(adminSig ? { adminSig } : {}) });
       refresh();
       return r;
     };

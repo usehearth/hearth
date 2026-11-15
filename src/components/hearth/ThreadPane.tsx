@@ -5,7 +5,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AssistantRuntimeProvider, useAuiState, WebSpeechDictationAdapter, WebSpeechSynthesisAdapter } from '@assistant-ui/react';
-import { Bot, ChevronDown, Circle, FolderOpen, CircleCheck, CircleDot, ListChecks, Loader2, PanelRightClose, PanelRightOpen, RefreshCw } from 'lucide-react';
+import { Bot, ChevronDown, Circle, FolderOpen, CircleCheck, CircleDot, ListChecks, Loader2, PanelRightClose, PanelRightOpen, RefreshCw, ShieldAlert } from 'lucide-react';
+import { AdminAudit, AdminStrip, FinishAdmin, useAdminTimeline } from '@/components/hearth/Admin';
+import { adminAnswerSig, adminPromptMeta } from '@/lib/admin';
 import { AcpClient, useAcpPlan, useAcpRuntime, useAcpSessionTitle } from '@/vendor/acp';
 import type { AcpWebSocketLike } from '@/vendor/acp/AcpClient';
 import { Thread, type ThreadComponents } from '@/components/assistant-ui/elements/thread.aui';
@@ -60,8 +62,17 @@ export interface ThreadEvents {
 /** What a fork opens with: a message sent at once (Edit, Regenerate) or put in the composer (Rewind). */
 export interface FirstMessage { text: string; send: boolean }
 
-export function ThreadPane({ url, serverKey, target, events, actionsEl, first, insert }: {
+/** An admin thread: whether this install can sign in it, whether it came from a blocked thread, and what Finish does. */
+export interface AdminThread { canSign: boolean; origin: boolean; title: string; onFinished: () => void }
+/** What blocked a thread, for "Open in admin" (the server finds the last refusal itself when this is left out). */
+export interface Blocked { tool?: string; reason?: string; what?: string }
+
+export function ThreadPane({ url, serverKey, target, events, actionsEl, first, insert, admin, onOpenAdmin }: {
   url: string; serverKey: string; target: ThreadTarget; events: ThreadEvents; first?: FirstMessage;
+  /** Set for an admin thread (lib/admin.ts): prompts and card answers are signed with this install's admin key. */
+  admin?: AdminThread;
+  /** Set where this thread may be opened in admin (not client or admin threads, an admin device with the key). */
+  onOpenAdmin?: (blocked?: Blocked) => void;
   /** Text from the editor (VS Code: Send selection) to add to the composer; n changes for each new one. */
   insert?: { text: string; n: number } | null;
   /** Where the thread's header buttons go (the plan toggle). */
@@ -73,6 +84,9 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
   const [reconnecting, setReconnecting] = useState<boolean | 'stopped'>(false);
   const known = useRef<string | undefined>(target.kind === 'open' ? target.sessionId : undefined);
   const fails = useRef(0);
+  // Read live by the signing hook: the admin key's state arrives after the thread opens.
+  const adminRef = useRef(admin);
+  adminRef.current = admin;
   const client = useMemo(() => {
     const sid = known.current;
     return new AcpClient({
@@ -81,6 +95,17 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
       clientInfo: { name: 'hearth', version: '0.1.0' },
       webSocketFactory: (u) => openSocket(u, serverKey) as unknown as AcpWebSocketLike,
       ...(sid ? { sessionId: sid } : target.kind === 'new' ? { newSessionMeta: target.meta } : {}),
+      // Admin threads: every prompt and every admin card answer carries this install's signature (the runner checks it).
+      ...(admin ? {
+        promptMeta: (sessionId: string, content: readonly any[]) => (adminRef.current?.canSign
+          ? adminPromptMeta(sessionId, content)
+          : Promise.reject(new Error('Watch only: admin threads take messages only from Hearth on the laptop, with its pinned admin key (Settings > Admin threads).'))),
+        signPermission: async (params: any, o: any) => {
+          const requestId = params?._meta?.hearth?.admin?.requestId;
+          if (!requestId || o?.outcome !== 'selected') return o;
+          return { ...o, _meta: { hearth: { adminSig: await adminAnswerSig(String(params.sessionId), String(requestId), String(o.optionId)) } } };
+        },
+      } : {}),
     });
   }, [url, serverKey, target, gen]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => client.dispose(), [client]);
@@ -119,7 +144,7 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
             : <><Loader2 className="size-3 animate-spin" />Reconnecting…</>}
         </div>
       )}
-      <Runtime key={gen} client={client} events={events} actionsEl={actionsEl} first={gen === 0 ? first : undefined} insert={insert} />
+      <Runtime key={gen} client={client} events={events} actionsEl={actionsEl} first={gen === 0 ? first : undefined} insert={insert} admin={admin} onOpenAdmin={onOpenAdmin} />
     </div>
   );
 }
@@ -146,6 +171,8 @@ interface Extras {
   filesLoading: boolean;
   refreshFiles: () => void;
   readFile: (path: string) => Promise<FileContent>;
+  /** "Open in admin" for this thread's blocked cards (unset where not allowed). */
+  onOpenAdmin?: (blocked?: Blocked) => void;
 }
 
 /** The thread's Hearth extras: its cards and its plan, kept live. A server without the extensions gives neither. */
@@ -211,7 +238,9 @@ function useThreadExtras(client: AcpClient): Extras {
   }), [client, linger]);
 
   const answer = useCallback(async (card: Card, a: CardAnswer) => {
-    const r = await client.extRequest<{ card: Card }>('_hearth/card/answer', { sessionId: client.sessionId, itemId: card.id, ...a });
+    // An admin card counts only with this install's signature over the runner's request and the option picked.
+    const adminSig = card.admin?.requestId && a.optionId && client.sessionId ? await adminAnswerSig(client.sessionId, card.admin.requestId, a.optionId) : undefined;
+    const r = await client.extRequest<{ card: Card }>('_hearth/card/answer', { sessionId: client.sessionId, itemId: card.id, ...a, ...(adminSig ? { adminSig } : {}) });
     if (r?.card) { setCards((cs) => mergeCard(cs, { ...card, ...r.card })); linger(r.card); }
   }, [client, linger]);
 
@@ -228,7 +257,7 @@ function ComposerExtra() {
   return <ComposerBar client={x.client} onError={x.onError} />;
 }
 
-function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClient; events: ThreadEvents; actionsEl?: HTMLElement | null; first?: FirstMessage; insert?: { text: string; n: number } | null }) {
+function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin }: { client: AcpClient; events: ThreadEvents; actionsEl?: HTMLElement | null; first?: FirstMessage; insert?: { text: string; n: number } | null; admin?: AdminThread; onOpenAdmin?: (blocked?: Blocked) => void }) {
   const ev = useRef(events);
   ev.current = events;
   // Images and text files, as this server takes them (its promptCapabilities); a refused file says why.
@@ -334,17 +363,28 @@ function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClie
   }, [first, loaded, runtime]);
   useEffect(() => client.subscribeConnectionChange(() => { if (client.sessionId) ev.current.onSession(client.sessionId); }), [client]);
   const base = useThreadExtras(client);
-  const extras = useMemo(() => ({ ...base, onError: (m: string) => ev.current.onError(m) }), [base]);
+  const extras = useMemo(() => ({ ...base, onError: (m: string) => ev.current.onError(m), onOpenAdmin }), [base, onOpenAdmin]);
+  // Admin threads: the audit beside the chat (read again after each turn), the commands handed over, Finish.
+  const adminReq = useMemo(() => (admin ? (<T,>(m: string, p?: unknown) => client.extRequest<T>(m, p)) : null), [admin, client]);
+  const audit = useAdminTimeline(adminReq, admin ? extras.sessionId : undefined);
+  const [finishing, setFinishing] = useState(false);
+  const reloadAudit = audit.reload;
+  useEffect(() => {
+    if (!admin) return;
+    let was = runtime.thread.getState().isRunning;
+    return runtime.thread.subscribe(() => { const now = runtime.thread.getState().isRunning; if (was && !now) reloadAudit(); was = now; });
+  }, [admin, runtime, reloadAudit]);
+  const nCommands = audit.timeline?.entries.filter((e) => e.outcome === 'command').length ?? 0;
   // Open or closed, remembered per thread; by default open when the thread has a plan, on a wide enough window.
   const [pref, setPref] = useState(() => planPref(extras.sessionId));
   useEffect(() => { setPref(planPref(extras.sessionId)); }, [extras.sessionId]);
   const wide = useWide();
   const hasPlan = !!extras.plan?.text;
-  const planOpen = extras.supported && !!extras.sessionId && (pref ? pref === 'open' : hasPlan && wide);
-  const [tab, setTab] = useState<'plan' | 'files' | 'tasks'>('plan');
+  const planOpen = extras.supported && !!extras.sessionId && (pref ? pref === 'open' : (hasPlan || !!admin) && wide);
+  const [tab, setTab] = useState<PanelTab>(admin ? 'audit' : 'plan');
   const setOpen = (v: 'open' | 'closed') => { setPref(v); setPlanPref(extras.sessionId, v); };
   /** The header buttons: open the panel on that tab, or close it when it already shows that tab. */
-  const show = (t: 'plan' | 'files' | 'tasks') => { if (planOpen && tab === t) setOpen('closed'); else { setTab(t); setOpen('open'); } };
+  const show = (t: PanelTab) => { if (planOpen && tab === t) setOpen('closed'); else { setTab(t); setOpen('open'); } };
   const nFiles = extras.files?.length ?? 0;
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -355,10 +395,15 @@ function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClie
         <MentionContext.Provider value={findFiles}>
         <QueueContext.Provider value={queueApi}>
         <div className="flex h-full">
-          <div className="relative min-w-0 flex-1">
-            <Thread components={components} />
+          <div className="relative flex min-w-0 flex-1 flex-col">
+            {admin && <AdminStrip canSign={admin.canSign} commands={nCommands} origin={admin.origin} onFinish={admin.canSign && extras.sessionId ? () => setFinishing(true) : undefined} />}
+            {admin && finishing && adminReq && extras.sessionId && (
+              <FinishAdmin title={admin.title} origin={admin.origin} request={adminReq} sessionId={extras.sessionId} onCancel={() => setFinishing(false)} onDone={() => { setFinishing(false); admin.onFinished(); }} />
+            )}
+            <div className="relative min-h-0 flex-1"><Thread components={components} /></div>
           </div>
-          {planOpen && <SidePanel extras={extras} tab={!extras.filesSupported && tab === 'files' ? 'plan' : tab} onTab={setTab} onClose={() => setOpen('closed')} />}
+          {planOpen && <SidePanel extras={extras} tab={!extras.filesSupported && tab === 'files' ? 'plan' : tab} onTab={setTab} onClose={() => setOpen('closed')}
+            audit={admin ? <AdminAudit timeline={audit.timeline} loading={audit.loading} /> : undefined} onRefreshAudit={admin ? audit.reload : undefined} />}
         </div>
         </QueueContext.Provider>
         </MentionContext.Provider>
@@ -366,6 +411,19 @@ function Runtime({ client, events, actionsEl, first, insert }: { client: AcpClie
         </MessageActionsProvider>
         {actionsEl && extras.supported && extras.sessionId && createPortal(
           <>
+            {admin && (
+              <button onClick={() => show('audit')} aria-pressed={planOpen && tab === 'audit'} title="Every call in this admin thread"
+                className={cn('flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground', planOpen && tab === 'audit' && 'bg-accent text-foreground')}>
+                <ShieldAlert className="size-4" /><span className="max-sm:sr-only">Audit</span>
+                {nCommands > 0 && <span className="rounded-full bg-rose-500/15 px-1.5 text-[11px] font-medium text-rose-700 dark:text-rose-300">{nCommands}</span>}
+              </button>
+            )}
+            {onOpenAdmin && (
+              <button onClick={() => onOpenAdmin()} title="Open a new admin thread to fix what blocked this one"
+                className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground">
+                <ShieldAlert className="size-4" /><span className="max-sm:sr-only">Open in admin</span>
+              </button>
+            )}
             <ExportThread />
             {extras.filesSupported && (
               <button onClick={() => show('files')} aria-pressed={planOpen && tab === 'files'} title="Files this thread made"
@@ -397,27 +455,32 @@ function useWide() {
  * Beside the chat: the thread's living plan (the plan file, rendered, updating when the agent changes it) and the
  * files the thread made (artifacts), with a preview.
  */
-function SidePanel({ extras, tab, onTab, onClose }: { extras: Extras; tab: 'plan' | 'files' | 'tasks'; onTab: (t: 'plan' | 'files' | 'tasks') => void; onClose: () => void }) {
+type PanelTab = 'plan' | 'files' | 'tasks' | 'audit';
+function SidePanel({ extras, tab, onTab, onClose, audit, onRefreshAudit }: { extras: Extras; tab: PanelTab; onTab: (t: PanelTab) => void; onClose: () => void; audit?: React.ReactNode; onRefreshAudit?: () => void }) {
   const { plan, planLoading, refreshPlan } = extras;
   const [open, setOpen] = useState<FileItem | null>(null);
   // A file reopens fresh when the agent changes it again.
   const current = open ? extras.files?.find((f) => f.path === open.path) ?? open : null;
   const wideFile = tab === 'files' && !!current;
   return (
-    <aside aria-label={tab === 'plan' ? 'Plan' : tab === 'tasks' ? 'Tasks' : 'Files'} className={cn(wideFile && 'lg:w-[34rem]', "flex w-[22rem] shrink-0 flex-col border-l bg-sidebar/40 max-lg:w-80 max-md:fixed max-md:inset-0 max-md:z-30 max-md:w-full max-md:border-l-0 max-md:bg-background max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)]")}>
+    <aside aria-label={tab === 'plan' ? 'Plan' : tab === 'tasks' ? 'Tasks' : tab === 'audit' ? 'Audit' : 'Files'} className={cn(wideFile && 'lg:w-[34rem]', "flex w-[22rem] shrink-0 flex-col border-l bg-sidebar/40 max-lg:w-80 max-md:fixed max-md:inset-0 max-md:z-30 max-md:w-full max-md:border-l-0 max-md:bg-background max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)]")}>
       <div className="flex h-11 shrink-0 items-center gap-1 border-b px-2">
         <div role="tablist" className="flex items-center gap-0.5">
+          {audit && <TabBtn on={tab === 'audit'} onClick={() => onTab('audit')}><ShieldAlert className="size-4" />Audit</TabBtn>}
           <TabBtn on={tab === 'plan'} onClick={() => onTab('plan')}><ListChecks className="size-4" />Plan</TabBtn>
           {extras.filesSupported && <TabBtn on={tab === 'files'} onClick={() => onTab('files')}><FolderOpen className="size-4" />Files{extras.files?.length ? <span className="text-xs text-muted-foreground">{extras.files.length}</span> : null}</TabBtn>}
           <TabBtn on={tab === 'tasks'} onClick={() => onTab('tasks')}><Bot className="size-4" />Tasks</TabBtn>
         </div>
         {(tab === 'plan' ? planLoading : extras.filesLoading) && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
         <div className="ml-auto flex items-center gap-0.5">
+          {tab === 'audit' && onRefreshAudit && <button onClick={onRefreshAudit} title="Read the audit again" aria-label="Read the audit again" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><RefreshCw className="size-3.5" /></button>}
           {tab === 'plan' && <button onClick={refreshPlan} title="Read the plan again" aria-label="Read the plan again" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><RefreshCw className="size-3.5" /></button>}
           <button onClick={onClose} title="Hide the panel" aria-label="Hide the panel" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><PanelRightClose className="size-4" /></button>
         </div>
       </div>
-      {tab === 'tasks' ? (
+      {tab === 'audit' && audit ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">{audit}</div>
+      ) : tab === 'tasks' ? (
         <div className="min-h-0 flex-1 overflow-y-auto"><TasksList /></div>
       ) : tab === 'plan' ? (
         <>
@@ -456,7 +519,7 @@ function AboveComposer() {
     <>
       {cards.length > 0 && (
         <div className="flex flex-col gap-2" aria-label="Needs you in this thread">
-          {cards.map((c) => <CardView key={c.id} card={c} compact onAnswer={(a) => x!.answer(c, a)} />)}
+          {cards.map((c) => <CardView key={c.id} card={c} compact onAnswer={(a) => x!.answer(c, a)} onOpenAdmin={x?.onOpenAdmin ? () => x.onOpenAdmin!({ tool: c.toolCall?.title, reason: c.why || c.title }) : undefined} />)}
         </div>
       )}
       <TurnChecklist />

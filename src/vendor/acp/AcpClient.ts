@@ -75,6 +75,16 @@ export type AcpClientOptions = {
   sessionId?: string;
   /** Hearth: `_meta` sent with `session/new` (e.g. `{ hearth: { project, main, title } }`). */
   newSessionMeta?: Record<string, unknown>;
+  /**
+   * Hearth (admin threads): `_meta` for each `session/prompt`, made from the session id and the exact content sent
+   * (Hearth signs it with the admin key). A throw stops the prompt before anything is sent.
+   */
+  promptMeta?: (sessionId: string, content: readonly AcpContentBlock[]) => Promise<Record<string, unknown> | undefined>;
+  /**
+   * Hearth (admin threads): adds to a permission answer before it is sent (a signature over the request and the
+   * option picked). Only called for a selected option; a throw sends "cancelled" instead.
+   */
+  signPermission?: (params: AcpPermissionRequest, outcome: AcpPermissionOutcome) => Promise<AcpPermissionOutcome>;
 };
 
 type AcpSession = Pick<
@@ -326,9 +336,11 @@ export class AcpClient {
     const sessionId = this._sessionId ?? (await this.ensureSession());
     if (signal?.aborted) return "cancelled";
     this.cancelSent = false;
+    const meta = this.options.promptMeta ? await this.options.promptMeta(sessionId, content) : undefined;
+    if (signal?.aborted) return "cancelled";
     const result = await this.request<{ stopReason?: AcpStopReason }>(
       "session/prompt",
-      { sessionId, prompt: content },
+      { sessionId, prompt: content, ...(meta ? { _meta: meta } : {}) },
       null,
     );
     return result.stopReason ?? "end_turn";
@@ -706,7 +718,10 @@ export class AcpClient {
       reply({ outcome: "cancelled" });
       return;
     }
-    void handled.then(reply, () => reply({ outcome: "cancelled" }));
+    const sign = this.options.signPermission;
+    void handled
+      .then((o) => (sign && (o as { outcome?: string })?.outcome === "selected" ? sign(params, o) : o))
+      .then(reply, () => reply({ outcome: "cancelled" }));
   }
 
   private handleNotification(msg: any): void {

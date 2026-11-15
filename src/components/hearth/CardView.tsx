@@ -9,9 +9,11 @@ import { FormQuestion } from '@/components/hearth/FormQuestion';
 
 const ICON: Record<string, typeof CircleHelp> = { question: CircleHelp, review_merge: GitMerge, permission: ShieldQuestion, failure: TriangleAlert };
 
-export function CardView({ card, onAnswer, where, compact }: {
+export function CardView({ card, onAnswer, where, compact, onOpenAdmin }: {
   card: Card;
   onAnswer: (a: CardAnswer) => Promise<unknown>;
+  /** "Open in admin": a new admin thread to fix what blocked this (never on client or admin threads). */
+  onOpenAdmin?: () => void;
   /** A line saying which thread the card is from (needs-you view). */
   where?: React.ReactNode;
   compact?: boolean;
@@ -78,6 +80,9 @@ export function CardView({ card, onAnswer, where, compact }: {
                 );
               })}
             </div>
+          )}
+          {open && onOpenAdmin && (
+            <button onClick={onOpenAdmin} className="mt-2 text-xs font-medium text-rose-700 hover:underline dark:text-rose-300">Open in admin</button>
           )}
           {err && <p className="mt-2 text-xs text-destructive">{err}</p>}
         </div>

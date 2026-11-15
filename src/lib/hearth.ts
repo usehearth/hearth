@@ -24,6 +24,8 @@ export interface Card {
   answer?: string | null;
   toolCall?: { title?: string; rawInput?: unknown } | null;
   options?: { optionId: string; name: string; kind: string }[];
+  /** An admin thread's card (a CLIProxyAPI change): answered only with this install's admin key (lib/admin.ts). */
+  admin?: { requestId: string; line?: string; reason?: string };
 }
 
 export interface CardEntry {

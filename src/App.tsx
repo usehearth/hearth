@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { notify } from '@/lib/notify';
 import { assetUrl, hostReady, onHostEvent } from '@/lib/hostBridge';
-import { Archive, BellDot, Briefcase, ChevronDown, FolderPlus, History as HistoryIcon, Lock, Menu, Settings as SettingsIcon, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
+import { Archive, BellDot, Briefcase, ChevronDown, FolderPlus, History as HistoryIcon, Lock, Menu, Settings as SettingsIcon, ShieldAlert, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert } from 'lucide-react';
+import { useAdminKey } from '@/components/hearth/Admin';
+import { errorText } from '@/lib/hearth';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
-import { ThreadPane, type FirstMessage, type ThreadTarget } from '@/components/hearth/ThreadPane';
+import { ThreadPane, type Blocked, type FirstMessage, type ThreadTarget } from '@/components/hearth/ThreadPane';
 import { AddServer, KeyPrompt } from '@/components/hearth/AddServer';
 import { NeedsYou } from '@/components/hearth/NeedsYou';
 import { Settings } from '@/components/hearth/Settings';
@@ -25,7 +27,7 @@ export default function App() {
   const [keyVersion, setKeyVersion] = useState(0);
   const dir = useDirectory(server, keyVersion);
   // `id` keys the open pane (stable for its lifetime); `sessionId` is the server's id once known.
-  const [target, setTarget] = useState<{ id: string; sessionId?: string; t: ThreadTarget; title: string; project?: string; client?: string; first?: FirstMessage } | null>(null);
+  const [target, setTarget] = useState<{ id: string; sessionId?: string; t: ThreadTarget; title: string; project?: string; client?: string; first?: FirstMessage; admin?: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   // The main pane shows the open thread, or the needs-you view.
@@ -46,6 +48,12 @@ export default function App() {
   const [showArchived, setShowArchived] = useState(false);
   const threadsExt = dir.state === 'ready' && dir.extensions.includes('threads');
   const menu = threadsExt && dir.state === 'ready' ? (t: ThreadItem) => <ThreadMenu t={t} request={dir.request} onError={setError} /> : undefined;
+  // Admin threads (server extension `admin_threads`): this install types in one only with its admin key, pinned on the
+  // laptop runner. Every device lists and watches them; only an admin device with that key opens or finishes one.
+  const adminExt = dir.state === 'ready' && dir.extensions.includes('admin_threads');
+  const adminKey = useAdminKey(dir.state === 'ready' ? dir.request : undefined, adminExt);
+  const canSign = adminExt && adminKey.pinned;
+  const canOpenAdmin = canSign && dir.state === 'ready' && dir.admin;
 
   useEffect(() => { if (!serverId && servers[0]) setServerId(servers[0].id); }, [servers, serverId]);
   // A notification for each new Needs-you card (when on and this window isn't in front). The first list only seeds.
@@ -73,8 +81,20 @@ export default function App() {
     setView('thread');
     setNavOpen(false);
     // The thread already open stays connected (coming back from Needs you, or a second click).
-    setTarget((cur) => (cur?.sessionId === t.sessionId ? cur : { id: t.sessionId, sessionId: t.sessionId, t: { kind: 'open', sessionId: t.sessionId, cwd: t.cwd }, title: t.kind === 'main' ? 'Main thread' : t.title, project: t.projectName, client: t.client }));
+    setTarget((cur) => (cur?.sessionId === t.sessionId ? cur : { id: t.sessionId, sessionId: t.sessionId, t: { kind: 'open', sessionId: t.sessionId, cwd: t.cwd }, title: t.kind === 'main' ? 'Main thread' : t.title, project: t.projectName, client: t.client, ...(t.admin ? { admin: true } : {}) }));
   }, []);
+  /** A new admin thread; from a blocked thread ("Open in admin") it opens with a draft first message to read and send. */
+  const openAdmin = useCallback(async (origin?: { sessionId: string; title: string }, blocked?: Blocked) => {
+    if (dir.state !== 'ready') return;
+    setError(null);
+    try {
+      const r = await dir.request<{ sessionId: string; cwd: string; title: string; draft: string | null }>('_hearth/admin/open', origin ? { origin: origin.sessionId, title: `Fix: ${origin.title}`.slice(0, 80), blocked } : { title: 'Admin' });
+      setView('thread'); setNavOpen(false);
+      setTarget({ id: r.sessionId, sessionId: r.sessionId, t: { kind: 'open', sessionId: r.sessionId, cwd: r.cwd }, title: r.title, project: 'Admin', admin: true, ...(r.draft ? { first: { text: r.draft, send: false } } : {}) });
+      dir.refresh(); void adminKey.reload();
+    } catch (e) { setError(errorText(e)); }
+  }, [dir, adminKey.reload]); // eslint-disable-line react-hooks/exhaustive-deps
+  const adminOrigin = (sessionId?: string) => !!adminKey.server?.threads.find((t) => t.sessionId === sessionId)?.origin;
   const openCard = useCallback((e: CardEntry) => {
     setError(null);
     setView('thread');
@@ -210,7 +230,8 @@ export default function App() {
                   </span>
                 </div>
                 {dir.groups.length === 0 && <p className="px-2 py-3 text-sm text-muted-foreground">No threads on this server yet.</p>}
-                {dir.groups.filter((g) => !g.client).map((g) => (
+                <AdminSection group={dir.groups.find(isAdminGroup)} canOpen={canOpenAdmin} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => void openAdmin()} menu={menu} />
+                {dir.groups.filter((g) => !g.client && !isAdminGroup(g)).map((g) => (
                   <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)} menu={menu}
                     onSettings={dir.extensions.includes('project') ? () => { setProjectView({ slug: g.project, name: g.name }); go('project'); } : undefined}
                     settingsOpen={view === 'project' && projectView?.slug === g.project} onHistory={() => openHistory({ project: g.project, name: g.name })} historyOpen={(view === 'history' || view === 'imported') && histKey === `p:${g.project}`} />
@@ -286,12 +307,17 @@ export default function App() {
             <div className="min-h-0 flex-1"><NewProject request={dir.request} onDone={made} /></div>
           )}
           {view === 'needs' && dir.state === 'ready' && (
-            <div className="min-h-0 flex-1"><NeedsYou cards={dir.cards} onAnswer={dir.answer} onOpen={openCard} /></div>
+            <div className="min-h-0 flex-1"><NeedsYou cards={dir.cards} onAnswer={dir.answer} onOpen={openCard}
+              onOpenAdmin={canOpenAdmin ? (e) => { if (!groupOf(e.project)?.client && e.project !== 'admin') void openAdmin({ sessionId: e.sessionId, title: e.title }, { tool: e.card.toolCall?.title, reason: e.card.why || e.card.title }); } : undefined}
+              adminRequest={adminExt ? dir.request : undefined}
+              onOpenThread={(sessionId, title) => open({ sessionId, title, cwd: '', updatedAt: null, project: 'admin', projectName: 'Admin', kind: 'work', status: null, runnerOnline: null, pinned: false, openCards: 0, admin: true })} /></div>
           )}
           {/* The open thread stays mounted behind the needs-you view, so going back keeps its place. */}
           <div className={cn('min-h-0 flex-1', view !== 'thread' && 'hidden')}>
             {target && server && key
-              ? <ThreadPane key={target.id} url={server.url} serverKey={key} target={target.t} events={events} actionsEl={actionsEl} first={target.first} insert={insert} />
+              ? <ThreadPane key={target.id} url={server.url} serverKey={key} target={target.t} events={events} actionsEl={actionsEl} first={target.first} insert={insert}
+                  admin={target.admin ? { canSign, origin: adminOrigin(target.sessionId), title: target.title, onFinished: () => { refresh?.(); void adminKey.reload(); setTarget(null); } } : undefined}
+                  onOpenAdmin={canOpenAdmin && !target.admin && !target.client && target.sessionId ? (b) => void openAdmin({ sessionId: target.sessionId!, title: target.title }, b) : undefined} />
               : <Welcome />}
           </div>
         </main>
@@ -343,6 +369,29 @@ function ProjectSection({ g, activeId, onOpen, onNew, onSettings, settingsOpen, 
           )}
         </ul>
       )}
+    </div>
+  );
+}
+
+const isAdminGroup = (g: ProjectGroup) => [g.main, ...g.threads].some((t) => t?.admin);
+
+/**
+ * Admin threads, first in the list: they run as you on the laptop with no project walls (see Settings > Admin). Every
+ * device sees them; only this install, with its pinned admin key, starts one or types in one.
+ */
+function AdminSection({ group: g, canOpen, activeId, onOpen, onNew, menu }: { group?: ProjectGroup; canOpen: boolean; activeId?: string; onOpen: (t: ThreadItem) => void; onNew: () => void; menu?: (t: ThreadItem) => React.ReactNode }) {
+  if (!g && !canOpen) return null;
+  const threads = g ? [...(g.main ? [g.main] : []), ...g.threads].sort((a, b) => (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0)) : [];
+  return (
+    <div className="mt-1" aria-label="Admin">
+      <div className="group flex items-center rounded-lg pr-1 hover:bg-sidebar-accent/60">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-[13px] font-semibold"><ShieldAlert className="size-3.5 shrink-0 text-rose-600 dark:text-rose-400" />Admin</span>
+        {canOpen && <IconBtn label="New admin thread" onClick={onNew}><Plus className="size-3.5" /></IconBtn>}
+      </div>
+      <ul className="ml-2 border-l border-rose-500/30 pl-1.5">
+        {threads.slice(0, SHOW).map((t) => <ThreadRow key={t.sessionId} t={t} active={activeId === t.sessionId} onOpen={onOpen} menu={menu} />)}
+        {!threads.length && <li className="px-2 py-1 text-[12px] text-muted-foreground">Runs as you on the laptop. No project walls; hard lines and an audit.</li>}
+      </ul>
     </div>
   );
 }
