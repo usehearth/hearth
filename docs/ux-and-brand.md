@@ -122,7 +122,7 @@ All colours come from CSS variables in `src/index.css`, used through Tailwind (`
 - **Outliers:**
   - `H` in Settings.tsx and `SectionHead` in ServerSettings.tsx are the same component; keep `SectionHead`.
   - Headings in `text-base`: AdminSettings "Device keys" and NeedsYou should be `text-sm font-semibold`.
-  - `text-[12.5px]` in ServerSettings (audit) and `text-[12px]`/`text-[13px]` outside the sidebar (ThreadPane header, ComposerBar pills, ExportThread) should become `text-xs` or `text-sm`.
+  - `text-[12px]`/`text-[13px]` outside the sidebar (ThreadPane header, ComposerBar pills, ExportThread) should become `text-xs` or `text-sm`.
 
 ---
 
@@ -147,7 +147,6 @@ Use Tailwind's 4 px scale. Use the steps below and avoid halves except where sho
 - FilesList `px-4 py-2` should be `px-3 py-2`.
 - NeedsYou `px-5` has no phone override.
 - NewProject uses `max-w-xl`. That is fine for a focused form, but say so in a comment.
-- The `mt-6 mb-2` section rhythm in ServerSettings should become `mt-8`.
 
 ---
 
@@ -170,7 +169,6 @@ Use Tailwind's 4 px scale. Use the steps below and avoid halves except where sho
 
 **Outliers:**
 - Plain `rounded` on small icon buttons (Settings rename, ProjectSettings) and on the PR CI badge should be `rounded-md` or `rounded-full`.
-- The bar chart box in UsagePage is `rounded-lg` and should be `rounded-xl`.
 
 ---
 
@@ -209,7 +207,7 @@ Use Tailwind's 4 px scale. Use the steps below and avoid halves except where sho
 - **Secondary:** `outline` (Cancel in a form or dialog, "Add a server" when it is not the page's main action).
 - **Quiet or row actions:** `ghost`. Icon-only row actions use `size="icon-sm" variant="ghost"`.
 - **Destroy:** a `ghost` trash icon (hover `text-destructive`) opens an inline confirm: "Delete this job? **[Delete]** (destructive, `xs`) [Keep] (ghost, `xs`)". Use a dialog (`ui/dialog`, destructive button) only when the thing is big or the action reaches far, such as deleting a thread or a rewind.
-- Use **no `window.confirm`**. *Outliers:* ServerSettings, for hook save, delete extension, remove connector and install plugin hooks. The Schedules delete has moved to the inline confirm.
+- Use **no `window.confirm`**. The inline confirm is `ConfirmLine` (`components/hearth/ConfirmLine.tsx`). For a warning rather than a delete (saving a hook), pass `destructive={false}` and a plain "Not yet" for the no.
 - Raw `<button>` is fine for list rows, nav items and the sidebar, which are not "buttons" visually. Anything that looks like a button uses `Button`. The local icon-button helpers `IconBtn` (App) and `IconAct` (FilesPanel) should become `Button size="icon-sm" variant="ghost"`.
 
 ### Switch and checkbox
@@ -228,7 +226,6 @@ Use Tailwind's 4 px scale. Use the steps below and avoid halves except where sho
 - **Row layout:** an optional status dot or icon, then the text (`min-w-0 flex-1`), then the actions (`shrink-0`, icon buttons, then a switch last).
 - **Row text:** title (`text-sm font-medium`), then up to two meta lines (`text-xs text-muted-foreground`) joined with " · ".
 - **Rows that are off or done** turn their text `text-muted-foreground`. They are not hidden. Done one-offs collapse under "N done".
-- *Outlier:* the ServerSettings lists have no `bg-card`.
 
 ### Cards
 - **Settings card** (servers, providers): `rounded-xl border bg-card p-4`, with a 32 px icon tile (`size-8 rounded-lg bg-muted`). The current item gets `border-primary/40` and an "In use" chip.

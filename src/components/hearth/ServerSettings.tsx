@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { errorText } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
 import { field, fieldArea } from '@/components/ui/field';
+import { ConfirmLine } from '@/components/hearth/ConfirmLine';
 
 export type Request = <T = unknown>(method: string, params?: unknown) => Promise<T>;
 
@@ -32,7 +33,7 @@ export function UsagePage({ request }: { request: Request }) {
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(() => { request<UsageReport>('_hearth/usage', { days: 30 }).then((x) => { setR(x); setError(null); }, (e) => setError(errorText(e))); }, [request]);
   useEffect(load, [load]);
-  if (error) return <p className="text-sm text-destructive">{error}</p>;
+  if (error) return <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>;
   if (!r) return <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div>;
   const days: string[] = [];
   for (let i = r.days - 1; i >= 0; i--) days.push(new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10));
@@ -49,16 +50,16 @@ export function UsagePage({ request }: { request: Request }) {
         <div className="rounded-xl border bg-card p-3"><div className="text-xs text-muted-foreground">This month</div><div className="text-xl font-semibold tabular-nums">{usd(month)}</div></div>
         <div className="rounded-xl border bg-card p-3"><div className="text-xs text-muted-foreground">Last {r.days} days</div><div className="text-xl font-semibold tabular-nums">{usd(total)}</div></div>
       </div>
-      <h3 className="mt-6 mb-2 text-sm font-semibold">Each day</h3>
-      <div className="flex h-28 items-end gap-px rounded-lg border bg-card p-2" role="img" aria-label={`Cost per day for the last ${r.days} days, highest ${usd(max)}`}>
+      <h3 className="mt-8 mb-2 text-sm font-semibold">Each day</h3>
+      <div className="flex h-28 items-end gap-px rounded-xl border bg-card p-2" role="img" aria-label={`Cost per day for the last ${r.days} days, highest ${usd(max)}`}>
         {days.map((d) => {
           const v = perDay.get(d) ?? 0;
           return <div key={d} title={`${d}: ${usd(v)}`} className="flex-1 rounded-t-sm bg-primary/70 hover:bg-primary" style={{ height: `${Math.max(v > 0 ? 3 : 0, (v / max) * 100)}%` }} />;
         })}
       </div>
-      <h3 className="mt-6 mb-2 text-sm font-semibold">This month, by project</h3>
+      <h3 className="mt-8 mb-2 text-sm font-semibold">This month, by project</h3>
       {!r.projects.length ? <p className="text-sm text-muted-foreground">Nothing yet this month.</p> : (
-        <ul className="divide-y rounded-xl border text-sm">
+        <ul className="divide-y rounded-xl border bg-card text-sm">
           {[...r.projects].sort((a, b) => b.monthCost - a.monthCost).map((p) => {
             const pct = p.budget ? Math.min(100, (p.monthCost / p.budget) * 100) : null;
             return (
@@ -95,13 +96,13 @@ export function ExtensionsPage({ request }: { request: Request }) {
   const [busy, setBusy] = useState(false);
   const load = useCallback(() => { request<{ extensions: Extension[] }>('_hearth/extensions', {}).then((r) => { setItems(r.extensions); setError(null); }, (e) => setError(errorText(e))); }, [request]);
   useEffect(load, [load]);
-  const save = async () => {
+  const [askHook, setAskHook] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  // A hook asks once more before it is saved (the server wants confirm: true for hooks).
+  const save = async (confirm = false) => {
     if (!edit) return;
-    let confirm = false;
-    if (edit.kind === 'hook') {
-      confirm = window.confirm('Hooks run shell commands as the agent on every matching tool call, in every project they apply to. Save it?');
-      if (!confirm) return;
-    }
+    if (edit.kind === 'hook' && !confirm) { setAskHook(true); return; }
+    setAskHook(false);
     setBusy(true);
     try { await request('_hearth/extensions/save', { ...edit, confirm }); setEdit(null); load(); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
@@ -109,7 +110,7 @@ export function ExtensionsPage({ request }: { request: Request }) {
     <div>
       <SectionHead title="Extensions" sub="Your own skills, slash commands, subagents, hooks and output styles. They reach every project's agents (or one project's). A repo's own .claude folder is never used."
         action={<Button size="sm" onClick={() => setEdit({ kind: 'command', scope: 'global', enabled: true, name: '', content: '' })}>Add</Button>} />
-      {error && <p className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
+      {error && <p role="alert" className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
       <PluginImport request={request} onDone={load} onError={setError} />
       {edit && (
         <div className="mb-4 space-y-2 rounded-xl border bg-card p-3 text-sm">
@@ -127,23 +128,27 @@ export function ExtensionsPage({ request }: { request: Request }) {
           <div className="flex items-center gap-2">
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={edit.enabled !== false} onChange={(e) => setEdit({ ...edit, enabled: e.target.checked })} className="size-4 accent-primary" />On</label>
             <div className="ml-auto flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => setEdit(null)}>Cancel</Button>
-              <Button size="sm" disabled={busy || !edit.name || !edit.content} onClick={() => void save()}>{busy && <Loader2 className="size-3.5 animate-spin" />}Save</Button>
+              <Button size="sm" variant="outline" onClick={() => { setEdit(null); setAskHook(false); }}>Cancel</Button>
+              <Button size="sm" disabled={busy || askHook || !edit.name || !edit.content} onClick={() => void save()}>{busy && <Loader2 className="size-3.5 animate-spin" />}Save</Button>
             </div>
           </div>
+          {askHook && <ConfirmLine question="Hooks run shell commands as the agent on every matching tool call, in every project they apply to. Save it?"
+            yes="Save hook" no="Not yet" destructive={false} busy={busy} onYes={() => void save(true)} onNo={() => setAskHook(false)} />}
         </div>
       )}
       {!items && !error && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div>}
       {items && !items.length && !edit && <p className="text-sm text-muted-foreground">None yet. Add a slash command your agents should know, a skill, or a reviewer subagent.</p>}
       {items && items.length > 0 && (
-        <ul className="divide-y rounded-xl border text-sm">
+        <ul className="divide-y rounded-xl border bg-card text-sm">
           {items.map((x) => (
-            <li key={x.id} className="flex items-center gap-2 px-3 py-2">
+            <li key={x.id} className="flex flex-wrap items-center gap-2 px-3 py-2">
               <span className="w-24 shrink-0 text-xs text-muted-foreground">{KIND_LABEL[x.kind] ?? x.kind}</span>
               <span className="min-w-0 flex-1"><span className="font-mono font-medium">{x.kind === 'command' ? '/' : ''}{x.name}</span>
                 <span className="block truncate text-xs text-muted-foreground">{x.scope === 'global' ? 'Every project' : x.scope}{x.description ? ` · ${x.description}` : ''}{x.enabled ? '' : ' · off'}</span></span>
               <Button size="sm" variant="ghost" onClick={() => setEdit(x)}>Edit</Button>
-              <Button size="sm" variant="ghost" onClick={() => { if (window.confirm(`Delete ${x.name}?`)) request('_hearth/extensions/delete', { id: x.id }).then(load, (e) => setError(errorText(e))); }}>Delete</Button>
+              <Button size="sm" variant="ghost" onClick={() => setDeleting(x.id)}>Delete</Button>
+              {deleting === x.id && <ConfirmLine className="basis-full" question={`Delete ${x.name}?`} yes="Delete" onNo={() => setDeleting(null)}
+                onYes={() => { setDeleting(null); request('_hearth/extensions/delete', { id: x.id }).then(load, (e) => setError(errorText(e))); }} />}
             </li>
           ))}
         </ul>
@@ -168,6 +173,7 @@ export function ConnectorsPage({ request }: { request: Request }) {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<{ name: string; title: string; url: string; token: string; client: string } | null>(null);
   const [tests, setTests] = useState<Record<string, string>>({});
+  const [removing, setRemoving] = useState<string | null>(null);
   const load = useCallback(() => { request<{ servers: McpServer[] }>('_hearth/mcp', {}).then((r) => { setItems(r.servers); setError(null); }, (e) => setError(errorText(e))); }, [request]);
   useEffect(load, [load]);
   const test = async (name: string) => {
@@ -188,7 +194,7 @@ export function ConnectorsPage({ request }: { request: Request }) {
     <div>
       <SectionHead title="Connectors" sub="MCP servers your agents can use. Give a project the ones it needs in its settings. Tokens are stored encrypted and never shown."
         action={<Button size="sm" onClick={() => setForm({ name: '', title: '', url: '', token: '', client: '' })}>Add</Button>} />
-      {error && <p className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
+      {error && <p role="alert" className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
       {form && (
         <div className="mb-4 space-y-2 rounded-xl border bg-card p-3 text-sm">
           <div className="flex flex-wrap gap-2">
@@ -210,7 +216,7 @@ export function ConnectorsPage({ request }: { request: Request }) {
       {!items && !error && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div>}
       {items && !items.length && !form && <p className="text-sm text-muted-foreground">No connectors yet.</p>}
       {items && items.length > 0 && (
-        <ul className="divide-y rounded-xl border text-sm">
+        <ul className="divide-y rounded-xl border bg-card text-sm">
           {items.map((s) => (
             <li key={s.name} className="px-3 py-2">
               <div className="flex flex-wrap items-center gap-2">
@@ -218,8 +224,10 @@ export function ConnectorsPage({ request }: { request: Request }) {
                   <span className="block truncate text-xs text-muted-foreground">{s.url}{s.client ? ` · client ${s.client}` : ''} · {s.oauth ? 'signed in (OAuth)' : s.has_token ? 'token set' : 'no token'}</span></span>
                 <Button size="sm" variant="ghost" onClick={() => void test(s.name)}>Test</Button>
                 <Button size="sm" variant="ghost" onClick={() => void signIn(s.name)}>{s.oauth ? 'Sign in again' : 'Sign in'}</Button>
-                <Button size="sm" variant="ghost" onClick={() => { if (window.confirm(`Remove ${s.name}? Projects that use it lose it.`)) request('_hearth/mcp/delete', { name: s.name }).then(load, (e) => setError(errorText(e))); }}>Remove</Button>
+                <Button size="sm" variant="ghost" onClick={() => setRemoving(s.name)}>Remove</Button>
               </div>
+              {removing === s.name && <ConfirmLine className="mt-2" question={`Remove ${s.name}? Projects that use it lose it.`} yes="Remove" onNo={() => setRemoving(null)}
+                onYes={() => { setRemoving(null); request('_hearth/mcp/delete', { name: s.name }).then(load, (e) => setError(errorText(e))); }} />}
               {tests[s.name] && <p className="mt-1 text-xs text-muted-foreground">{tests[s.name]}</p>}
             </li>
           ))}
@@ -244,8 +252,10 @@ function PluginImport({ request, onDone, onError }: { request: Request; onDone: 
     setBusy(true); setPreview(null); setDone(null);
     try { setPreview(await request('_hearth/extensions/import', { url: url.trim() })); } catch (e) { onError(errorText(e)); } finally { setBusy(false); }
   };
-  const install = async () => {
-    if (hooks && !window.confirm('This plugin\'s hooks run shell commands as the agent on every matching tool call. Install them?')) return;
+  const [askHooks, setAskHooks] = useState(false);
+  const install = async (confirmed = false) => {
+    if (hooks && !confirmed) { setAskHooks(true); return; }
+    setAskHooks(false);
     setBusy(true);
     try {
       const r = await request<{ saved: string[]; skipped: string[] }>('_hearth/extensions/import', { url: url.trim(), install: true, scope, confirmHooks: hooks });
@@ -267,8 +277,10 @@ function PluginImport({ request, onDone, onError }: { request: Request; onDone: 
           )}
           <div className="flex flex-wrap items-center gap-2">
             <input value={scope} onChange={(e) => setScope(e.target.value)} aria-label="For" placeholder="global or a project" className={cn(field, 'h-8 w-40 px-2 text-xs')} />
-            <Button size="sm" disabled={!preview.found.length || busy} onClick={() => void install()}>{busy && <Loader2 className="size-3.5 animate-spin" />}Install</Button>
+            <Button size="sm" disabled={!preview.found.length || busy || askHooks} onClick={() => void install()}>{busy && <Loader2 className="size-3.5 animate-spin" />}Install</Button>
           </div>
+          {askHooks && <ConfirmLine question="This plugin's hooks run shell commands as the agent on every matching tool call. Install them?"
+            yes="Install with hooks" no="Not yet" destructive={false} busy={busy} onYes={() => void install(true)} onNo={() => setAskHooks(false)} />}
         </div>
       )}
       {done && <p className="mt-2 text-xs text-muted-foreground">{done}</p>}
@@ -304,14 +316,14 @@ export function AuditLog({ request }: { request: Request }) {
         action={<Button size="sm" variant="outline" onClick={() => void load()} disabled={busy}><RefreshCw className="size-3.5" />Refresh</Button>} />
       <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter: an action (chat.) or who (device:…)" aria-label="Filter the audit log"
         className={cn(field, 'mb-3')} />
-      {error && <p className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
+      {error && <p role="alert" className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
       {!entries && !error && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div>}
       {entries && !entries.length && <p className="text-sm text-muted-foreground">Nothing recorded{filter ? ' that matches' : ''}.</p>}
       {entries && entries.length > 0 && (
-        <ul className="divide-y rounded-xl border text-sm">
+        <ul className="divide-y rounded-xl border bg-card text-sm">
           {entries.map((e) => (
             <li key={e.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 px-3 py-2">
-              <span className="truncate font-mono text-[12.5px]">{e.action}</span>
+              <span className="truncate font-mono text-xs">{e.action}</span>
               <time className="text-xs whitespace-nowrap text-muted-foreground" dateTime={e.at}>{when(e.at)}</time>
               <span className="col-span-2 truncate text-xs text-muted-foreground">
                 {e.actor}{e.target ? ` · ${e.target}` : ''}{e.detail && Object.keys(e.detail).length ? ` · ${Object.entries(e.detail).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join(', ')}` : ''}

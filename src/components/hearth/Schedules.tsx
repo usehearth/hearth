@@ -13,6 +13,7 @@ import {
 } from '@/lib/schedules';
 import { cn } from '@/lib/utils';
 import { field, fieldArea } from '@/components/ui/field';
+import { ConfirmLine } from '@/components/hearth/ConfirmLine';
 
 interface Data { schedules: Schedule[]; next?: { id: number; next: string | null }[]; triggers: Trigger[]; runs: { schedules: Run[]; triggers: Run[] } }
 
@@ -173,11 +174,8 @@ function ScheduleRow({ s, next, run, status, reminder, call }: { s: Schedule; ne
           {when.join(' · ')}{status === 'failed' && <>{when.length ? ' · ' : ''}<span className="text-destructive">last run failed</span></>}
         </div>
         {confirm && (
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-            <span className="text-foreground">Delete this {reminder ? 'reminder' : 'job'}?</span>
-            <Button size="xs" variant="destructive" disabled={busy} onClick={() => act(call(`/api/schedules/${s.id}/delete`))}>Delete</Button>
-            <Button size="xs" variant="ghost" onClick={() => setConfirm(false)}>Keep</Button>
-          </div>
+          <ConfirmLine className="mt-2" question={`Delete this ${reminder ? 'reminder' : 'job'}?`} yes="Delete" busy={busy}
+            onYes={() => act(call(`/api/schedules/${s.id}/delete`))} onNo={() => setConfirm(false)} />
         )}
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
