@@ -1,7 +1,8 @@
-// Imported Claude Code conversations (`_hearth/history*`): a project's (or an unfiled group's) History list, a search
+// Imported Claude conversations (Claude Code and claude.ai, from the import wizard) (`_hearth/history*`): a project's (or an unfiled group's) History list, a search
 // across all imported history, and a read-only view of one conversation (tool calls collapsed like a live thread,
 // subagent threads, paged). "Continue in Hearth" starts a new live thread in that project, its composer filled with a
-// short summary. Client conversations come only to work devices; their body is read live from the work laptop.
+// short summary. Servers from before the import wizard read client conversations live from a work laptop; the
+// offline notes below are for those.
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Brain, ChevronDown, CircleAlert, History as HistoryIcon, Laptop, Loader2, Lock, NotebookText, Search, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -72,7 +73,7 @@ export function HistoryView({ request, scope, onOpen }: { request: Request; scop
       <div className="mx-auto max-w-2xl px-6 py-6 max-md:px-4">
         <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight"><HistoryIcon className="size-5 text-muted-foreground" />{heading}</h2>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          {'group' in scope ? 'Imported from a Claude Code folder that isn\'t a Hearth project. ' : 'Conversations imported from Claude Code. '}Read-only; continue any of them as a new thread.
+          {'group' in scope ? 'Imported from a Claude Code folder that isn\'t a Hearth project. ' : 'Conversations imported from Claude. '}Read-only; continue any of them as a new thread.
         </p>
         <label className="mt-4 flex items-center gap-2 rounded-xl border bg-background px-3 py-2 focus-within:ring-2 focus-within:ring-ring/40">
           <Search className="size-4 shrink-0 text-muted-foreground" />
@@ -161,8 +162,8 @@ export function ImportedThread({ request, summary, onContinue }: { request: Requ
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[44rem] px-4 pt-4 pb-8">
           <div className="mb-5 rounded-xl border bg-muted/40 px-4 py-3 text-sm" role="note">
-            <div className="flex items-center gap-2 font-medium"><HistoryIcon className="size-4 text-muted-foreground" />Imported from Claude Code, {day(c.startedAt)}</div>
-            <p className="mt-0.5 text-xs text-muted-foreground">Read-only. {c.messages} messages{c.folder ? ` · ${c.folder}` : ''}{c.unclear ? ' · not yet sorted as personal or client' : ''}</p>
+            <div className="flex items-center gap-2 font-medium"><HistoryIcon className="size-4 text-muted-foreground" />Imported from {c.source === 'claude-ai' ? 'claude.ai' : 'Claude Code'}, {day(c.startedAt)}</div>
+            <p className="mt-0.5 text-xs text-muted-foreground">Read-only. {c.messages} messages{c.folder && c.source !== 'claude-ai' ? ` · ${c.folder}` : ''}{c.unclear ? ' · not yet sorted as personal or client' : ''}</p>
             {page.threads.length > 1 && (
               <div className="mt-2.5 flex flex-wrap gap-1.5" role="tablist" aria-label="Threads in this conversation">
                 {page.threads.map((t) => (
