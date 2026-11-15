@@ -56,7 +56,7 @@ export function AddServer({ first, onDone, onCancel }: { first: boolean; onDone:
           <Field label="Name (optional)">
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Home" className={field} />
           </Field>
-          {err && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{err}</p>}
+          {err && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{err}</p>}
           <div className="flex justify-end gap-2 pt-1">
             {onCancel && <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>}
             <Button type="submit" disabled={busy || !url || !key}>{busy ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}Connect</Button>

@@ -15,7 +15,7 @@ const FALLBACK_MODES = [
   { id: 'plan', name: 'Plan', description: 'Reads and plans; changes nothing' },
 ];
 
-const pill = 'flex h-7 items-center gap-1 rounded-full px-2 text-[12px] text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50 data-[state=open]:bg-accent';
+const pill = 'flex h-7 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50 data-[state=open]:bg-accent';
 const menu = 'z-50 min-w-48 max-w-72 rounded-lg border bg-popover p-1 text-sm text-popover-foreground shadow-md';
 const item = 'flex cursor-default items-start gap-2 rounded-md px-2 py-1.5 outline-none select-none data-[highlighted]:bg-accent';
 

@@ -66,10 +66,10 @@ export function ProviderForm({ initial, request, onSaved, onCancel }: {
       </div>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
         <label className="flex items-center gap-2">Order <input type="number" min={0} max={1000} value={f.priority} onChange={(e) => set('priority', Number(e.target.value))} className={cn(field, 'w-20')} /></label>
-        <label className="flex items-center gap-2"><input type="checkbox" checked={f.enabled} onChange={(e) => set('enabled', e.target.checked)} className="size-4 accent-(--primary)" />On</label>
-        <label className="flex items-center gap-2"><input type="checkbox" checked={f.sensitive_ok} onChange={(e) => set('sensitive_ok', e.target.checked)} className="size-4 accent-(--primary)" />Allowed for client work</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={f.enabled} onChange={(e) => set('enabled', e.target.checked)} className="size-4 accent-primary" />On</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={f.sensitive_ok} onChange={(e) => set('sensitive_ok', e.target.checked)} className="size-4 accent-primary" />Allowed for client work</label>
       </div>
-      {err && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{err}</p>}
+      {err && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{err}</p>}
       <div className="flex gap-2">
         <Button type="submit" size="sm" disabled={busy}>{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}Save</Button>
         <Button type="button" size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
@@ -104,7 +104,7 @@ export function DeviceKeys({ request }: { request: Request }) {
   const active = (rows ?? []).filter((d) => !d.revoked_at);
   return (
     <div className="mt-8">
-      <h3 className="text-base font-semibold">Device keys</h3>
+      <h3 className="text-sm font-semibold">Device keys</h3>
       <p className="mt-0.5 text-sm text-muted-foreground">This is an admin device, so it can make keys for new devices and revoke old ones. A revoked device is cut off at once.</p>
       {made && (
         <div className="mt-3 rounded-xl border border-primary/40 bg-primary/5 p-3 text-sm">
@@ -121,8 +121,8 @@ export function DeviceKeys({ request }: { request: Request }) {
         <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="New device name, e.g. phone" aria-label="New device name" maxLength={60} className={cn(field, 'flex-1')} />
         <Button type="submit" size="sm" disabled={busy || !name.trim()}>{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}Make a key</Button>
       </form>
-      {err && <p className="mt-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{err}</p>}
-      {!rows && !err && <Loader2 className="mt-3 size-4 animate-spin text-muted-foreground" />}
+      {err && <p role="alert" className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{err}</p>}
+      {!rows && !err && <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div>}
       {rows && (
         <ul className="mt-3 divide-y rounded-xl border bg-card">
           {active.map((d) => (

@@ -110,7 +110,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
     } catch (e2) { setErr(errorText(e2)); } finally { setBusy(false); }
   };
 
-  if (!view) return <div className="p-6">{err ? <p className="text-sm text-destructive">{err}</p> : <Loader2 className="size-4 animate-spin text-muted-foreground" />}</div>;
+  if (!view) return <div className="p-6">{err ? <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{err}</p> : <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div>}</div>;
   const move = (i: number, d: -1 | 1) => setOrder((o) => { const n = [...o]; const j = i + d; if (j < 0 || j >= n.length) return o; [n[i], n[j]] = [n[j], n[i]]; return n; });
   const toggle = (name: string) => setOrder((o) => (o.includes(name) ? o.filter((x) => x !== name) : [...o, name]));
   const listed = [...order, ...view.availableProviders.map((p) => p.name).filter((n) => !order.includes(n))];
@@ -153,7 +153,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
 
         <Section title="Model providers" sub={view.client ? 'A client project only ever uses providers allowed for client work.' : 'Which providers this project may use, tried in this order.'}>
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={allProviders} onChange={(e) => setAllProviders(e.target.checked)} className="size-4 accent-(--primary)" />
+            <input type="checkbox" checked={allProviders} onChange={(e) => setAllProviders(e.target.checked)} className="size-4 accent-primary" />
             Any provider, in the server's order
           </label>
           {!allProviders && (
@@ -164,14 +164,14 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
                 const p = view.availableProviders.find((x) => x.name === n);
                 return (
                   <li key={n} className="flex items-center gap-2 px-3 py-2 text-sm">
-                    <input type="checkbox" checked={on} onChange={() => toggle(n)} aria-label={`Use ${n}`} className="size-4 accent-(--primary)" />
-                    {on && <span className="grid size-5 place-items-center rounded bg-muted text-[11px] font-semibold">{i + 1}</span>}
+                    <input type="checkbox" checked={on} onChange={() => toggle(n)} aria-label={`Use ${n}`} className="size-4 accent-primary" />
+                    {on && <span className="grid size-5 place-items-center rounded-md bg-muted text-[11px] font-semibold">{i + 1}</span>}
                     <span className={cn('font-medium', !on && 'text-muted-foreground')}>{n}</span>
                     <span className="text-xs text-muted-foreground">{p ? (p.kind === 'anthropic' ? 'Anthropic API' : 'OpenAI-style API') : 'not available to this project'}</span>
                     {on && (
                       <span className="ml-auto flex gap-0.5">
-                        <button type="button" onClick={() => move(i, -1)} disabled={i === 0} aria-label={`Move ${n} up`} className="grid size-6 place-items-center rounded hover:bg-accent disabled:opacity-30"><ArrowUp className="size-3.5" /></button>
-                        <button type="button" onClick={() => move(i, 1)} disabled={i === order.length - 1} aria-label={`Move ${n} down`} className="grid size-6 place-items-center rounded hover:bg-accent disabled:opacity-30"><ArrowDown className="size-3.5" /></button>
+                        <button type="button" onClick={() => move(i, -1)} disabled={i === 0} aria-label={`Move ${n} up`} className="grid size-6 place-items-center rounded-md hover:bg-accent disabled:opacity-30"><ArrowUp className="size-3.5" /></button>
+                        <button type="button" onClick={() => move(i, 1)} disabled={i === order.length - 1} aria-label={`Move ${n} down`} className="grid size-6 place-items-center rounded-md hover:bg-accent disabled:opacity-30"><ArrowDown className="size-3.5" /></button>
                       </span>
                     )}
                   </li>
@@ -183,7 +183,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
 
         <Section title="Work">
           <label className="flex items-start gap-2 text-sm">
-            <input type="checkbox" checked={planFirst} onChange={(e) => setPlanFirst(e.target.checked)} className="mt-0.5 size-4 accent-(--primary)" />
+            <input type="checkbox" checked={planFirst} onChange={(e) => setPlanFirst(e.target.checked)} className="mt-0.5 size-4 accent-primary" />
             <span>Plan first<span className="block text-xs text-muted-foreground">Workers write a spec for your OK before they build.</span></span>
           </label>
         </Section>
@@ -216,7 +216,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
             </div>
             {!view.client && (
               <label className="mt-3 flex items-start gap-2 text-sm">
-                <input type="checkbox" checked={allowAuto} onChange={(e) => setAllowAuto(e.target.checked)} className="mt-0.5 size-4 accent-(--primary)" />
+                <input type="checkbox" checked={allowAuto} onChange={(e) => setAllowAuto(e.target.checked)} className="mt-0.5 size-4 accent-primary" />
                 <span>Allow auto mode<span className="block text-xs text-muted-foreground">Threads may then go ahead without asking, except for risky things (the network, deleting, secrets, git history). The runner still checks every call. Needs an admin device.</span></span>
               </label>
             )}
@@ -253,7 +253,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
             {view.repoMcp && (
               <div className="mt-3 rounded-lg border p-2.5 text-sm">
                 <label className="flex items-start gap-2">
-                  <input type="checkbox" checked={repoMcp} onChange={(e) => setRepoMcp(e.target.checked)} className="mt-0.5 size-4 accent-(--primary)" />
+                  <input type="checkbox" checked={repoMcp} onChange={(e) => setRepoMcp(e.target.checked)} className="mt-0.5 size-4 accent-primary" />
                   <span>Use the repo's own .mcp.json<span className="block text-xs text-muted-foreground">Only servers you allow below, only http ones (a command in the repo never runs), and their tools still ask.</span></span>
                 </label>
                 {repoMcp && (view.repoMcp.found.length === 0
@@ -261,7 +261,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
                   : <ul className="mt-2 space-y-1">{view.repoMcp.found.map((f) => (
                       <li key={f.hash} className="flex items-center gap-2 text-xs">
                         <input type="checkbox" disabled={!f.usable} checked={repoApproved.includes(f.hash)} aria-label={`Allow ${f.name}`}
-                          onChange={(e) => setRepoApproved((a) => (e.target.checked ? [...a, f.hash] : a.filter((h) => h !== f.hash)))} className="size-3.5 accent-(--primary)" />
+                          onChange={(e) => setRepoApproved((a) => (e.target.checked ? [...a, f.hash] : a.filter((h) => h !== f.hash)))} className="size-3.5 accent-primary" />
                         <span className="font-mono">{f.name}</span>
                         <span className="min-w-0 flex-1 truncate text-muted-foreground">{f.usable ? f.url : f.command ? `command: ${f.command} (never run)` : 'not usable'}</span>
                       </li>))}</ul>)}
@@ -280,7 +280,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
           <Button type="submit" disabled={busy || !view.canEdit || (!allProviders && order.length === 0)}>{busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}Save</Button>
           {saved && <span className="text-sm text-success">Saved</span>}
           {!allProviders && order.length === 0 && <span className="text-sm text-muted-foreground">Pick at least one provider.</span>}
-          {err && <span className="text-sm text-destructive">{err}</span>}
+          {err && <span role="alert" className="text-sm text-destructive">{err}</span>}
         </div>
       </form>
     </div>
@@ -320,7 +320,7 @@ function PullRequests({ project, request }: { project: string; request: Request 
             <li key={p.number} className="flex items-center gap-2">
               <a href={p.url} target="_blank" rel="noreferrer" className="font-medium underline-offset-2 hover:underline">#{p.number}</a>
               <span className="font-mono">{p.branch} → {p.base}</span>
-              <span className={cn('ml-auto rounded px-1.5', p.ci === 'failure' ? 'bg-destructive/15 text-destructive' : p.ci === 'success' ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground')}>
+              <span className={cn('ml-auto rounded-full px-1.5', p.ci === 'failure' ? 'bg-destructive/15 text-destructive' : p.ci === 'success' ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground')}>
                 {p.state !== 'open' ? p.state : p.ci === 'failure' ? `CI failed: ${p.ci_detail ?? ''}` : p.ci ?? 'no checks'}</span>
             </li>
           ))}

@@ -45,7 +45,7 @@ export function ExportThread() {
   return (
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger title="Export the thread" aria-label="Export the thread"
-        className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground data-[state=open]:bg-accent">
+        className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground data-[state=open]:bg-accent">
         <FileDown className="size-4" /><span className="max-sm:sr-only">Export</span>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>

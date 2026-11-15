@@ -413,27 +413,27 @@ function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin 
           <>
             {admin && (
               <button onClick={() => show('audit')} aria-pressed={planOpen && tab === 'audit'} title="Every call in this admin thread"
-                className={cn('flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground', planOpen && tab === 'audit' && 'bg-accent text-foreground')}>
+                className={cn('flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground', planOpen && tab === 'audit' && 'bg-accent text-foreground')}>
                 <ShieldAlert className="size-4" /><span className="max-sm:sr-only">Audit</span>
                 {nCommands > 0 && <span className="rounded-full bg-rose-500/15 px-1.5 text-[11px] font-medium text-rose-700 dark:text-rose-300">{nCommands}</span>}
               </button>
             )}
             {onOpenAdmin && (
               <button onClick={() => onOpenAdmin()} title="Open a new admin thread to fix what blocked this one"
-                className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground">
+                className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">
                 <ShieldAlert className="size-4" /><span className="max-sm:sr-only">Open in admin</span>
               </button>
             )}
             <ExportThread />
             {extras.filesSupported && (
               <button onClick={() => show('files')} aria-pressed={planOpen && tab === 'files'} title="Files this thread made"
-                className={cn('flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground', planOpen && tab === 'files' && 'bg-accent text-foreground')}>
+                className={cn('flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground', planOpen && tab === 'files' && 'bg-accent text-foreground')}>
                 <FolderOpen className="size-4" /><span className="max-sm:sr-only">Files</span>
                 {nFiles > 0 && <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium">{nFiles}</span>}
               </button>
             )}
             <button onClick={() => show('plan')} aria-pressed={planOpen && tab === 'plan'} title={planOpen && tab === 'plan' ? 'Hide the plan' : 'Show the plan'}
-              className={cn('flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground', planOpen && tab === 'plan' && 'bg-accent text-foreground')}>
+              className={cn('flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground', planOpen && tab === 'plan' && 'bg-accent text-foreground')}>
               {planOpen && tab === 'plan' ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
               <span className="max-sm:sr-only">Plan</span>
               {hasPlan && !(planOpen && tab === 'plan') && <span className="size-1.5 rounded-full bg-primary" aria-label="has a plan" />}
@@ -463,7 +463,7 @@ function SidePanel({ extras, tab, onTab, onClose, audit, onRefreshAudit }: { ext
   const current = open ? extras.files?.find((f) => f.path === open.path) ?? open : null;
   const wideFile = tab === 'files' && !!current;
   return (
-    <aside aria-label={tab === 'plan' ? 'Plan' : tab === 'tasks' ? 'Tasks' : tab === 'audit' ? 'Audit' : 'Files'} className={cn(wideFile && 'lg:w-[34rem]', "flex w-[22rem] shrink-0 flex-col border-l bg-sidebar/40 max-lg:w-80 max-md:fixed max-md:inset-0 max-md:z-30 max-md:w-full max-md:border-l-0 max-md:bg-background max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)]")}>
+    <aside aria-label={tab === 'plan' ? 'Plan' : tab === 'tasks' ? 'Tasks' : tab === 'audit' ? 'Audit' : 'Files'} className={cn(wideFile && 'lg:w-[34rem]', "flex w-[22rem] shrink-0 flex-col border-l bg-sidebar/40 max-lg:w-80 max-md:fixed max-md:inset-0 max-md:z-30 max-md:w-full max-md:border-l-0 max-md:bg-background max-md:pt-safe max-md:pb-safe")}>
       <div className="flex h-11 shrink-0 items-center gap-1 border-b px-2">
         <div role="tablist" className="flex items-center gap-0.5">
           {audit && <TabBtn on={tab === 'audit'} onClick={() => onTab('audit')}><ShieldAlert className="size-4" />Audit</TabBtn>}
@@ -488,7 +488,7 @@ function SidePanel({ extras, tab, onTab, onClose, audit, onRefreshAudit }: { ext
             {plan?.text ? <Markdown text={plan.text} />
               : <p className="text-sm text-muted-foreground">{plan?.note ?? (planLoading ? 'Reading the plan…' : 'No plan yet.')}</p>}
           </div>
-          {plan?.path && <div className="truncate border-t px-4 py-2 font-mono text-[11px] text-muted-foreground" title={plan.path}>{plan.path}</div>}
+          {plan?.path && <div className="truncate border-t px-4 py-2 font-mono text-xs text-muted-foreground" title={plan.path}>{plan.path}</div>}
         </>
       ) : current ? (
         <div className="min-h-0 flex-1"><FileView file={current} read={extras.readFile} onBack={() => setOpen(null)} /></div>

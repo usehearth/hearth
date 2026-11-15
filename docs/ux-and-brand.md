@@ -44,13 +44,13 @@ Sources of truth: `src/index.css` (tokens), `components.json` (shadcn, new-york 
 - **Sentence case** everywhere: buttons, headings, menu items, tabs. Write "Add a server", not "Add A Server". Product and protocol names keep their case (ACP, MCP, GitHub).
 - **Say what it does, from the user's side.** Write "Weekdays at 07:15", not `15 7 * * 1-5`. Write "Not connected", not "WebSocket closed (1006)". Put the technical detail in a tooltip, a monospace sub-line or the docs.
 - **Verbs.** Pick the word for what really happens:
-  - **Add** puts a thing into a list (a server, a job, a provider). *Outlier:* "Make project" and "Make a key" (NewProject, AdminSettings). "Make a key" can stay, because a key is generated rather than added.
+  - **Add** puts a thing into a list (a server, a job, a provider). "Make a key" (AdminSettings) is the one exception, because a key is generated rather than added.
   - **Remove** takes something off this device or out of a list, and it can be added again.
   - **Delete** destroys it on the server.
   - **Revoke** applies to keys and access only.
   - **Keep** is the "no" in an inline confirm. **Cancel** closes a form or a dialog.
 - **Buttons** are verbs or verb phrases: "Run now", "Add a job", "Save". Don't use bare nouns ("Settings…") unless the button opens a place.
-- **Ellipsis.** Use "…" (one character, never "...") for loading text ("Reading…") and for a menu item that opens a dialog before acting ("Delete…"). *Outlier:* the composer placeholder "Send a message..." (assistant-ui) uses three dots.
+- **Ellipsis.** Use "…" (one character, never "...") for loading text ("Reading…") and for a menu item that opens a dialog before acting ("Delete…").
 - **Empty states** say what would be here and how to get it, in one line: "No jobs of your own yet. Add a job to run a prompt on a timetable." Don't write "No data".
 - **Errors** say what failed in words, then the server's message if it helps. Never blame the user.
 - **Times.** Use relative and short near now ("today 18:15", "tomorrow 07:30", "Fri 16:30"), and a date further out ("31 Jan 2027"). Use the 24-hour clock. Put the full date and time in the tooltip (`title`).
@@ -119,12 +119,7 @@ All colours come from CSS variables in `src/index.css`, used through Tailwind (`
   - brand `text-[15px] font-semibold`.
   
   Keep these inside the sidebar.
-- **Outliers:**
-  - `H` in Settings.tsx and `SectionHead` in ServerSettings.tsx are the same component; keep `SectionHead`.
-  - Headings in `text-base`: AdminSettings "Device keys" and NeedsYou should be `text-sm font-semibold`.
-  - `text-[12px]`/`text-[13px]` outside the sidebar (ThreadPane header, ComposerBar pills, ExportThread) should become `text-xs` or `text-sm`.
-
----
+- ---
 
 ## 5. Spacing
 
@@ -144,8 +139,6 @@ Use Tailwind's 4 px scale. Use the steps below and avoid halves except where sho
 
 **Outliers:**
 - History rows `px-3.5 py-2.5` should be `px-3 py-2.5`.
-- FilesList `px-4 py-2` should be `px-3 py-2`.
-- NeedsYou `px-5` has no phone override.
 - NewProject uses `max-w-xl`. That is fine for a focused form, but say so in a comment.
 
 ---
@@ -166,9 +159,6 @@ Use Tailwind's 4 px scale. Use the steps below and avoid halves except where sho
 - `shadow-xs` on outline buttons, the switch and cards that float in a thread (CardView).
 - `shadow-md` on menus and popovers, `shadow-lg` on dialogs and the slash menu, `shadow-2xl` on the phone drawer.
 - Never use a shadow on a list or a settings card.
-
-**Outliers:**
-- Plain `rounded` on small icon buttons (Settings rename, ProjectSettings) and on the PR CI badge should be `rounded-md` or `rounded-full`.
 
 ---
 
@@ -195,7 +185,6 @@ Use Tailwind's 4 px scale. Use the steps below and avoid halves except where sho
   - CalendarClock = schedules
   - Zap = triggers
   - Loader2 + `animate-spin` = working
-- **Outlier:** Settings "Add a server" has `size-4` inside a default button. That is correct; the `sm` buttons with `size-4` are not.
 
 ---
 
@@ -208,11 +197,11 @@ Use Tailwind's 4 px scale. Use the steps below and avoid halves except where sho
 - **Quiet or row actions:** `ghost`. Icon-only row actions use `size="icon-sm" variant="ghost"`.
 - **Destroy:** a `ghost` trash icon (hover `text-destructive`) opens an inline confirm: "Delete this job? **[Delete]** (destructive, `xs`) [Keep] (ghost, `xs`)". Use a dialog (`ui/dialog`, destructive button) only when the thing is big or the action reaches far, such as deleting a thread or a rewind.
 - Use **no `window.confirm`**. The inline confirm is `ConfirmLine` (`components/hearth/ConfirmLine.tsx`). For a warning rather than a delete (saving a hook), pass `destructive={false}` and a plain "Not yet" for the no.
-- Raw `<button>` is fine for list rows, nav items and the sidebar, which are not "buttons" visually. Anything that looks like a button uses `Button`. The local icon-button helpers `IconBtn` (App) and `IconAct` (FilesPanel) should become `Button size="icon-sm" variant="ghost"`.
+- Raw `<button>` is fine for list rows, nav items and the sidebar, which are not "buttons" visually. Anything that looks like a button uses `Button`. The local icon-button helper `IconBtn` (App) should become `Button size="icon-sm" variant="ghost"`, as `IconAct` (FilesPanel) now is.
 
 ### Switch and checkbox
 - **`ui/switch`** turns a thing that runs on or off: a schedule, a trigger, a connector, notifications. It needs an `aria-label` naming the thing and its state, and no "On" text beside it.
-- **Checkbox** (native, `size-4 accent-primary`) is for choices inside a form ("Always allow", options to send). Write it as `accent-primary`, not `accent-(--primary)` (ProjectSettings, AdminSettings).
+- **Checkbox** (native, `size-4 accent-primary`) is for choices inside a form ("Always allow", options to send). Write it as `accent-primary`, not `accent-(--primary)`.
 
 ### Forms
 - **Field:** `h-9 w-full rounded-lg border border-input bg-background px-3 text-sm`, with focus `focus-visible:ring-[3px] focus-visible:ring-ring/50`. A textarea is the same with `py-2`. Monospace inputs (project slug, cron, URL) add `font-mono`.
@@ -237,9 +226,8 @@ Use Tailwind's 4 px scale. Use the steps below and avoid halves except where sho
 - **Loading** is `Loader2 size-3.5 animate-spin` plus a word: "Reading…", "Loading…", "Searching…". Never show a bare spinner without text, except inside a button. Use `ui/skeleton` for a list that will fill in place (the sidebar).
 - **Error** is a box, `rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm` with `role="alert"`, at the top of the section it belongs to. A one-field error goes under the field as `text-xs text-destructive`.
 - **Outliers:**
-  - Filled `bg-destructive/10 text-destructive` errors (Settings, AdminSettings, AddServer).
-  - Plain-text errors (UsagePage, History, ProjectSettings).
-  - Bare spinners (Settings, ProjectSettings, AdminSettings, History, NewProject, FilesPanel).
+  - Plain-text errors in History.
+  - The bare spinner in History.
   - The hand-rolled SidebarSkeleton (App).
 
 ### Chips and badges
@@ -262,7 +250,7 @@ Use Tailwind's 4 px scale. Use the steps below and avoid halves except where sho
   - Content padding drops to `px-4`.
   - Rows keep their actions on the right and let the text wrap. Don't hide actions on phones.
   - Use `max-sm:` only to hide button labels (`sr-only`) where space runs out.
-- **Safe areas:** use `pt-safe` and `pb-safe` (index.css). *Outliers:* the raw `env()` in ThreadPane and the header's inline style in App.
+- **Safe areas:** use `pt-safe` and `pb-safe` (index.css). *Outlier:* the header's inline style in App.
 - **Check every screen** at 390 px and 1280 px wide, light and dark. In dev, `/#preview/schedules` shows the Schedules screen against made-up data (`src/dev/Preview.tsx`). Add `?theme=dark` and `?frame=390` for the phone width.
 
 ---

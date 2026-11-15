@@ -7,12 +7,13 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Markdown } from '@/components/hearth/Markdown';
 import { errorText } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 
 export interface FileItem { path: string; name: string; inProject: boolean; at: string; edits: number }
 export interface FileContent extends FileItem { mimeType: string; size?: number; text?: string; dataBase64?: string; note?: string }
 
 export function FilesList({ files, loading, onOpen, onRefresh }: { files: FileItem[] | null; loading: boolean; onOpen: (f: FileItem) => void; onRefresh: () => void }) {
-  if (!files) return <div className="p-4">{loading ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}</div>;
+  if (!files) return <div className="p-4">{loading ? <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div> : null}</div>;
   if (!files.length) return <p className="p-4 text-sm text-muted-foreground">No files yet. Files the agent writes or changes in this thread show up here.</p>;
   return (
     <div>
@@ -22,7 +23,7 @@ export function FilesList({ files, loading, onOpen, onRefresh }: { files: FileIt
           const Icon = iconFor(f.path);
           return (
             <li key={f.path}>
-              <button onClick={() => onOpen(f)} className="flex w-full items-start gap-2.5 px-4 py-2 text-left hover:bg-accent/60" title={f.path}>
+              <button onClick={() => onOpen(f)} className="flex w-full items-start gap-2.5 px-3 py-2 text-left hover:bg-accent/60" title={f.path}>
                 <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{f.name}</span>
@@ -59,7 +60,7 @@ export function FileView({ file, read, onBack }: { file: FileItem; read: (path: 
         <IconAct label="Read again" onClick={load}><RefreshCw className="size-3.5" /></IconAct>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {err && <p className="p-4 text-sm text-destructive">{err}</p>}
+        {err && <div className="p-4"><p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{err}</p></div>}
         {!c && !err && <div className="p-4"><Loader2 className="size-4 animate-spin text-muted-foreground" /></div>}
         {c && <Preview c={c} />}
       </div>
@@ -125,7 +126,7 @@ function toBlob(c: FileContent): Blob {
 }
 
 function IconAct({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
-  return <button onClick={onClick} aria-label={label} title={label} className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">{children}</button>;
+  return <Button size="icon-sm" variant="ghost" onClick={onClick} aria-label={label} title={label} className="size-7 text-muted-foreground">{children}</Button>;
 }
 
 function iconFor(p: string) {

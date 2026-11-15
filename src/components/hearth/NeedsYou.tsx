@@ -20,11 +20,11 @@ export function NeedsYou({ cards, onAnswer, onOpen, onOpenAdmin, adminRequest, o
     // Admin flags (when any) above the usual empty state; the flags section draws nothing when there are none.
     return (
       <div className="flex h-full flex-col overflow-y-auto">
-        {flags && <div className="mx-auto w-full max-w-2xl px-5 pt-6">{flags}</div>}
+        {flags && <div className="mx-auto w-full max-w-2xl px-5 pt-6 max-md:px-4">{flags}</div>}
         <div className="grid flex-1 place-items-center p-8 text-center">
           <div>
             <Inbox className="mx-auto size-10 text-muted-foreground/60" />
-            <h2 className="mt-3 text-base font-semibold">No cards waiting</h2>
+            <h2 className="mt-3 text-sm font-semibold">No cards waiting</h2>
             <p className="mt-1 text-sm text-muted-foreground">Questions, approvals and permission prompts from any thread show up here.</p>
           </div>
         </div>
@@ -36,7 +36,7 @@ export function NeedsYou({ cards, onAnswer, onOpen, onOpenAdmin, adminRequest, o
   for (const e of cards) byThread.set(e.sessionId, [...(byThread.get(e.sessionId) ?? []), e]);
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-2xl space-y-6 px-5 py-6">
+      <div className="mx-auto max-w-2xl space-y-6 px-5 py-6 max-md:px-4">
         {flags}
         <p className="text-sm text-muted-foreground">{cards.length} {cards.length === 1 ? 'thing waits' : 'things wait'} for you. The first answer from any window counts.</p>
         {[...byThread.values()].map((list) => {

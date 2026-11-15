@@ -35,7 +35,7 @@ export function NewProject({ request, onDone }: { request: Request; onDone: (m: 
     catch (e2) { setErr(errorText(e2)); } finally { setBusy(false); }
   };
 
-  if (!opts) return <div className="p-6">{err ? <p className="text-sm text-destructive">{err}</p> : <Loader2 className="size-4 animate-spin text-muted-foreground" />}</div>;
+  if (!opts) return <div className="p-6">{err ? <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{err}</p> : <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div>}</div>;
   return (
     <div className="h-full overflow-y-auto">
       <form onSubmit={submit} className="mx-auto max-w-xl space-y-5 px-6 py-6 max-md:px-4">
@@ -64,8 +64,8 @@ export function NewProject({ request, onDone }: { request: Request; onDone: (m: 
           </Field>
         )}
         <div className="flex items-center gap-3 border-t pt-4">
-          <Button type="submit" disabled={busy || !name.trim() || !!clientBlocked}>{busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}Make project</Button>
-          {err && <span className="text-sm text-destructive">{err}</span>}
+          <Button type="submit" disabled={busy || !name.trim() || !!clientBlocked}>{busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}Add project</Button>
+          {err && <span role="alert" className="text-sm text-destructive">{err}</span>}
         </div>
       </form>
     </div>

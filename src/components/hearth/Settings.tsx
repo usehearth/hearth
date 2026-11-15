@@ -6,7 +6,7 @@ import { AdminKeySettings } from '@/components/hearth/Admin';
 import { Button } from '@/components/ui/button';
 import { KeyPrompt } from '@/components/hearth/AddServer';
 import { DeviceKeys, ProviderForm } from '@/components/hearth/AdminSettings';
-import { AuditLog, ConnectorsPage, ExtensionsPage, SchedulesPage, UsagePage } from '@/components/hearth/ServerSettings';
+import { AuditLog, ConnectorsPage, ExtensionsPage, SchedulesPage, SectionHead, UsagePage } from '@/components/hearth/ServerSettings';
 import type { DirectoryState } from '@/lib/directory';
 import { forgetKey, isDesktop, keyFor, removeServer, renameServer, type Server } from '@/lib/servers';
 import { setThemeMode, useThemeMode, type ThemeMode } from '@/lib/theme';
@@ -67,9 +67,6 @@ export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged }: {
   );
 }
 
-function H({ title, sub }: { title: string; sub?: string }) {
-  return (<div className="mb-4"><h2 className="text-lg font-semibold tracking-tight">{title}</h2>{sub && <p className="mt-0.5 text-sm text-muted-foreground">{sub}</p>}</div>);
-}
 
 // ---------- servers and keys ----------
 
@@ -82,7 +79,7 @@ function Servers({ servers, server, dir, onAdd, onUse, onKeyChanged }: { servers
   }, [ready?.request]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
-      <H title="Servers and keys" sub="Hearth remembers each server's address and name. Its device key lives in your system keychain on the desktop, or in memory for this window on the web." />
+      <SectionHead title="Servers and keys" sub="Hearth remembers each server's address and name. Its device key lives in your system keychain on the desktop, or in memory for this window on the web." />
       <div className="space-y-3">
         {servers.map((s) => <ServerRow key={s.id} s={s} current={s.id === server?.id} dir={s.id === server?.id ? dir : undefined}
           device={s.id === server?.id ? device : null} onUse={() => onUse(s.id)} onKeyChanged={onKeyChanged} />)}
@@ -117,7 +114,7 @@ function ServerRow({ s, current, dir, device, onUse, onKeyChanged }: { s: Server
             <div className="flex items-center gap-2">
               <span className="truncate font-medium">{s.name}</span>
               {current && <span className="rounded-full bg-primary/12 px-2 py-0.5 text-[11px] font-medium text-primary">In use</span>}
-              <button onClick={() => setEditing(true)} aria-label={`Rename ${s.name}`} className="grid size-6 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"><Pencil className="size-3" /></button>
+              <button onClick={() => setEditing(true)} aria-label={`Rename ${s.name}`} className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Pencil className="size-3" /></button>
             </div>
           )}
           <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">{s.url}</div>
@@ -179,11 +176,11 @@ function Providers({ dir, server }: { dir: DirectoryState; server?: Server }) {
   useEffect(load, [load]);
   return (
     <>
-      <H title="Model providers" sub="Where the server's agents get their thinking, in the order it tries them. When one is down, new work moves to the next." />
+      <SectionHead title="Model providers" sub="Where the server's agents get their thinking, in the order it tries them. When one is down, new work moves to the next." />
       {!ready && <p className="text-sm text-muted-foreground">Connect to a server to see its providers.</p>}
       {ready && !supported && <p className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">{server?.name ?? 'This server'} doesn't share its providers with Hearth. They are set on the server itself.</p>}
-      {err && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{err}</p>}
-      {ready && supported && !rows && !err && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+      {err && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{err}</p>}
+      {ready && supported && !rows && !err && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div>}
       {rows && rows.length === 0 && <p className="rounded-xl border bg-card p-4 text-sm">No providers yet: the server waits until one is added.</p>}
       {rows && (
         <>
@@ -264,7 +261,7 @@ function Appearance() {
   ];
   return (
     <>
-      <H title="Appearance" sub="Remembered on this device." />
+      <SectionHead title="Appearance" sub="Remembered on this device." />
       <div role="radiogroup" aria-label="Theme" className="grid grid-cols-3 gap-2 max-sm:grid-cols-1">
         {opts.map((o) => (
           <button key={o.id} role="radio" aria-checked={mode === o.id} onClick={() => setThemeMode(o.id)}
