@@ -415,7 +415,7 @@ function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin 
               <button onClick={() => show('audit')} aria-pressed={planOpen && tab === 'audit'} title="Every call in this admin thread"
                 className={cn('flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground', planOpen && tab === 'audit' && 'bg-accent text-foreground')}>
                 <ShieldAlert className="size-4" /><span className="max-sm:sr-only">Audit</span>
-                {nCommands > 0 && <span className="rounded-full bg-rose-500/15 px-1.5 text-[11px] font-medium text-rose-700 dark:text-rose-300">{nCommands}</span>}
+                {nCommands > 0 && <span className="rounded-full bg-admin/15 px-1.5 text-[11px] font-medium text-admin-text">{nCommands}</span>}
               </button>
             )}
             {onOpenAdmin && (

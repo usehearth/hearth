@@ -82,7 +82,7 @@ export function CardView({ card, onAnswer, where, compact, onOpenAdmin }: {
             </div>
           )}
           {open && onOpenAdmin && (
-            <button onClick={onOpenAdmin} className="mt-2 text-xs font-medium text-rose-700 hover:underline dark:text-rose-300">Open in admin</button>
+            <button onClick={onOpenAdmin} className="mt-2 text-xs font-medium text-admin-text hover:underline">Open in admin</button>
           )}
           {err && <p className="mt-2 text-xs text-destructive">{err}</p>}
         </div>

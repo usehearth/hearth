@@ -404,10 +404,10 @@ function AdminSection({ group: g, canOpen, activeId, onOpen, onNew, menu }: { gr
   return (
     <div className="mt-1" aria-label="Admin">
       <div className="group flex items-center rounded-lg pr-1 hover:bg-sidebar-accent/60">
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-[13px] font-semibold"><ShieldAlert className="size-3.5 shrink-0 text-rose-600 dark:text-rose-400" />Admin</span>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-[13px] font-semibold"><ShieldAlert className="size-3.5 shrink-0 text-admin" />Admin</span>
         {canOpen && <IconBtn label="New admin thread" onClick={onNew}><Plus className="size-3.5" /></IconBtn>}
       </div>
-      <ul className="ml-2 border-l border-rose-500/30 pl-1.5">
+      <ul className="ml-2 border-l border-admin/30 pl-1.5">
         {threads.slice(0, SHOW).map((t) => <ThreadRow key={t.sessionId} t={t} active={activeId === t.sessionId} onOpen={onOpen} menu={menu} />)}
         {!threads.length && <li className="px-2 py-1 text-[12px] text-muted-foreground">Runs as you on the laptop. No project walls; hard lines and an audit.</li>}
       </ul>

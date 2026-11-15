@@ -109,11 +109,11 @@ function ChainLine({ chain }: { chain: AdminInfo['chain'] }) {
 /** The strip above an admin thread: what it is, whether this install can type in it, and Finish. */
 export function AdminStrip({ canSign, commands, origin, onFinish }: { canSign: boolean; commands: number; origin: boolean; onFinish?: () => void }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b bg-rose-500/8 px-5 py-1.5 text-xs text-rose-900 max-md:px-3 dark:text-rose-200" role="note">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b bg-admin/8 px-5 py-1.5 text-xs text-admin-text max-md:px-3" role="note">
       <span className="flex items-center gap-1.5"><ShieldAlert className="size-3.5 shrink-0" /><span className="font-semibold">Admin.</span> Runs as you on the laptop, no project walls; every call audited.</span>
       {!canSign && <span className="font-medium">Watch only on this device.</span>}
       {commands > 0 && <span className="flex items-center gap-1 font-medium"><Terminal className="size-3.5" />{commands} command{commands > 1 ? 's' : ''} for you to run (Audit)</span>}
-      {onFinish && <button onClick={onFinish} className="ml-auto rounded-md px-2 py-0.5 font-medium hover:bg-rose-500/15">{origin ? 'Finish and tell the thread' : 'Finish'}</button>}
+      {onFinish && <button onClick={onFinish} className="ml-auto rounded-md px-2 py-0.5 font-medium hover:bg-admin/15">{origin ? 'Finish and tell the thread' : 'Finish'}</button>}
     </div>
   );
 }
@@ -142,7 +142,7 @@ export function AdminAudit({ timeline, loading }: { timeline: { entries: AuditEn
           <h3 className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">For you to run</h3>
           <div className="space-y-2">
             {commands.map((e) => (
-              <div key={e.seq} className="rounded-xl border border-rose-500/30 bg-card p-2.5">
+              <div key={e.seq} className="rounded-xl border border-admin/30 bg-card p-2.5">
                 <div className="text-xs text-muted-foreground">{LINE_NAMES[e.line ?? ''] ?? e.line}: never run by the agent</div>
                 <pre className="mt-1 overflow-x-auto rounded-md bg-muted px-2 py-1 text-xs whitespace-pre-wrap break-all">{e.detail}</pre>
                 <div className="mt-1.5"><CopyBtn text={e.detail!} label="Copy command" /></div>
@@ -162,11 +162,11 @@ export function AdminAudit({ timeline, loading }: { timeline: { entries: AuditEn
         {timeline.entries.map((e) => {
           const bad = e.outcome === 'refused' || e.outcome === 'command' || e.outcome === 'unchecked';
           return (
-            <li key={e.seq} className={cn('rounded-lg px-2 py-1.5', bad ? 'bg-rose-500/8' : 'bg-muted/40')}>
+            <li key={e.seq} className={cn('rounded-lg px-2 py-1.5', bad ? 'bg-admin/8' : 'bg-muted/40')}>
               <div className="flex items-center gap-1.5 text-xs">
                 <span className="font-medium">{e.kind === 'tool' || e.kind === 'card' ? e.tool : e.kind.replace('_', ' ')}</span>
-                {e.line && <span className="rounded bg-rose-500/15 px-1 text-[10px] font-semibold text-rose-700 dark:text-rose-300">{LINE_NAMES[e.line] ?? e.line}</span>}
-                <span className={cn('text-[11px]', bad ? 'text-rose-700 dark:text-rose-300' : 'text-muted-foreground')}>{(e.outcome ?? '').replace('_', ' ')}</span>
+                {e.line && <span className="rounded bg-admin/15 px-1 text-[10px] font-semibold text-admin-text">{LINE_NAMES[e.line] ?? e.line}</span>}
+                <span className={cn('text-[11px]', bad ? 'text-admin-text' : 'text-muted-foreground')}>{(e.outcome ?? '').replace('_', ' ')}</span>
                 <span className="ml-auto text-[10px] text-muted-foreground">{new Date(e.at).toLocaleTimeString()}</span>
               </div>
               {e.detail && <div className="mt-0.5 font-mono text-[11px] break-all text-muted-foreground">{e.detail}</div>}
