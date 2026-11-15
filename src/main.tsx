@@ -1,8 +1,12 @@
+import { lazy, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import './index.css';
 
-createRoot(document.getElementById('root')!).render(<App />);
+// Development only: #preview/<section> shows a Settings section against made-up data (src/dev/Preview.tsx).
+const Preview = import.meta.env.DEV && location.hash.startsWith('#preview/') ? lazy(() => import('./dev/Preview')) : null;
+
+createRoot(document.getElementById('root')!).render(Preview ? <Suspense><Preview /></Suspense> : <App />);
 
 // Web build only (the desktop app has no need): install as an app on phones and desktops. Production builds only, so
 // development never serves a cached copy.
