@@ -548,7 +548,7 @@ function TurnChecklist() {
         <ul className="space-y-1 px-3 pb-2.5">
           {entries.map((e, i) => (
             <li key={i} className="flex items-start gap-2">
-              {e.status === 'completed' ? <CircleCheck className="mt-0.5 size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+              {e.status === 'completed' ? <CircleCheck className="mt-0.5 size-3.5 shrink-0 text-success" />
                 : e.status === 'in_progress' ? <CircleDot className="mt-0.5 size-3.5 shrink-0 text-primary" />
                 : <Circle className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />}
               <span className={cn(e.status === 'completed' && 'text-muted-foreground line-through decoration-muted-foreground/40')}>{e.content}</span>

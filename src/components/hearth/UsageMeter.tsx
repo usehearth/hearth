@@ -20,7 +20,7 @@ export function UsageMeter() {
       <svg viewBox="0 0 18 18" className="size-4 -rotate-90" aria-hidden>
         <circle cx="9" cy="9" r={r} fill="none" stroke="currentColor" strokeOpacity="0.2" strokeWidth="2.5" />
         <circle cx="9" cy="9" r={r} fill="none" strokeWidth="2.5" strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={circ * (1 - pct / 100)}
-          className={cn(pct >= 90 ? 'stroke-red-500' : pct >= 80 ? 'stroke-amber-500' : 'stroke-primary')} />
+          className={cn(pct >= 90 ? 'stroke-destructive' : pct >= 80 ? 'stroke-warning' : 'stroke-primary')} />
       </svg>
       <span className="tabular-nums">{pct}%</span>
       {cost && <span className="tabular-nums max-sm:hidden">· {cost}</span>}

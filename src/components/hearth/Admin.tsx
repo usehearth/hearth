@@ -72,9 +72,9 @@ export function AdminKeySettings({ request }: { request: Request }) {
         )}
         {k.pub && (
           <>
-            <p className="mt-2">Key <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{k.fp}</code> {home === 'dev-browser' && <span className="text-xs text-amber-700 dark:text-amber-300">(development key in this browser)</span>}</p>
+            <p className="mt-2">Key <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{k.fp}</code> {home === 'dev-browser' && <span className="text-xs text-warning-text">(development key in this browser)</span>}</p>
             {k.pinned
-              ? <p className="mt-2 flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400"><ShieldCheck className="size-4" />The laptop runner has this key pinned. You can type in admin threads here.</p>
+              ? <p className="mt-2 flex items-center gap-1.5 text-success"><ShieldCheck className="size-4" />The laptop runner has this key pinned. You can type in admin threads here.</p>
               : (
                 <div className="mt-3 space-y-2">
                   <p className="text-muted-foreground">{k.server?.keyFingerprint
@@ -152,8 +152,8 @@ export function AdminAudit({ timeline, loading }: { timeline: { entries: AuditEn
         </section>
       )}
       {timeline.flags.length > 0 && (
-        <section aria-label="Worth a look" className="rounded-xl border border-amber-500/40 bg-amber-500/8 p-2.5">
-          <div className="flex items-center gap-1.5 font-medium"><CircleAlert className="size-4 text-amber-600" />Worth a look</div>
+        <section aria-label="Worth a look" className="rounded-xl border border-warning/40 bg-warning/8 p-2.5">
+          <div className="flex items-center gap-1.5 font-medium"><CircleAlert className="size-4 text-warning" />Worth a look</div>
           <ul className="mt-1 ml-5 list-disc space-y-0.5 text-xs">{timeline.flags.map((f, i) => <li key={i}>{f.text}</li>)}</ul>
         </section>
       )}
@@ -206,8 +206,8 @@ export function AdminFlags({ request, onOpen }: { request: Request; onOpen: (ses
   useEffect(() => { void request<AdminInfo>('_hearth/admin').then((a) => setFlags(a?.flags ?? []), () => setFlags([])); }, [request]);
   if (!flags.length) return null;
   return (
-    <section aria-label="Admin: worth a look" className="rounded-xl border border-amber-500/40 bg-amber-500/8 p-3 text-sm">
-      <div className="flex items-center gap-1.5 font-medium"><ShieldAlert className="size-4 text-amber-600" />Admin: worth a look</div>
+    <section aria-label="Admin: worth a look" className="rounded-xl border border-warning/40 bg-warning/8 p-3 text-sm">
+      <div className="flex items-center gap-1.5 font-medium"><ShieldAlert className="size-4 text-warning" />Admin: worth a look</div>
       <ul className="mt-1.5 space-y-1">
         {flags.map((f, i) => (
           <li key={i}><button onClick={() => onOpen(f.chatId, f.title)} className="text-left hover:underline"><span className="font-medium">{f.title}</span>: {f.text}</button></li>

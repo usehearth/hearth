@@ -272,13 +272,13 @@ export default function App() {
             <div ref={setActionsEl} className={cn('ml-auto flex items-center gap-1', view !== 'thread' && 'hidden')} />
           </header>
           {view === 'imported' && imported?.client && (
-            <div className="flex items-center gap-2 border-b bg-amber-500/10 px-5 py-1.5 text-xs text-amber-900 max-md:px-3 dark:text-amber-200" role="note">
+            <div className="flex items-center gap-2 border-b bg-warning/10 px-5 py-1.5 text-xs text-warning-text max-md:px-3" role="note">
               <Lock className="size-3.5 shrink-0" />
               <span><span className="font-semibold">Client conversation.</span> Read live from the work laptop; the server keeps only a one-line index.</span>
             </div>
           )}
           {view === 'thread' && target?.client && (
-            <div className="flex items-center gap-2 border-b bg-amber-500/10 px-5 py-1.5 text-xs text-amber-900 max-md:px-3 dark:text-amber-200" role="note">
+            <div className="flex items-center gap-2 border-b bg-warning/10 px-5 py-1.5 text-xs text-warning-text max-md:px-3" role="note">
               <Lock className="size-3.5 shrink-0" />
               <span><span className="font-semibold">Client: {target.client}.</span> Content stays on the work machine; the server keeps only summaries.</span>
             </div>
@@ -469,7 +469,7 @@ function ThreadRow({ t, active, onOpen, main, menu }: { t: ThreadItem; active: b
 }
 
 function StatusDot({ state }: { state: string }) {
-  const c = state === 'ready' ? 'bg-emerald-500' : state === 'error' || state === 'no-key' ? 'bg-destructive' : 'bg-amber-400 animate-pulse';
+  const c = state === 'ready' ? 'bg-success' : state === 'error' || state === 'no-key' ? 'bg-destructive' : 'bg-warning animate-pulse';
   return <span className={cn('size-1.5 shrink-0 rounded-full', c)} aria-label={state} />;
 }
 

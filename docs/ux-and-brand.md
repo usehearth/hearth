@@ -73,14 +73,15 @@ All colours come from CSS variables in `src/index.css`, used through Tailwind (`
 | `muted-foreground` | `oklch(0.52 0.014 55)` | `oklch(0.68 0.012 65)` | meta text, captions, icons |
 | `accent` | `oklch(0.945 0.018 60)` | `oklch(0.27 0.014 55)` | hover and the selected nav item |
 | `destructive` | `oklch(0.58 0.22 27)` | `oklch(0.65 0.2 27)` | errors, delete, failed |
-| `success` | `oklch(0.6 0.14 155)` | `oklch(0.7 0.14 155)` | ran fine, connected, CI passed |
-| `warning` | `oklch(0.72 0.15 75)` | `oklch(0.78 0.14 80)` | near a limit, reconnecting, needs a look |
+| `success` | `oklch(0.55 0.13 155)` | `oklch(0.7 0.14 155)` | ran fine, connected, CI passed; dark enough for text |
+| `warning` | `oklch(0.72 0.15 75)` | `oklch(0.78 0.14 80)` | near a limit, reconnecting, needs a look: fills, bars, dots, icons |
+| `warning-text` | `oklch(0.5 0.11 60)` | `oklch(0.85 0.11 85)` | words in the warning colour (a note on a `bg-warning/10` strip) |
 | `border` / `input` | `oklch(0.91 0.008 70)` | `oklch(0.29 / 0.31 …)` | lines, field borders |
 | `ring` | `oklch(0.7 0.16 45)` | `oklch(0.7 0.16 48)` | focus ring (`ring-ring/50`, 3 px) |
 | `sidebar*` | slightly darker than `background` | darker still | the left sidebar only |
 | `ember` | `oklch(0.7 0.17 50)` | `oklch(0.74 0.16 52)` | brand glow (logo-adjacent), not for controls |
 
-`success` and `warning` were added with this guide (Nov 2026).
+`success`, `warning` and `warning-text` were added with this guide (Nov 2026). `warning` is too light for text on white, so words use `warning-text`.
 
 **Rules**
 - One `primary` button per view at most, for its main action. Everything else is `outline` or `ghost`.
@@ -88,14 +89,7 @@ All colours come from CSS variables in `src/index.css`, used through Tailwind (`
 - Status dots are 8 px (`size-2 rounded-full`): `bg-success` on or ok, `bg-primary animate-pulse` running, `bg-destructive` failed, `bg-warning` attention, and a hollow `border border-muted-foreground/60` for off.
 - Contrast: body text on `background` and `card` meets WCAG AA in both themes. Don't put `muted-foreground` text on `muted` fills for anything that must be read.
 
-**Outliers to move onto tokens**
-- `emerald-*` used for "ok" in Settings.tsx (provider health), ProjectSettings.tsx (CI, git), TasksPanel.tsx, ThreadPane.tsx and ComposerBar.tsx should use `success`.
-- `amber-*` should use `warning`:
-  - the client banners in App.tsx;
-  - the StatusDot in App.tsx;
-  - the budget bar in ServerSettings (UsagePage);
-  - UsageMeter.
-- `red-500` in UsageMeter should use `destructive`.
+**Raw palette colours.** The app had `emerald-*`, `amber-*` and `red-500` in several screens. They moved onto `success`, `warning`, `warning-text` and `destructive` in Nov 2026.
 - Diff and terminal views (ToolViews.tsx: emerald, red, zinc on `zinc-950`) are **allowed** to keep their own palette, because a terminal is dark in both themes. Keep it inside those views.
 
 ---

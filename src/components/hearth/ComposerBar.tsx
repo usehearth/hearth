@@ -94,7 +94,7 @@ function ModelPicker({ client, onError }: { client: AcpClient; onError: (m: stri
           {providers === null && <div className="px-2 py-1.5 text-xs text-muted-foreground">Loading…</div>}
           {providers?.map((p) => (
             <DropdownMenu.Item key={p.name} className={item} onSelect={() => pickProvider(p.name)}>
-              <span className={cn('mt-1.5 size-1.5 shrink-0 rounded-full', p.status === 'ok' ? 'bg-emerald-500' : p.status === 'down' ? 'bg-destructive' : 'bg-muted-foreground/40')} />
+              <span className={cn('mt-1.5 size-1.5 shrink-0 rounded-full', p.status === 'ok' ? 'bg-success' : p.status === 'down' ? 'bg-destructive' : 'bg-muted-foreground/40')} />
               <span className="min-w-0 flex-1"><span className="font-medium">{p.name}</span><span className="block text-xs text-muted-foreground">{p.kind === 'anthropic' ? 'Claude (Claude Code)' : 'Any model (OpenCode)'}</span></span>
               {chosen === p.name && <Check className="mt-0.5 size-3.5 text-primary" />}
             </DropdownMenu.Item>

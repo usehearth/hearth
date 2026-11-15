@@ -228,7 +228,7 @@ function ProviderCard({ p, n, test, onTested, admin }: { p: ProviderRow; n: numb
     try { const r = await test(p.name); setBad(!r.ok); setResult(r.ok ? `Answered in ${r.ms} ms` : `Failed: ${r.error ?? r.status}`); onTested(); }
     catch (e) { setBad(true); setResult(errorText(e)); } finally { setBusy(false); }
   };
-  const pill = p.status === 'ok' ? 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-400' : p.status === 'down' ? 'bg-destructive/12 text-destructive' : 'bg-muted text-muted-foreground';
+  const pill = p.status === 'ok' ? 'bg-success/12 text-success' : p.status === 'down' ? 'bg-destructive/12 text-destructive' : 'bg-muted text-muted-foreground';
   return (
     <div className="rounded-xl border bg-card p-4">
       <div className="flex items-center gap-2">
@@ -248,7 +248,7 @@ function ProviderCard({ p, n, test, onTested, admin }: { p: ProviderRow; n: numb
       </dl>
       <div className="mt-3 flex items-center gap-3">
         <Button size="sm" variant="outline" onClick={run} disabled={busy}>{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Zap className="size-3.5" />}Test</Button>
-        {result && <span className={cn('text-sm', bad ? 'text-destructive' : 'text-emerald-700 dark:text-emerald-400')}>{result}</span>}
+        {result && <span className={cn('text-sm', bad ? 'text-destructive' : 'text-success')}>{result}</span>}
         {admin && <span className="ml-auto flex items-center gap-2">{admin}</span>}
       </div>
     </div>

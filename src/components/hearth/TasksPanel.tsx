@@ -50,7 +50,7 @@ export function TasksList() {
             <span className="min-w-0 flex-1"><span className="block truncate">{r.label}</span>{r.detail && <span className="block truncate text-xs text-muted-foreground">{r.detail}</span>}</span>
             {r.state === 'running' ? <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-primary" />
               : r.state === 'failed' ? <CircleX className="mt-0.5 size-3.5 shrink-0 text-destructive" />
-              : <CircleCheck className={cn('mt-0.5 size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400')} />}
+              : <CircleCheck className={cn('mt-0.5 size-3.5 shrink-0 text-success')} />}
           </button>
         </li>
       ))}

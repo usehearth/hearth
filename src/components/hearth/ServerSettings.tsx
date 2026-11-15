@@ -62,7 +62,7 @@ export function UsagePage({ request }: { request: Request }) {
             return (
               <li key={p.project} className="px-3 py-2">
                 <div className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate font-medium">{p.name}</span><span className="tabular-nums">{usd(p.monthCost)}</span>{p.budget && <span className="text-xs text-muted-foreground tabular-nums">of {usd(p.budget)}</span>}</div>
-                {pct !== null && <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted"><div className={pct >= 100 ? 'h-full bg-destructive' : pct >= 80 ? 'h-full bg-amber-500' : 'h-full bg-primary'} style={{ width: `${pct}%` }} /></div>}
+                {pct !== null && <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted"><div className={pct >= 100 ? 'h-full bg-destructive' : pct >= 80 ? 'h-full bg-warning' : 'h-full bg-primary'} style={{ width: `${pct}%` }} /></div>}
               </li>
             );
           })}

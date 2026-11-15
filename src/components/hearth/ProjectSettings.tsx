@@ -277,7 +277,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
 
         <div className="sticky bottom-0 flex items-center gap-3 border-t bg-background py-3">
           <Button type="submit" disabled={busy || !view.canEdit || (!allProviders && order.length === 0)}>{busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}Save</Button>
-          {saved && <span className="text-sm text-emerald-700 dark:text-emerald-400">Saved</span>}
+          {saved && <span className="text-sm text-success">Saved</span>}
           {!allProviders && order.length === 0 && <span className="text-sm text-muted-foreground">Pick at least one provider.</span>}
           {err && <span className="text-sm text-destructive">{err}</span>}
         </div>
@@ -319,7 +319,7 @@ function PullRequests({ project, request }: { project: string; request: Request 
             <li key={p.number} className="flex items-center gap-2">
               <a href={p.url} target="_blank" rel="noreferrer" className="font-medium underline-offset-2 hover:underline">#{p.number}</a>
               <span className="font-mono">{p.branch} → {p.base}</span>
-              <span className={cn('ml-auto rounded px-1.5', p.ci === 'failure' ? 'bg-destructive/15 text-destructive' : p.ci === 'success' ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-muted text-muted-foreground')}>
+              <span className={cn('ml-auto rounded px-1.5', p.ci === 'failure' ? 'bg-destructive/15 text-destructive' : p.ci === 'success' ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground')}>
                 {p.state !== 'open' ? p.state : p.ci === 'failure' ? `CI failed: ${p.ci_detail ?? ''}` : p.ci ?? 'no checks'}</span>
             </li>
           ))}
