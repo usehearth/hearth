@@ -2,6 +2,8 @@
 // keeping each server's device key in the operating system's keychain (Windows Credential Manager,
 // macOS Keychain, Secret Service on Linux). Keys never touch Hearth's own files, and chat content is never stored.
 
+mod import;
+
 const SERVICE: &str = "dev.usehearth.hearth";
 
 fn entry(server_id: &str) -> Result<keyring::Entry, String> {
@@ -131,7 +133,8 @@ pub fn run() {
             check_for_update(_app.handle().clone());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![key_get, key_set, key_delete, admin_key_public, admin_key_create, admin_sign])
+        .manage(import::Scanned::default())
+        .invoke_handler(tauri::generate_handler![key_get, key_set, key_delete, admin_key_public, admin_key_create, admin_sign, import::import_sources, import::import_scan, import::import_read])
         .run(tauri::generate_context!())
         .expect("error while running Hearth");
 }

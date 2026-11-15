@@ -1572,10 +1572,13 @@ name = "hearth"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "dirs",
  "ed25519-dalek",
  "getrandom 0.2.17",
  "keyring",
  "serde",
+ "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-notification",
