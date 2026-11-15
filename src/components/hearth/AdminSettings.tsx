@@ -6,6 +6,7 @@ import { Check, Copy, KeyRound, Loader2, Plus, Smartphone, Trash2, X } from 'luc
 import { Button } from '@/components/ui/button';
 import { errorText } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
+import { field } from '@/components/ui/field';
 
 type Request = <T = unknown>(method: string, params?: unknown) => Promise<T>;
 
@@ -45,26 +46,26 @@ export function ProviderForm({ initial, request, onSaved, onCancel }: {
       <div className="text-sm font-semibold">{editing ? `Change ${f.name}` : 'Add a provider'}</div>
       <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
         <L label="Name">
-          <input required disabled={editing} value={f.name} onChange={(e) => set('name', e.target.value)} placeholder="backup" pattern="[a-z0-9-]+" title="lowercase letters, digits and dashes" className={inp} />
+          <input required disabled={editing} value={f.name} onChange={(e) => set('name', e.target.value)} placeholder="backup" pattern="[a-z0-9-]+" title="lowercase letters, digits and dashes" className={field} />
         </L>
         <L label="Kind">
-          <select value={f.kind} onChange={(e) => set('kind', e.target.value as ProviderInput['kind'])} className={inp}>
+          <select value={f.kind} onChange={(e) => set('kind', e.target.value as ProviderInput['kind'])} className={field}>
             <option value="anthropic">Anthropic API</option>
             <option value="openai">OpenAI-style API</option>
           </select>
         </L>
       </div>
-      <L label="Address"><input required value={f.base_url} onChange={(e) => set('base_url', e.target.value)} placeholder={f.kind === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.example.com/v1'} className={inp} /></L>
+      <L label="Address"><input required value={f.base_url} onChange={(e) => set('base_url', e.target.value)} placeholder={f.kind === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.example.com/v1'} className={field} /></L>
       <L label="Key" hint={editing ? (initial?.has_key ? 'A key is set. Leave empty to keep it.' : 'No key is set.') : 'Stored encrypted on the server and never shown again.'}>
-        <input type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={editing ? 'Leave empty to keep the current key' : 'Paste the key'} className={inp} />
+        <input type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={editing ? 'Leave empty to keep the current key' : 'Paste the key'} className={field} />
       </L>
       <div className="grid grid-cols-3 gap-3 max-sm:grid-cols-1">
         {(['default', 'strong', 'fast'] as const).map((k) => (
-          <L key={k} label={`Model: ${k}`}><input value={f.models[k] ?? ''} onChange={(e) => set('models', { ...f.models, [k]: e.target.value })} placeholder={f.kind === 'openai' && k === 'default' ? 'required' : 'optional'} className={inp} /></L>
+          <L key={k} label={`Model: ${k}`}><input value={f.models[k] ?? ''} onChange={(e) => set('models', { ...f.models, [k]: e.target.value })} placeholder={f.kind === 'openai' && k === 'default' ? 'required' : 'optional'} className={field} /></L>
         ))}
       </div>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
-        <label className="flex items-center gap-2">Order <input type="number" min={0} max={1000} value={f.priority} onChange={(e) => set('priority', Number(e.target.value))} className={cn(inp, 'w-20')} /></label>
+        <label className="flex items-center gap-2">Order <input type="number" min={0} max={1000} value={f.priority} onChange={(e) => set('priority', Number(e.target.value))} className={cn(field, 'w-20')} /></label>
         <label className="flex items-center gap-2"><input type="checkbox" checked={f.enabled} onChange={(e) => set('enabled', e.target.checked)} className="size-4 accent-(--primary)" />On</label>
         <label className="flex items-center gap-2"><input type="checkbox" checked={f.sensitive_ok} onChange={(e) => set('sensitive_ok', e.target.checked)} className="size-4 accent-(--primary)" />Allowed for client work</label>
       </div>
@@ -117,7 +118,7 @@ export function DeviceKeys({ request }: { request: Request }) {
         </div>
       )}
       <form onSubmit={create} className="mt-3 flex gap-2">
-        <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="New device name, e.g. phone" aria-label="New device name" maxLength={60} className={cn(inp, 'flex-1')} />
+        <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="New device name, e.g. phone" aria-label="New device name" maxLength={60} className={cn(field, 'flex-1')} />
         <Button type="submit" size="sm" disabled={busy || !name.trim()}>{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}Make a key</Button>
       </form>
       {err && <p className="mt-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{err}</p>}
@@ -147,7 +148,6 @@ export function DeviceKeys({ request }: { request: Request }) {
   );
 }
 
-const inp = 'w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-60';
 
 function L({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (

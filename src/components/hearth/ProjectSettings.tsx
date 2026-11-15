@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, Check, Loader2, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { errorText } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
+import { field, fieldArea } from '@/components/ui/field';
 
 export interface ProjectView {
   slug: string; name: string; kind: string; client: boolean; agent: string;
@@ -122,7 +123,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
         </div>
 
         <Section title="Name">
-          <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} aria-label="Project name" />
+          <input value={name} onChange={(e) => setName(e.target.value)} className={field} aria-label="Project name" />
         </Section>
 
         <Section title="Instructions" sub="What every agent in this project should know, like a project's custom instructions.">
@@ -132,7 +133,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
               <>
                 <textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} maxLength={8000} aria-label="Project instructions"
                   placeholder="For example: answer in British English; keep changes small; ask before touching the database."
-                  className={cn(inputCls, 'min-h-32 resize-y leading-relaxed')} />
+                  className={cn(fieldArea, 'min-h-32 resize-y leading-relaxed')} />
                 <span className="mt-1 block text-right text-xs text-muted-foreground">{instructions.length} / 8000</span>
               </>
             )}
@@ -144,7 +145,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
             {view.roles.map((r) => (
               <label key={r.role} className="grid grid-cols-[11rem_1fr] items-center gap-3 max-sm:grid-cols-1 max-sm:gap-1">
                 <span className="text-sm">{r.label}</span>
-                <input list="hearth-models" value={models[r.role] ?? ''} placeholder={`Default: ${r.default}`} onChange={(e) => setModels((m) => ({ ...m, [r.role]: e.target.value }))} className={inputCls} />
+                <input list="hearth-models" value={models[r.role] ?? ''} placeholder={`Default: ${r.default}`} onChange={(e) => setModels((m) => ({ ...m, [r.role]: e.target.value }))} className={field} />
               </label>
             ))}
           </div>
@@ -190,15 +191,15 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
         {view.extraFolders && (
           <Section title="Extra folders" sub="More folders this project's agents may read and edit, one per line (they must be on the runner's machine, in its folders). Needs an admin device.">
             <textarea value={folders} onChange={(e) => setFolders(e.target.value)} rows={2} spellCheck={false} aria-label="Extra folders"
-              placeholder="/workspace/shared-lib" className={cn(inputCls, 'font-mono text-xs')} />
+              placeholder="/workspace/shared-lib" className={cn(fieldArea, 'font-mono text-xs')} />
           </Section>
         )}
 
         {extensions.includes('git') && (
           <Section title="Git remote" sub="Where branches are pushed and pull requests opened (GitHub). Agents never push; you do, here. Changing it needs an admin device.">
-            <input value={remoteUrl} onChange={(e) => setRemoteUrl(e.target.value)} placeholder="https://github.com/owner/repo.git" aria-label="Remote URL" className={cn(inputCls, 'font-mono')} />
+            <input value={remoteUrl} onChange={(e) => setRemoteUrl(e.target.value)} placeholder="https://github.com/owner/repo.git" aria-label="Remote URL" className={cn(field, 'font-mono')} />
             <input value={remoteToken} onChange={(e) => setRemoteToken(e.target.value)} type="password" autoComplete="off" aria-label="Remote token"
-              placeholder={view.remote?.hasToken ? 'Token set (type to replace)' : 'Token (a fine-grained token for this repo)'} className={cn(inputCls, 'mt-2')} />
+              placeholder={view.remote?.hasToken ? 'Token set (type to replace)' : 'Token (a fine-grained token for this repo)'} className={cn(field, 'mt-2')} />
             {view.remote && <PullRequests project={project} request={request} />}
           </Section>
         )}
@@ -221,10 +222,10 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
             )}
             <label className="mt-3 block text-xs font-medium text-muted-foreground" htmlFor="perm-allow">Also allowed (one rule per line)</label>
             <textarea id="perm-allow" value={allowText} onChange={(e) => setAllowText(e.target.value)} rows={4} spellCheck={false}
-              placeholder={'Bash(npm test:*)\nWebFetch(domain:docs.example.com)\nmcp__server__tool'} className={cn(inputCls, 'font-mono text-xs')} />
+              placeholder={'Bash(npm test:*)\nWebFetch(domain:docs.example.com)\nmcp__server__tool'} className={cn(fieldArea, 'font-mono text-xs')} />
             <label className="mt-3 block text-xs font-medium text-muted-foreground" htmlFor="perm-deny">Never allowed (one rule per line)</label>
             <textarea id="perm-deny" value={denyText} onChange={(e) => setDenyText(e.target.value)} rows={3} spellCheck={false}
-              placeholder="Bash(curl:*)" className={cn(inputCls, 'font-mono text-xs')} />
+              placeholder="Bash(curl:*)" className={cn(fieldArea, 'font-mono text-xs')} />
             <p className="mt-2 text-xs text-muted-foreground">Always allowed: <span className="font-mono">{view.permissions.defaults.join(', ')}</span>. Always refused: <span className="font-mono">{view.permissions.alwaysDenied.join(', ')}</span>.</p>
           </Section>
         )}
@@ -232,8 +233,8 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
         {view.monthCost !== undefined && (
           <Section title="Budget" sub={`This month so far: $${view.monthCost.toFixed(2)}. Leave empty for no budget.`}>
             <div className="flex flex-wrap items-center gap-2 text-sm">
-              <label className="flex items-center gap-1.5">$<input value={budget} onChange={(e) => setBudget(e.target.value)} inputMode="decimal" placeholder="none" aria-label="Monthly budget in US dollars" className={cn(inputCls, 'w-28')} /> a month</label>
-              <label className="flex items-center gap-1.5">warn at <input value={warnAt} onChange={(e) => setWarnAt(e.target.value)} inputMode="numeric" aria-label="Warning level in percent" className={cn(inputCls, 'w-16')} />%</label>
+              <label className="flex items-center gap-1.5">$<input value={budget} onChange={(e) => setBudget(e.target.value)} inputMode="decimal" placeholder="none" aria-label="Monthly budget in US dollars" className={cn(field, 'w-28')} /> a month</label>
+              <label className="flex items-center gap-1.5">warn at <input value={warnAt} onChange={(e) => setWarnAt(e.target.value)} inputMode="numeric" aria-label="Warning level in percent" className={cn(field, 'w-16')} />%</label>
             </div>
             <p className="mt-1.5 text-xs text-muted-foreground">At the warning level you get a note; at the budget, new work in this project stops until you raise it.</p>
           </Section>
@@ -305,8 +306,8 @@ function PullRequests({ project, request }: { project: string; request: Request 
   return (
     <div className="mt-3 rounded-lg border p-2.5 text-sm">
       <div className="flex flex-wrap gap-2">
-        <input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="branch" aria-label="Branch" className={cn(inputCls, 'w-44 font-mono')} />
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Pull request title" aria-label="Pull request title" className={cn(inputCls, 'min-w-40 flex-1')} />
+        <input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="branch" aria-label="Branch" className={cn(field, 'w-44 font-mono')} />
+        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Pull request title" aria-label="Pull request title" className={cn(field, 'min-w-40 flex-1')} />
       </div>
       <div className="mt-2 flex gap-2">
         <Button type="button" size="sm" variant="outline" disabled={!branch || !!busy} onClick={() => void go('push')}>{busy === 'push' && <Loader2 className="size-3.5 animate-spin" />}Push</Button>
@@ -329,7 +330,6 @@ function PullRequests({ project, request }: { project: string; request: Request 
   );
 }
 
-const inputCls = 'w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/40';
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (

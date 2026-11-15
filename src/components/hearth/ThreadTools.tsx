@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toItem, type ThreadItem } from '@/lib/directory';
 import { cn } from '@/lib/utils';
+import { field } from '@/components/ui/field';
 
 export type Request = <T = unknown>(method: string, params?: unknown) => Promise<T>;
 
@@ -67,7 +68,7 @@ function RenameDialog({ t, onClose, save }: { t: ThreadItem; onClose: () => void
         <DialogHeader><DialogTitle>Rename thread</DialogTitle></DialogHeader>
         <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} aria-label="Thread name"
           onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
-          className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50" />
+          className={field} />
         {error && <p className="text-sm text-destructive">{error}</p>}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>

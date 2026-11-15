@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Check, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { errorText } from '@/lib/hearth';
+import { field } from '@/components/ui/field';
 
 type Request = <T = unknown>(method: string, params?: unknown) => Promise<T>;
 interface Options { pools: { name: string; title: string; clientOk: boolean }[]; defaultPool: string; clientAllowed: boolean }
@@ -43,22 +44,22 @@ export function NewProject({ request, onDone }: { request: Request; onDone: (m: 
           <p className="mt-0.5 text-sm text-muted-foreground">A project is a folder on one of your machines, with its own threads, tools and settings.</p>
         </div>
         <Field label="Name">
-          <input value={name} onChange={(e) => setName(e.target.value)} required maxLength={80} autoFocus className={inputCls} placeholder="Garden planner" />
+          <input value={name} onChange={(e) => setName(e.target.value)} required maxLength={80} autoFocus className={field} placeholder="Garden planner" />
         </Field>
         <Field label="Short name" sub="Used in links and tool names: lowercase letters, digits and dashes.">
-          <input value={slugTouched ? slug : slugFrom(name)} onChange={(e) => { setSlugTouched(true); setSlug(e.target.value); }} pattern="[a-z0-9][a-z0-9\-]{0,39}" className={inputCls} />
+          <input value={slugTouched ? slug : slugFrom(name)} onChange={(e) => { setSlugTouched(true); setSlug(e.target.value); }} pattern="[a-z0-9][a-z0-9\-]{0,39}" className={field} />
         </Field>
         <Field label="Runs on">
-          <select value={pool} onChange={(e) => setPool(e.target.value)} className={inputCls}>
+          <select value={pool} onChange={(e) => setPool(e.target.value)} className={field}>
             {opts.pools.map((p) => <option key={p.name} value={p.name}>{p.title}{p.title !== p.name ? ` (${p.name})` : ''}</option>)}
           </select>
         </Field>
         <Field label="Folder on that machine" sub="Where the agents work. Leave empty to set it later on the page.">
-          <input value={path} onChange={(e) => setPath(e.target.value)} className={inputCls} placeholder="C:\Projects\garden-planner" />
+          <input value={path} onChange={(e) => setPath(e.target.value)} className={field} placeholder="C:\Projects\garden-planner" />
         </Field>
         {opts.clientAllowed && (
           <Field label="Client" sub="Leave empty for a personal project. Client work stays on machines that allow it.">
-            <input value={client} onChange={(e) => setClient(e.target.value)} maxLength={60} className={inputCls} />
+            <input value={client} onChange={(e) => setClient(e.target.value)} maxLength={60} className={field} />
             {clientBlocked && <p className="mt-1 text-xs text-destructive">{poolInfo?.title} doesn't take client work: pick another machine.</p>}
           </Field>
         )}
@@ -71,14 +72,13 @@ export function NewProject({ request, onDone }: { request: Request; onDone: (m: 
   );
 }
 
-const inputCls = 'w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/40';
 
 function Field({ label, sub, children }: { label: string; sub?: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="text-sm font-semibold">{label}</span>
+      <span className="text-xs font-medium">{label}</span>
       {sub && <span className="mt-0.5 block text-xs text-muted-foreground">{sub}</span>}
-      <span className="mt-1.5 block">{children}</span>
+      <span className="mt-1 block">{children}</span>
     </label>
   );
 }

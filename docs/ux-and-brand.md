@@ -123,7 +123,6 @@ All colours come from CSS variables in `src/index.css`, used through Tailwind (`
   - `H` in Settings.tsx and `SectionHead` in ServerSettings.tsx are the same component; keep `SectionHead`.
   - Headings in `text-base`: AdminSettings "Device keys" and NeedsYou should be `text-sm font-semibold`.
   - `text-[12.5px]` in ServerSettings (audit) and `text-[12px]`/`text-[13px]` outside the sidebar (ThreadPane header, ComposerBar pills, ExportThread) should become `text-xs` or `text-sm`.
-  - Form labels in AddServer (`text-sm font-medium`) and NewProject (`text-sm font-semibold`) should be `text-xs font-medium`.
 
 ---
 
@@ -170,7 +169,6 @@ Use Tailwind's 4 px scale. Use the steps below and avoid halves except where sho
 - Never use a shadow on a list or a settings card.
 
 **Outliers:**
-- Inputs in ServerSettings are `rounded-md` and should be `rounded-lg`.
 - Plain `rounded` on small icon buttons (Settings rename, ProjectSettings) and on the PR CI badge should be `rounded-md` or `rounded-full`.
 - The bar chart box in UsagePage is `rounded-lg` and should be `rounded-xl`.
 
@@ -223,7 +221,7 @@ Use Tailwind's 4 px scale. Use the steps below and avoid halves except where sho
 - **Label above the field** (`text-xs font-medium`), and help below it (`text-xs text-muted-foreground`). Help can be live: the Schedules "When" field shows the cron in words as you type.
 - Two fields side by side on wide screens, one column on phones (`grid gap-3 sm:grid-cols-2`).
 - **Form panel:** `rounded-xl border bg-card p-4 space-y-3`, actions on the right at the end: [Cancel] outline, then [Save or Add …] default. Disable Save until the form can be sent, and show a spinner in it while sending.
-- *Outliers:* five input recipes today (`inputCls` copies, `inp`, ServerSettings `h-9 rounded-md`, `h-8` fields). They should move to the field above, ideally as one shared `ui/input`.
+- **In code:** `field` (inputs and selects) and `fieldArea` (textareas) from `ui/field`. Add width or font with `cn(field, 'w-40 font-mono')`. Don't write a local copy.
 
 ### Lists
 - The list box is `ul.divide-y.rounded-xl.border.bg-card`, with each `li` at `px-3 py-2` (or `py-2.5` when it has two or three lines).

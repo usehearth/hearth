@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { errorText } from '@/lib/hearth';
+import { cn } from '@/lib/utils';
+import { field, fieldArea } from '@/components/ui/field';
 
 export type Request = <T = unknown>(method: string, params?: unknown) => Promise<T>;
 
@@ -112,16 +114,16 @@ export function ExtensionsPage({ request }: { request: Request }) {
       {edit && (
         <div className="mb-4 space-y-2 rounded-xl border bg-card p-3 text-sm">
           <div className="flex flex-wrap gap-2">
-            <select value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value })} aria-label="Kind" className="h-9 rounded-md border bg-background px-2">
+            <select value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value })} aria-label="Kind" className={cn(field, 'w-auto px-2')}>
               {Object.entries(KIND_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
             </select>
-            <input value={edit.name ?? ''} onChange={(e) => setEdit({ ...edit, name: e.target.value.toLowerCase() })} placeholder="name-with-dashes" aria-label="Name" className="h-9 min-w-40 flex-1 rounded-md border bg-background px-3 font-mono" />
-            <input value={edit.scope ?? 'global'} onChange={(e) => setEdit({ ...edit, scope: e.target.value })} placeholder="global or a project" aria-label="Scope" className="h-9 w-40 rounded-md border bg-background px-3" />
+            <input value={edit.name ?? ''} onChange={(e) => setEdit({ ...edit, name: e.target.value.toLowerCase() })} placeholder="name-with-dashes" aria-label="Name" className={cn(field, 'w-auto min-w-40 flex-1 font-mono')} />
+            <input value={edit.scope ?? 'global'} onChange={(e) => setEdit({ ...edit, scope: e.target.value })} placeholder="global or a project" aria-label="Scope" className={cn(field, 'w-40')} />
           </div>
-          <input value={edit.description ?? ''} onChange={(e) => setEdit({ ...edit, description: e.target.value })} placeholder="What it is for (shown to the agent)" aria-label="Description" className="h-9 w-full rounded-md border bg-background px-3" />
+          <input value={edit.description ?? ''} onChange={(e) => setEdit({ ...edit, description: e.target.value })} placeholder="What it is for (shown to the agent)" aria-label="Description" className={field} />
           <p className="text-xs text-muted-foreground">{KIND_HINT[edit.kind ?? 'command']}</p>
           <textarea value={edit.content ?? ''} onChange={(e) => setEdit({ ...edit, content: e.target.value })} rows={8} spellCheck={false} aria-label="Content"
-            className="w-full rounded-md border bg-background px-3 py-2 font-mono text-xs" />
+            className={cn(fieldArea, 'font-mono text-xs')} />
           <div className="flex items-center gap-2">
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={edit.enabled !== false} onChange={(e) => setEdit({ ...edit, enabled: e.target.checked })} className="size-4 accent-primary" />On</label>
             <div className="ml-auto flex gap-2">
@@ -190,12 +192,12 @@ export function ConnectorsPage({ request }: { request: Request }) {
       {form && (
         <div className="mb-4 space-y-2 rounded-xl border bg-card p-3 text-sm">
           <div className="flex flex-wrap gap-2">
-            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value.toLowerCase() })} placeholder="name" aria-label="Name" className="h-9 w-40 rounded-md border bg-background px-3 font-mono" />
-            <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="What it is (e.g. Linear)" aria-label="Title" className="h-9 min-w-40 flex-1 rounded-md border bg-background px-3" />
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value.toLowerCase() })} placeholder="name" aria-label="Name" className={cn(field, 'w-40 font-mono')} />
+            <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="What it is (e.g. Linear)" aria-label="Title" className={cn(field, 'w-auto min-w-40 flex-1')} />
           </div>
-          <input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://example.com/mcp" aria-label="URL" className="h-9 w-full rounded-md border bg-background px-3 font-mono" />
-          <input value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} type="password" autoComplete="off" placeholder="Token (leave empty for OAuth sign-in or no token)" aria-label="Token" className="h-9 w-full rounded-md border bg-background px-3" />
-          <input value={form.client} onChange={(e) => setForm({ ...form, client: e.target.value })} placeholder="Client (only for a client's own login)" aria-label="Client" className="h-9 w-full rounded-md border bg-background px-3" />
+          <input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://example.com/mcp" aria-label="URL" className={cn(field, 'font-mono')} />
+          <input value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} type="password" autoComplete="off" placeholder="Token (leave empty for OAuth sign-in or no token)" aria-label="Token" className={field} />
+          <input value={form.client} onChange={(e) => setForm({ ...form, client: e.target.value })} placeholder="Client (only for a client's own login)" aria-label="Client" className={field} />
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="outline" onClick={() => setForm(null)}>Cancel</Button>
             <Button size="sm" disabled={!form.name || !form.url} onClick={async () => {
@@ -254,7 +256,7 @@ function PluginImport({ request, onDone, onError }: { request: Request; onDone: 
     <div className="mb-4 rounded-xl border bg-card p-3 text-sm">
       <div className="font-medium">Install a plugin from GitHub</div>
       <div className="mt-2 flex flex-wrap gap-2">
-        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/owner/repo" aria-label="Plugin repository" className="h-9 min-w-56 flex-1 rounded-md border bg-background px-3 font-mono text-xs" />
+        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/owner/repo" aria-label="Plugin repository" className={cn(field, 'w-auto min-w-56 flex-1 font-mono text-xs')} />
         <Button size="sm" variant="outline" disabled={!url.trim() || busy} onClick={() => void look()}>{busy && !preview && <Loader2 className="size-3.5 animate-spin" />}Look</Button>
       </div>
       {preview && (
@@ -264,7 +266,7 @@ function PluginImport({ request, onDone, onError }: { request: Request; onDone: 
             <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={hooks} onChange={(e) => setHooks(e.target.checked)} className="size-4 accent-primary" />Also install its hooks (they run commands)</label>
           )}
           <div className="flex flex-wrap items-center gap-2">
-            <input value={scope} onChange={(e) => setScope(e.target.value)} aria-label="For" placeholder="global or a project" className="h-8 w-40 rounded-md border bg-background px-2 text-xs" />
+            <input value={scope} onChange={(e) => setScope(e.target.value)} aria-label="For" placeholder="global or a project" className={cn(field, 'h-8 w-40 px-2 text-xs')} />
             <Button size="sm" disabled={!preview.found.length || busy} onClick={() => void install()}>{busy && <Loader2 className="size-3.5 animate-spin" />}Install</Button>
           </div>
         </div>
@@ -301,7 +303,7 @@ export function AuditLog({ request }: { request: Request }) {
       <SectionHead title="Audit log" sub="Every change on the server, with who made it. Newest first."
         action={<Button size="sm" variant="outline" onClick={() => void load()} disabled={busy}><RefreshCw className="size-3.5" />Refresh</Button>} />
       <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter: an action (chat.) or who (device:…)" aria-label="Filter the audit log"
-        className="mb-3 h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50" />
+        className={cn(field, 'mb-3')} />
       {error && <p className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
       {!entries && !error && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div>}
       {entries && !entries.length && <p className="text-sm text-muted-foreground">Nothing recorded{filter ? ' that matches' : ''}.</p>}

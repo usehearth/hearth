@@ -12,12 +12,12 @@ import {
   type Group, type Run, type Schedule, type Status, type Trigger,
 } from '@/lib/schedules';
 import { cn } from '@/lib/utils';
+import { field, fieldArea } from '@/components/ui/field';
 
 interface Data { schedules: Schedule[]; next?: { id: number; next: string | null }[]; triggers: Trigger[]; runs: { schedules: Run[]; triggers: Run[] } }
 
 const localTz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return ''; } })();
 const fullWhen = (s: string | null | undefined) => (s ? new Date(s).toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'short' }) : undefined);
-const inputCls = 'h-9 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export function SchedulesPage({ request }: { request: Request }) {
   const [data, setData] = useState<Data | null>(null);
@@ -223,18 +223,18 @@ function AddJob({ onCancel, onSave }: { onCancel: () => void; onSave: (f: { proj
       <div className="flex items-center gap-2 text-sm font-semibold"><CalendarClock className="size-4 text-muted-foreground" />A new job</div>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block space-y-1"><span className="text-xs font-medium">Name</span>
-          <input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Weekly spend check" className={inputCls} /></label>
+          <input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Weekly spend check" className={field} /></label>
         <label className="block space-y-1"><span className="text-xs font-medium">Project</span>
-          <input value={f.project} onChange={(e) => setF({ ...f, project: e.target.value })} placeholder="home" className={cn(inputCls, 'font-mono')} /></label>
+          <input value={f.project} onChange={(e) => setF({ ...f, project: e.target.value })} placeholder="home" className={cn(field, 'font-mono')} /></label>
       </div>
       <label className="block space-y-1"><span className="text-xs font-medium">When</span>
-        <input value={f.cron} onChange={(e) => setF({ ...f, cron: e.target.value })} className={cn(inputCls, 'font-mono')} aria-describedby="sch-when-help" />
+        <input value={f.cron} onChange={(e) => setF({ ...f, cron: e.target.value })} className={cn(field, 'font-mono')} aria-describedby="sch-when-help" />
         <span id="sch-when-help" className="block text-xs text-muted-foreground">
           {words ? <>{words}, server time.</> : <>Cron (minute hour day month weekday), or a date like 2027-01-31T09:00 for once.</>}
         </span></label>
       <label className="block space-y-1"><span className="text-xs font-medium">What to do each time</span>
         <textarea value={f.prompt} onChange={(e) => setF({ ...f, prompt: e.target.value })} rows={4} placeholder="Check this week's AI spend and tell me if anything stands out."
-          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" /></label>
+          className={fieldArea} /></label>
       <div className="flex justify-end gap-2">
         <Button type="button" size="sm" variant="outline" onClick={onCancel}>Cancel</Button>
         <Button type="submit" size="sm" disabled={!ok || busy}>{busy && <Loader2 className="size-3.5 animate-spin" />}Add job</Button>
