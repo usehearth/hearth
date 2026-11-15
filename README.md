@@ -39,6 +39,10 @@ Add a server: its address (for example `wss://ai.home.example`, or `host:port`; 
 - **Hearth extensions:** a server lists the `_hearth/*` methods it has in `initialize` (`_meta.hearth.extensions`): plan, cards, files, threads (rename, pin, archive, delete, search, fork), modes, permissions (always allow, rules), usage, extensions, mcp (connectors, OAuth), git (push, pull requests), schedules, audit, project and device settings. Each screen shows only when its server has it.
 - **Optional extras:** servers may add `_meta.hearth` on list items and updates (`project`, `projectName`, `kind: main | work`, `status`). Hearth groups threads by project with them; plain ACP servers still work, grouped by folder. `session/new` sends `_meta.hearth { project, main?, title? }`.
 
+## Design
+
+New screens follow the [UX and brand guide](docs/ux-and-brand.md): spacing, colour tokens (light and dark), type, radii, icons, component patterns, phone layout, wording, and how to use the name and logo. Where the app still differs from it, the guide lists the outliers to fix.
+
 ## Releases
 
 A tag `v*` builds Windows, macOS and Linux installers on GitHub Actions (`.github/workflows/release.yml`) as a draft release, with signed self-updates when the signing secrets are set (see the workflow's header). Local builds don't need them.

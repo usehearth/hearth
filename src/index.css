@@ -30,6 +30,9 @@
   --sidebar-border: oklch(0.9 0.008 70);
   --sidebar-accent: oklch(0.925 0.012 65);
   --ember: oklch(0.7 0.17 50);
+  /* Status: success (ran fine, connected) and warning (near a limit, needs a look). */
+  --success: oklch(0.6 0.14 155);
+  --warning: oklch(0.72 0.15 75);
 }
 
 .dark {
@@ -56,6 +59,8 @@
   --sidebar-border: oklch(0.25 0.009 55);
   --sidebar-accent: oklch(0.23 0.011 55);
   --ember: oklch(0.74 0.16 52);
+  --success: oklch(0.7 0.14 155);
+  --warning: oklch(0.78 0.14 80);
 }
 
 @theme inline {
@@ -88,6 +93,8 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent: var(--sidebar-accent);
   --color-ember: var(--ember);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
   @keyframes collapsible-down {
   from {
     height: 0;
