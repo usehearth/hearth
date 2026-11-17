@@ -206,11 +206,11 @@ export class AcpClient {
    * Hearth: choices made on a new thread before its first message (mode, model provider). They are sent right after
    * session/new, before the first prompt, so the first turn already runs with them.
    */
-  pending: { mode?: string; provider?: { name: string | null; model?: string | null } } = {};
+  beforeSession: { mode?: string; provider?: { name: string | null; model?: string | null } } = {};
 
   /** Hearth (parity): change the session's mode (ACP session/set_mode). Before the first message: kept for it. */
   setMode(modeId: string): Promise<unknown> {
-    if (!this._sessionId) { this.pending = { ...this.pending, mode: modeId }; this.emitConnectionChange(); return Promise.resolve(); }
+    if (!this._sessionId) { this.beforeSession = { ...this.beforeSession, mode: modeId }; this.emitConnectionChange(); return Promise.resolve(); }
     return this.request("session/set_mode", { sessionId: this._sessionId, modeId });
   }
 
@@ -539,8 +539,8 @@ export class AcpClient {
     this.lostSessionId = undefined;
     if (attach === undefined && lost === undefined) {
       // Hearth: what was picked before the thread existed applies before its first prompt.
-      const p = this.pending;
-      this.pending = {};
+      const p = this.beforeSession;
+      this.beforeSession = {};
       if (p.mode) await this.request("session/set_mode", { sessionId: session.sessionId, modeId: p.mode }).catch(() => undefined);
       if (p.provider) await this.request("_hearth/thread/provider", { sessionId: session.sessionId, provider: p.provider.name, ...(p.provider.model ? { model: p.provider.model } : {}) }).catch(() => undefined);
     }

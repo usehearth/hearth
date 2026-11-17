@@ -18,7 +18,7 @@ import { ExportThread } from '@/components/hearth/ExportThread';
 import { ComposerBar } from '@/components/hearth/ComposerBar';
 import { notify } from '@/lib/notify';
 import { MessageActionsProvider } from '@/components/hearth/messageActions';
-import { MentionContext, QueueContext, ShellContext } from '@/components/hearth/SlashMenu';
+import { CommandsContext, MentionContext, QueueContext, ShellContext, type SlashCommand } from '@/components/hearth/SlashMenu';
 import type { AppendMessage } from '@assistant-ui/react';
 
 const textOf = (content: readonly { type: string; text?: string }[] | undefined) =>
@@ -144,7 +144,7 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
             : <><Loader2 className="size-3 animate-spin" />Reconnecting…</>}
         </div>
       )}
-      <Runtime key={gen} client={client} events={events} actionsEl={actionsEl} first={gen === 0 ? first : undefined} insert={insert} admin={admin} onOpenAdmin={onOpenAdmin} />
+      <Runtime newProject={target.kind === 'new' ? (target.meta as { hearth?: { project?: string } } | undefined)?.hearth?.project : undefined} key={gen} client={client} events={events} actionsEl={actionsEl} first={gen === 0 ? first : undefined} insert={insert} admin={admin} onOpenAdmin={onOpenAdmin} />
     </div>
   );
 }
@@ -257,7 +257,7 @@ function ComposerExtra() {
   return <ComposerBar client={x.client} onError={x.onError} />;
 }
 
-function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin }: { client: AcpClient; events: ThreadEvents; actionsEl?: HTMLElement | null; first?: FirstMessage; insert?: { text: string; n: number } | null; admin?: AdminThread; onOpenAdmin?: (blocked?: Blocked) => void }) {
+function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin, newProject }: { client: AcpClient; newProject?: string; events: ThreadEvents; actionsEl?: HTMLElement | null; first?: FirstMessage; insert?: { text: string; n: number } | null; admin?: AdminThread; onOpenAdmin?: (blocked?: Blocked) => void }) {
   const ev = useRef(events);
   ev.current = events;
   // Images and text files, as this server takes them (its promptCapabilities); a refused file says why.
@@ -315,6 +315,17 @@ function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin 
       try { await client.extRequest('_hearth/shell', { sessionId: client.sessionId, command }); }
       catch (e) { ev.current.onError((e as Error).message); }
     };
+  }, [client, client.initializeMeta]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A new thread's "/" menu before the agent exists: the project's last command list (servers with 'commands').
+  const [startCommands, setStartCommands] = useState<readonly SlashCommand[] | null>(null);
+  useEffect(() => {
+    const ext = client.initializeMeta?.hearth?.extensions;
+    const project = newProject;
+    if (!project || !Array.isArray(ext) || !ext.includes('commands')) return;
+    let live = true;
+    client.extRequest<{ availableCommands: SlashCommand[] }>('_hearth/commands', { project })
+      .then((r) => { if (live) setStartCommands(r.availableCommands); }, () => {});
+    return () => { live = false; };
   }, [client, client.initializeMeta]); // eslint-disable-line react-hooks/exhaustive-deps
   // @-mentions: the project's files (servers with the mentions extension).
   const findFiles = useMemo(() => {
@@ -393,6 +404,7 @@ function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin 
         <MessageActionsProvider value={messageActions}>
         <ShellContext.Provider value={shell}>
         <MentionContext.Provider value={findFiles}>
+        <CommandsContext.Provider value={startCommands}>
         <QueueContext.Provider value={queueApi}>
         <div className="flex h-full">
           <div className="relative flex min-w-0 flex-1 flex-col">
@@ -406,6 +418,7 @@ function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin 
             audit={admin ? <AdminAudit timeline={audit.timeline} loading={audit.loading} /> : undefined} onRefreshAudit={admin ? audit.reload : undefined} />}
         </div>
         </QueueContext.Provider>
+        </CommandsContext.Provider>
         </MentionContext.Provider>
         </ShellContext.Provider>
         </MessageActionsProvider>
