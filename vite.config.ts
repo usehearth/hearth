@@ -6,7 +6,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': path.resolve(import.meta.dirname, 'src') } },
-  server: { port: 5178, strictPort: true },
+  server: { host: '127.0.0.1', port: 5178, strictPort: true },
   clearScreen: false,
   // Unit tests are the app's own (packages/* have their own test runners).
   test: { include: ['src/**/*.test.ts'] },

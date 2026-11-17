@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { notify } from '@/lib/notify';
-import { assetUrl, hostReady, onHostEvent } from '@/lib/hostBridge';
+import { assetUrl, hostReady, inVsCode, onHostEvent } from '@/lib/hostBridge';
 import { Archive, BellDot, Briefcase, ChevronDown, FolderPlus, History as HistoryIcon, Lock, Menu, Settings as SettingsIcon, ShieldAlert, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert, Download } from 'lucide-react';
 import { useAdminKey } from '@/components/hearth/Admin';
 import { errorText } from '@/lib/hearth';
@@ -8,6 +8,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { ThreadPane, type Blocked, type FirstMessage, type ThreadTarget } from '@/components/hearth/ThreadPane';
 import { AddServer, KeyPrompt } from '@/components/hearth/AddServer';
+import { Setup } from '@/components/hearth/Setup';
 import { NeedsYou } from '@/components/hearth/NeedsYou';
 import { Settings } from '@/components/hearth/Settings';
 import { ProjectSettings } from '@/components/hearth/ProjectSettings';
@@ -17,7 +18,8 @@ import { NewProject, type Made } from '@/components/hearth/NewProject';
 import { ArchivedList, SearchResults, SidebarSearch, ThreadMenu, type SearchHit } from '@/components/hearth/ThreadTools';
 import type { CardEntry } from '@/lib/hearth';
 import { useDirectory, type ClientLine, type ImportedGroup, type ProjectGroup, type ThreadItem } from '@/lib/directory';
-import { keyFor, keysReady, useServers } from '@/lib/servers';
+import { isDesktop, keyFor, keysReady, useServers } from '@/lib/servers';
+import { startSetup, useSetup } from '@/lib/setup';
 import { useTheme } from '@/lib/theme';
 import { cn } from '@/lib/utils';
 
@@ -57,6 +59,9 @@ export default function App() {
   const canOpenAdmin = canSign && dir.state === 'ready' && dir.admin;
 
   useEffect(() => { if (!serverId && servers[0]) setServerId(servers[0].id); }, [servers, serverId]);
+  const setup = useSetup();
+  const guided = isDesktop && !inVsCode;
+  useEffect(() => { if (guided && !servers.length && !setup?.active) startSetup(); }, [guided, servers.length, setup?.active]);
   // A server just added: once connected, offer the import wizard if it can import and holds no history yet.
   const offerImport = useRef(false);
   useEffect(() => {
@@ -163,6 +168,10 @@ export default function App() {
     },
   }), [refresh]);
 
+  // First run on the desktop: the guided setup (docs/setup-guide.md). The web build and VS Code keep the plain form.
+  if (guided && !adding && (setup?.active || !servers.length)) {
+    return <Setup onDone={(id) => { offerImport.current = true; setServerId(id); setTarget(null); setKeyVersion((v) => v + 1); }} />;
+  }
   if (!servers.length || adding) {
     return <AddServer first={!servers.length} onDone={(id) => { offerImport.current = true; setAdding(false); setServerId(id); setTarget(null); setKeyVersion((v) => v + 1); }} onCancel={servers.length ? () => setAdding(false) : undefined} />;
   }

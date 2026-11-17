@@ -32,3 +32,5 @@ keyring = { version = "3", features = ["windows-native", "apple-native", "linux-
 ed25519-dalek = "2"
 getrandom = "0.2"
 base64 = "0.22"
+# Setup guide (src/guide.rs): calls to the model provider the person chose, the server address check.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

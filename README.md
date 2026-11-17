@@ -49,9 +49,10 @@ A tag `v*` builds Windows, macOS and Linux installers on GitHub Actions (`.githu
 
 ## Privacy
 
-- **No chat content on disk.** Hearth stores only server addresses and your theme choice. Chats stay in memory and on the server.
+- **No chat content on disk.** Hearth stores only server addresses, your theme choice and, during first-run setup, which setup step you're on. Chats stay in memory and on the server.
 - **No telemetry,** none at all.
 - **Keys:** the desktop app keeps each server's key in the OS keychain (Windows Credential Manager, macOS Keychain, Secret Service). The web build holds it in memory for the window only.
+- **Setup guide (desktop, first run):** Hearth asks for a model key first, and a small guide then helps you set up a server. Only during setup, the app calls the model provider *you* picked, directly, with your key. The key stays in the OS keychain, and is removed when setup ends unless you choose to keep it. The guide's chat is never saved. See [docs/setup-guide.md](docs/setup-guide.md).
 
 ## Built with
 

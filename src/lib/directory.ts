@@ -231,8 +231,10 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
 }
 
 export function friendly(e: unknown): string {
-  // A WebSocket error arrives as a bare Event (no message): the server is down or refused the key.
-  const m = (e as Error)?.message ?? (typeof Event !== 'undefined' && e instanceof Event ? 'closed' : String(e));
+  // A WebSocket error arrives as a bare Event (no message), or as an error with an empty message: the server is down
+  // or refused the key.
+  const bare = e == null || e instanceof Error || (typeof Event !== 'undefined' && e instanceof Event);
+  const m = (e as Error)?.message || (bare ? 'closed' : String(e));
   if (/closed|failed|1006|ECONNREFUSED/i.test(m)) return "Can't reach the server, or it refused the key.";
   return m;
 }
