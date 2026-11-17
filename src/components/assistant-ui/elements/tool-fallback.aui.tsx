@@ -8,6 +8,9 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ComponentProps,
+  createContext,
+  useContext,
 } from "react";
 import {
   AlertCircleIcon,
@@ -1199,6 +1202,9 @@ function ToolFallbackApprovalImpl({
   );
 }
 
+/** Hearth: set while drawing a subagent's calls inside its Task call, so they show there instead of hiding. */
+const InsideTaskContext = createContext(false);
+
 const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   toolName,
   argsText,
@@ -1220,7 +1226,8 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   const myId = (part as { toolCallId?: string }).toolCallId;
   const parts = useAuiState((s) => s.message.parts) as readonly { type: string; toolCallId?: string; providerMetadata?: unknown; approval?: unknown; status?: { type?: string } }[];
   const waits = (p: { approval?: unknown; status?: { type?: string } }) => p.approval != null || p.status?.type === "requires-action";
-  const nested = !!meta?.parent && !waits({ approval, status }) && parts.some((p) => p.type === "tool-call" && p.toolCallId === meta.parent);
+  const inside = useContext(InsideTaskContext);
+  const nested = !inside && !!meta?.parent && !waits({ approval, status }) && parts.some((p) => p.type === "tool-call" && p.toolCallId === meta.parent);
   const children = myId ? parts.filter((p) => p.type === "tool-call" && acpMetaOf(p)?.parent === myId && !waits(p)) : [];
   const diffs = diffsOf(meta);
   const shell = !diffs.length && isShell(meta, toolName);
@@ -1319,7 +1326,9 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
         )}
         {children.length > 0 && (
           <div className="space-y-1 border-l-2 pl-2" aria-label="What the subagent did">
-            {children.map((c) => <ToolFallback key={c.toolCallId} {...(c as unknown as Parameters<typeof ToolFallbackImpl>[0])} />)}
+            <InsideTaskContext.Provider value={true}>
+              {children.map((c) => <ToolFallback key={c.toolCallId} {...(c as unknown as ComponentProps<typeof ToolFallbackImpl>)} />)}
+            </InsideTaskContext.Provider>
           </div>
         )}
         {!diffs.length && !shell && <ToolFallbackResult result={result} />}

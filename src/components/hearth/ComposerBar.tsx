@@ -33,7 +33,7 @@ export function ComposerBar({ client, onError }: { client: AcpClient; onError: (
 function ModePicker({ client, onError }: { client: AcpClient; onError: (m: string) => void }) {
   const [, redraw] = useState(0);
   const liveMode = useAcpCurrentModeId();
-  const current = (client.sessionId ? undefined : client.pending.mode) ?? liveMode ?? client.modes?.currentModeId ?? 'default';
+  const current = (client.sessionId ? undefined : client.beforeSession.mode) ?? liveMode ?? client.modes?.currentModeId ?? 'default';
   const modes = (client.modes?.availableModes as { id: string; name: string; description?: string | null }[] | undefined) ?? FALLBACK_MODES;
   const cur = modes.find((m) => m.id === current) ?? FALLBACK_MODES[0];
   const Icon = MODE_ICON[cur.id] ?? Hand;
@@ -83,7 +83,7 @@ function ModelPicker({ client, onError }: { client: AcpClient; onError: (m: stri
   // A model by name goes with an OpenCode provider (its engine offers one model only); Claude Code threads pick theirs
   // from the engine's own model list below.
   const pickProvider = (name: string | null, model: string | null = null) => {
-    if (!client.sessionId) { client.pending = { ...client.pending, provider: { name, model } }; setChosen(name); setChosenModel(model); return; }
+    if (!client.sessionId) { client.beforeSession = { ...client.beforeSession, provider: { name, model } }; setChosen(name); setChosenModel(model); return; }
     client.extRequest('_hearth/thread/provider', { sessionId: client.sessionId, provider: name, ...(model ? { model } : {}) })
       .then(() => { setChosen(name); setChosenModel(model); }, (e) => onError((e as Error).message));
   };

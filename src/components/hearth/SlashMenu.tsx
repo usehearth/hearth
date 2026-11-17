@@ -28,6 +28,9 @@ export const QueueContext = createContext<{ items: string[]; add: (text: string)
 /** The "@word" at the end of what is being typed. */
 export const mentionQuery = (text: string) => { const m = /(^|\s)@([^\s@]*)$/.exec(text); return m ? m[2] : null; };
 
+/** Commands to offer before the agent reports its own (a new thread: the project's last list, from the server). */
+export const CommandsContext = createContext<readonly SlashCommand[] | null>(null);
+
 /** "!command": run a shell command in the thread (the thread pane provides it when the server can). */
 export const ShellContext = createContext<((command: string) => Promise<void>) | null>(null);
 
@@ -38,7 +41,8 @@ export function useSlashMenu() {
   const running = useAuiState((s) => s.thread.isRunning);
   const aui = useAui();
   const text = useAuiState((s) => s.composer.text);
-  const commands = (useAcpAvailableCommands() ?? []) as readonly SlashCommand[];
+  const startCommands = useContext(CommandsContext);
+  const commands = (useAcpAvailableCommands() ?? startCommands ?? []) as readonly SlashCommand[];
   const query = slashQuery(text);
   const [closedFor, setClosedFor] = useState<string | null>(null);
   const items = useMemo(() => (query == null ? [] : matchCommands(commands, query)), [commands, query]);
