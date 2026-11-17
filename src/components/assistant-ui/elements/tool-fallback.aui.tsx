@@ -1215,6 +1215,13 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 }) => {
   // Hearth: edits as a real diff, shell commands as a terminal, from the ACP call itself.
   const meta = acpMetaOf(part as { providerMetadata?: unknown });
+  // Hearth: a subagent's tool calls sit inside its Task call, as in Claude Code. One that waits for an answer stays
+  // where it is, so its approval buttons work.
+  const myId = (part as { toolCallId?: string }).toolCallId;
+  const parts = useAuiState((s) => s.message.parts) as readonly { type: string; toolCallId?: string; providerMetadata?: unknown; approval?: unknown; status?: { type?: string } }[];
+  const waits = (p: { approval?: unknown; status?: { type?: string } }) => p.approval != null || p.status?.type === "requires-action";
+  const nested = !!meta?.parent && !waits({ approval, status }) && parts.some((p) => p.type === "tool-call" && p.toolCallId === meta.parent);
+  const children = myId ? parts.filter((p) => p.type === "tool-call" && acpMetaOf(p)?.parent === myId && !waits(p)) : [];
   const diffs = diffsOf(meta);
   const shell = !diffs.length && isShell(meta, toolName);
   const label = meta?.title?.replace(/`/g, "") || toolName;
@@ -1258,6 +1265,7 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
     }
   }, [approval, isRequiresAction, status?.type]);
 
+  if (nested) return null;
   return (
     <ToolFallbackRoot open={open} onOpenChange={setOpen} data-tool-call-id={(part as { toolCallId?: string }).toolCallId}>
       <ToolFallbackTrigger
@@ -1308,6 +1316,11 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
               if (!stillFocused) approvalHadFocusRef.current = false;
             }}
           />
+        )}
+        {children.length > 0 && (
+          <div className="space-y-1 border-l-2 pl-2" aria-label="What the subagent did">
+            {children.map((c) => <ToolFallback key={c.toolCallId} {...(c as unknown as Parameters<typeof ToolFallbackImpl>[0])} />)}
+          </div>
         )}
         {!diffs.length && !shell && <ToolFallbackResult result={result} />}
       </ToolFallbackContent>

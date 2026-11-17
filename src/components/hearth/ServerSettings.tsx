@@ -111,6 +111,7 @@ export function ExtensionsPage({ request }: { request: Request }) {
       <SectionHead title="Extensions" sub="Your own skills, slash commands, subagents, hooks and output styles. They reach every project's agents (or one project's). A repo's own .claude folder is never used."
         action={<Button size="sm" onClick={() => setEdit({ kind: 'command', scope: 'global', enabled: true, name: '', content: '' })}>Add</Button>} />
       {error && <p role="alert" className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
+      <ClaudeImport request={request} onDone={load} onError={setError} />
       <PluginImport request={request} onDone={load} onError={setError} />
       {edit && (
         <div className="mb-4 space-y-2 rounded-xl border bg-card p-3 text-sm">
@@ -239,6 +240,79 @@ export function ConnectorsPage({ request }: { request: Request }) {
 
 // Schedules moved to its own file (Schedules.tsx); re-exported so Settings keeps one import.
 export { SchedulesPage } from '@/components/hearth/Schedules';
+
+interface CcItem { key: string; source: string; kind: string; name: string; description: string | null; bytes: number; importable: boolean; held?: string[]; leftOut?: string[] }
+const HELD: Record<string, string> = { 'names-a-client': 'names a client' };
+
+/**
+ * Bring Claude Code's own skills, slash commands, subagents, output styles and hooks over from the laptop (the work
+ * runner reads ~/.claude). Anything that looks like it holds a secret or names a client stays on the laptop.
+ */
+function ClaudeImport({ request, onDone, onError }: { request: Request; onDone: () => void; onError: (m: string) => void }) {
+  const [items, setItems] = useState<CcItem[] | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [scope, setScope] = useState('global');
+  const [busy, setBusy] = useState(false);
+  const [askHooks, setAskHooks] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const look = async () => {
+    setBusy(true); setItems(null); setDone(null);
+    try {
+      const r = await request<{ items: CcItem[] }>('_hearth/extensions/import', { source: 'claude-code' });
+      setItems(r.items);
+      setPicked(new Set(r.items.filter((i) => i.importable && i.kind !== 'hook').map((i) => i.key)));
+    } catch (e) { onError(errorText(e)); } finally { setBusy(false); }
+  };
+  const hooksPicked = !!items?.some((i) => i.kind === 'hook' && picked.has(i.key));
+  const install = async (confirmed = false) => {
+    if (hooksPicked && !confirmed) { setAskHooks(true); return; }
+    setAskHooks(false); setBusy(true);
+    try {
+      const picks = [...picked].map((key) => ({ key, scope: scope.trim() || 'global' }));
+      const r = await request<{ saved: string[]; skipped: string[] }>('_hearth/extensions/import', { source: 'claude-code', install: true, picks, confirmHooks: hooksPicked });
+      setDone(`Imported ${r.saved.length}${r.skipped.length ? `, left out ${r.skipped.length}: ${r.skipped.join(', ')}` : ''}.`);
+      setItems(null); onDone();
+    } catch (e) { onError(errorText(e)); } finally { setBusy(false); }
+  };
+  const toggle = (k: string) => setPicked((cur) => { const n = new Set(cur); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  return (
+    <div className="mb-4 rounded-xl border bg-card p-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="font-medium">Import from Claude Code</div>
+          <p className="text-xs text-muted-foreground">Your skills, slash commands, subagents, output styles and hooks, read from Claude Code on the work runner.</p>
+        </div>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => void look()}>{busy && !items && <Loader2 className="size-3.5 animate-spin" />}{items ? 'Look again' : 'Look'}</Button>
+      </div>
+      {items && !items.length && <p className="mt-2 text-xs text-muted-foreground">Claude Code has nothing Hearth can import on that runner.</p>}
+      {items && items.length > 0 && (
+        <div className="mt-2 space-y-2">
+          <ul className="max-h-72 divide-y overflow-y-auto rounded-lg border">
+            {items.map((i) => (
+              <li key={i.key} className="flex items-start gap-2 px-2 py-1.5">
+                <input type="checkbox" className="mt-0.5 size-4 accent-primary" aria-label={`Import ${i.name}`} disabled={!i.importable}
+                  checked={picked.has(i.key)} onChange={() => toggle(i.key)} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate"><span className="text-xs text-muted-foreground">{KIND_LABEL[i.kind] ?? i.kind}</span> {i.name}</div>
+                  {i.importable
+                    ? i.description && <div className="truncate text-xs text-muted-foreground">{i.description}</div>
+                    : <div className="text-xs text-muted-foreground">Stays on the laptop: {(i.held ?? []).map((h) => HELD[h] ?? `looks like it holds a ${h}`).join(', ') || 'not readable'}</div>}
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div className="flex flex-wrap items-center gap-2">
+            <input value={scope} onChange={(e) => setScope(e.target.value)} aria-label="For" placeholder="global or a project" className={cn(field, 'h-8 w-40 px-2 text-xs')} />
+            <Button size="sm" disabled={!picked.size || busy || askHooks} onClick={() => void install()}>{busy && <Loader2 className="size-3.5 animate-spin" />}Import {picked.size || ''}</Button>
+          </div>
+          {askHooks && <ConfirmLine question="Hooks run shell commands as the agent on every matching tool call. Import the ticked hooks?"
+            yes="Import with hooks" no="Not yet" destructive={false} busy={busy} onYes={() => void install(true)} onNo={() => setAskHooks(false)} />}
+        </div>
+      )}
+      {done && <p className="mt-2 text-xs text-muted-foreground">{done}</p>}
+    </div>
+  );
+}
 
 /** Install a Claude Code plugin from GitHub: preview what it holds, then install (hooks need their own tick). */
 function PluginImport({ request, onDone, onError }: { request: Request; onDone: () => void; onError: (m: string) => void }) {

@@ -10,6 +10,7 @@ import {
   useIsMarkdownCodeBlock,
 } from "@assistant-ui/react-markdown";
 import remarkGfm from "remark-gfm";
+import { remarkSoftBreaks } from "@/lib/remark-soft-breaks";
 import { type FC, memo, useMemo, useState } from "react";
 import type { TextMessagePartProps } from "@assistant-ui/react";
 import { CheckIcon, CopyIcon } from "lucide-react";
@@ -59,7 +60,7 @@ const MarkdownTextImpl: FC<MarkdownTextProps> = ({
 
   return (
     <MarkdownTextPrimitive
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkSoftBreaks]}
       className="aui-md"
       components={markdownComponents}
       componentsByLanguage={stableComponentsByLanguage}

@@ -238,7 +238,8 @@ function ProviderCard({ p, n, test, onTested, admin }: { p: ProviderRow; n: numb
         <dt className="text-muted-foreground">Address</dt><dd className="truncate font-mono text-xs leading-5">{p.base_url}</dd>
         <dt className="text-muted-foreground">Key</dt><dd>{p.has_key ? 'Set' : <span className="text-destructive">Missing</span>}</dd>
         <dt className="text-muted-foreground">Models</dt>
-        <dd className="text-xs leading-5">{[['default', p.models.default], ['strong', p.models.strong], ['fast', p.models.fast]].filter(([, m]) => m).map(([k, m]) => <span key={k} className="mr-2 inline-block"><span className="text-muted-foreground">{k}</span> {m}</span>)}</dd>
+        <dd className="text-xs leading-5">{[['default', p.models.default], ['strong', p.models.strong], ['fast', p.models.fast]].filter(([, m]) => m).map(([k, m]) => <span key={k} className="mr-2 inline-block"><span className="text-muted-foreground">{k}</span> {m}</span>)}
+          {p.kind === 'anthropic' && <span className="block text-muted-foreground">Threads ask for the model their project sets (Opus unless changed); these are for anything else.</span>}</dd>
         <dt className="text-muted-foreground">Client work</dt><dd>{p.sensitive_ok ? 'Allowed' : 'Personal projects only'}</dd>
         {p.last_ok && <><dt className="text-muted-foreground">Last answer</dt><dd>{new Date(p.last_ok).toLocaleString()}</dd></>}
         {p.status === 'down' && p.last_error && <><dt className="text-muted-foreground">Last error</dt><dd className="flex gap-1.5 text-destructive"><CircleAlert className="mt-0.5 size-3.5 shrink-0" /><span className="break-words">{p.last_error}</span></dd></>}
