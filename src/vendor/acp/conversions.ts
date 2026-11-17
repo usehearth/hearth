@@ -352,6 +352,8 @@ type AcpToolCallMetadata = {
   }[];
   /** Hearth: the engine's own name for the tool (Claude Code's toolName). */
   readonly tool?: string;
+  /** Hearth: the Task (subagent) call this call belongs to (Claude Code's parentToolUseId). */
+  readonly parent?: string;
   /** Hearth: the call's last `content` collection as the agent sent it (diffs with old and new text, terminal output). */
   readonly content?: readonly ReadonlyJSONObject[];
 };
@@ -380,8 +382,11 @@ const mergedMetadataOf = (
   const content = Array.isArray(update.content) && update.content.length ? (update.content as unknown as readonly ReadonlyJSONObject[]) : previous?.content;
   // Hearth (parity): the engine's own tool name (Claude Code: _meta.claudeCode.toolName), e.g. Task for a subagent.
   const tool = ((update as { _meta?: { claudeCode?: { toolName?: unknown } } })._meta?.claudeCode?.toolName as string | undefined) ?? previous?.tool;
+  // Hearth: a subagent's own tool calls name the Task call that started them (_meta.claudeCode.parentToolUseId).
+  const parent = ((update as { _meta?: { claudeCode?: { parentToolUseId?: unknown } } })._meta?.claudeCode?.parentToolUseId as string | undefined) ?? previous?.parent;
   return {
     ...(tool !== undefined && { tool }),
+    ...(parent !== undefined && { parent }),
     ...(content !== undefined && { content }),
     ...(name !== undefined && { name }),
     ...(kind !== undefined && { kind }),

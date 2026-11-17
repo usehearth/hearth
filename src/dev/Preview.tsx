@@ -36,14 +36,34 @@ const runs = { schedules: [
   { schedule_id: 11, title: 'Style check (weekly, proposes updates)', started_at: ago(44), ended_at: ago(43.8), status: 'failed' },
 ], triggers: [] };
 
-const request = async <T,>(method: string): Promise<T> => {
+// Extensions and Claude Code's own config as the work runner reports it (one item held back: it names a client).
+const extensions = [
+  { id: 'e1', kind: 'command', name: 'standup', scope: 'global', description: 'Three lines on yesterday, today and blockers', enabled: true, source: 'owner' },
+  { id: 'e2', kind: 'skill', name: 'release-notes', scope: 'todo-api', description: 'Write release notes from merged PRs', enabled: true, source: 'claude-code:skills' },
+];
+const ccItems = [
+  { key: 'skill:review', source: 'skills', kind: 'skill', name: 'review', description: 'Review a diff for bugs', bytes: 2100, files: 1, importable: true },
+  { key: 'command:ship', source: 'commands', kind: 'command', name: 'ship', description: 'Tag and push a release', bytes: 640, files: 0, importable: true },
+  { key: 'agent:tester', source: 'agents', kind: 'agent', name: 'tester', description: 'Writes and runs tests', bytes: 1300, files: 0, importable: true },
+  { key: 'hook:format', source: 'settings', kind: 'hook', name: 'format on edit', description: 'Runs the formatter after each edit', bytes: 120, files: 0, importable: true },
+  { key: 'skill:acme-deploy', source: 'skills', kind: 'skill', name: 'acme-deploy', description: null, bytes: 900, files: 0, importable: false, held: ['names-a-client'] },
+];
+const providers = [
+  { name: 'meridian', kind: 'anthropic', base_url: 'http://192.0.2.10:3456', has_key: true, models: { default: 'claude-sonnet-5-5', strong: 'claude-opus-5-5', fast: 'claude-haiku-5-5' }, priority: 10, enabled: true, sensitive_ok: true, status: 'ok', last_ok: ago(0.1), last_error: null },
+  { name: 'cliproxy', kind: 'openai', base_url: 'http://192.0.2.10:8317/v1', has_key: true, models: { default: 'gemini-3.5-flash' }, priority: 20, enabled: true, sensitive_ok: false, status: 'down', last_ok: ago(3), last_error: 'HTTP 429, model cooldown: You exceeded your current quota, please check your plan.' },
+];
+
+const request = async <T,>(method: string, params?: { source?: string; install?: boolean; picks?: unknown[] }): Promise<T> => {
   await new Promise((r) => setTimeout(r, 150));
   if (method === '_hearth/schedules') return { schedules, next, triggers: [], runs } as T;
+  if (method === '_hearth/extensions') return { extensions } as T;
+  if (method === '_hearth/extensions/import' && params?.source === 'claude-code') return (params.install ? { saved: (params.picks ?? []).map(String), skipped: [] } : { items: ccItems }) as T;
+  if (method === '_hearth/providers') return { providers, canEdit: true } as T;
   return {} as T;
 };
 
 const dir: DirectoryState = {
-  state: 'ready', agent: 'Monolith', groups: [], refresh: () => {}, cards: [], answer: async () => {}, extensions: ['schedules', 'usage', 'audit'],
+  state: 'ready', agent: 'Monolith', groups: [], refresh: () => {}, cards: [], answer: async () => {}, extensions: ['schedules', 'usage', 'audit', 'extensions', 'providers'],
   clients: [], workDevice: false, admin: true, importedGroups: [], request: request as never,
 };
 

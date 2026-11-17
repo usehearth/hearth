@@ -10,6 +10,8 @@ export interface AcpToolMeta {
   name?: string;
   /** The engine's own tool name (Claude Code: Task for a subagent, Bash...). */
   tool?: string;
+  /** The subagent (Task) call this one ran inside, if any. */
+  parent?: string;
   kind?: string;
   title?: string;
   status?: string;
