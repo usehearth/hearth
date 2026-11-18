@@ -24,6 +24,14 @@
     "category": "Productivity",
     "shortDescription": "Your AI, at home",
     "longDescription": "A server-first chat app for any ACP agent. The server owns the chats; Hearth is the window.",
-    "license": "Apache-2.0"
+    "license": "Apache-2.0",
+    "windows": {
+      "nsis": {
+        "template": "installer/installer.nsi",
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "installer/header.bmp",
+        "sidebarImage": "installer/sidebar.bmp"
+      }
+    }
   }
 }
