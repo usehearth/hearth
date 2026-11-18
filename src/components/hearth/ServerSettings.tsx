@@ -158,7 +158,22 @@ export function ExtensionsPage({ request }: { request: Request }) {
   );
 }
 
-interface McpServer { name: string; title: string; url: string; client: string | null; enabled: boolean; has_token: boolean; oauth?: boolean; expiresAt?: string | null }
+interface McpServer { name: string; title: string; url: string | null; client: string | null; enabled: boolean; has_token: boolean; oauth?: boolean; expiresAt?: string | null;
+  transport?: 'http' | 'stdio'; command?: string | null; args?: string[] | null; env_names?: string[] }
+type McpForm = { kind: 'http' | 'stdio'; name: string; title: string; url: string; token: string; client: string; command: string; args: string; env: string };
+const EMPTY_FORM: McpForm = { kind: 'http', name: '', title: '', url: '', token: '', client: '', command: '', args: '', env: '' };
+/** "NAME=value" lines -> an env object (blank lines skipped). */
+function envLines(text: string): Record<string, string> | string {
+  const out: Record<string, string> = {};
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    const i = line.indexOf('=');
+    if (i < 1) return `"${line.slice(0, 40)}" isn't NAME=value`;
+    out[line.slice(0, i).trim()] = line.slice(i + 1);
+  }
+  return out;
+}
 
 /** Open a sign-in page: the system browser in the desktop app, a new tab on the web. */
 async function openExternal(url: string) {
@@ -172,7 +187,7 @@ async function openExternal(url: string) {
 export function ConnectorsPage({ request }: { request: Request }) {
   const [items, setItems] = useState<McpServer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState<{ name: string; title: string; url: string; token: string; client: string } | null>(null);
+  const [form, setForm] = useState<McpForm | null>(null);
   const [tests, setTests] = useState<Record<string, string>>({});
   const [removing, setRemoving] = useState<string | null>(null);
   const load = useCallback(() => { request<{ servers: McpServer[] }>('_hearth/mcp', {}).then((r) => { setItems(r.servers); setError(null); }, (e) => setError(errorText(e))); }, [request]);
@@ -193,8 +208,8 @@ export function ConnectorsPage({ request }: { request: Request }) {
   };
   return (
     <div>
-      <SectionHead title="Connectors" sub="MCP servers your agents can use. Give a project the ones it needs in its settings. Tokens are stored encrypted and never shown."
-        action={<Button size="sm" onClick={() => setForm({ name: '', title: '', url: '', token: '', client: '' })}>Add</Button>} />
+      <SectionHead title="Connectors" sub="MCP servers your agents can use: a web address, or a command the agent starts on its runner (like Claude Code's stdio servers). Give a project the ones it needs in its settings. Tokens and environment values are stored encrypted and never shown."
+        action={<Button size="sm" onClick={() => setForm({ ...EMPTY_FORM })}>Add</Button>} />
       {error && <p role="alert" className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
       {form && (
         <div className="mb-4 space-y-2 rounded-xl border bg-card p-3 text-sm">
@@ -202,13 +217,31 @@ export function ConnectorsPage({ request }: { request: Request }) {
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value.toLowerCase() })} placeholder="name" aria-label="Name" className={cn(field, 'w-40 font-mono')} />
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="What it is (e.g. Linear)" aria-label="Title" className={cn(field, 'w-auto min-w-40 flex-1')} />
           </div>
-          <input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://example.com/mcp" aria-label="URL" className={cn(field, 'font-mono')} />
-          <input value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} type="password" autoComplete="off" placeholder="Token (leave empty for OAuth sign-in or no token)" aria-label="Token" className={field} />
+          <div role="radiogroup" aria-label="Kind" className="flex gap-1 text-xs">
+            {(['http', 'stdio'] as const).map((k) => (
+              <button key={k} type="button" role="radio" aria-checked={form.kind === k} onClick={() => setForm({ ...form, kind: k })}
+                className={cn('rounded-md border px-2 py-1', form.kind === k ? 'border-primary bg-primary/10 font-medium' : 'text-muted-foreground')}>
+                {k === 'http' ? 'Web address' : 'Command (stdio)'}</button>))}
+          </div>
+          {form.kind === 'http' ? (<>
+            <input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://example.com/mcp" aria-label="URL" className={cn(field, 'font-mono')} />
+            <input value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} type="password" autoComplete="off" placeholder="Token (leave empty for OAuth sign-in or no token)" aria-label="Token" className={field} />
+          </>) : (<>
+            <input value={form.command} onChange={(e) => setForm({ ...form, command: e.target.value })} placeholder="Command, e.g. npx" aria-label="Command" className={cn(field, 'font-mono')} />
+            <textarea value={form.args} onChange={(e) => setForm({ ...form, args: e.target.value })} rows={3} placeholder={'Arguments, one per line, e.g.\n-y\n@azure-devops/mcp\nmy-org'} aria-label="Arguments" className={cn(field, 'font-mono')} />
+            <textarea value={form.env} onChange={(e) => setForm({ ...form, env: e.target.value })} rows={2} autoComplete="off" spellCheck={false} placeholder={'Environment, NAME=value per line (stored encrypted), e.g.\nAZURE_DEVOPS_PAT=…'} aria-label="Environment" className={cn(field, 'font-mono')} />
+            <p className="text-xs text-muted-foreground">It runs on the project's runner as the project's own user, started by the agent, as Claude Code does.</p>
+          </>)}
           <input value={form.client} onChange={(e) => setForm({ ...form, client: e.target.value })} placeholder="Client (only for a client's own login)" aria-label="Client" className={field} />
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="outline" onClick={() => setForm(null)}>Cancel</Button>
-            <Button size="sm" disabled={!form.name || !form.url} onClick={async () => {
-              try { await request('_hearth/mcp/save', { name: form.name, title: form.title, url: form.url, ...(form.token ? { token: form.token } : {}), ...(form.client ? { client: form.client } : {}) }); setForm(null); load(); }
+            <Button size="sm" disabled={!form.name || (form.kind === 'http' ? !form.url : !form.command.trim())} onClick={async () => {
+              const env = form.kind === 'stdio' ? envLines(form.env) : {};
+              if (typeof env === 'string') { setError(`Environment: ${env}`); return; }
+              const target = form.kind === 'http'
+                ? { url: form.url, ...(form.token ? { token: form.token } : {}) }
+                : { command: form.command.trim(), args: form.args.split('\n').map((a) => a.trim()).filter(Boolean), env };
+              try { await request('_hearth/mcp/save', { name: form.name, title: form.title, ...target, ...(form.client ? { client: form.client } : {}) }); setForm(null); load(); }
               catch (e) { setError(errorText(e)); }
             }}>Save</Button>
           </div>
@@ -222,9 +255,11 @@ export function ConnectorsPage({ request }: { request: Request }) {
             <li key={s.name} className="px-3 py-2">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="min-w-0 flex-1"><span className="font-mono font-medium">{s.name}</span>{s.title && <span className="text-muted-foreground"> · {s.title}</span>}
-                  <span className="block truncate text-xs text-muted-foreground">{s.url}{s.client ? ` · client ${s.client}` : ''} · {s.oauth ? 'signed in (OAuth)' : s.has_token ? 'token set' : 'no token'}</span></span>
-                <Button size="sm" variant="ghost" onClick={() => void test(s.name)}>Test</Button>
-                <Button size="sm" variant="ghost" onClick={() => void signIn(s.name)}>{s.oauth ? 'Sign in again' : 'Sign in'}</Button>
+                  <span className="block truncate text-xs text-muted-foreground">{s.transport === 'stdio'
+                    ? <>command: <span className="font-mono">{[s.command, ...(s.args ?? [])].join(' ')}</span>{s.client ? ` · client ${s.client}` : ''}{s.env_names?.length ? ` · env ${s.env_names.join(', ')}` : ''}</>
+                    : <>{s.url}{s.client ? ` · client ${s.client}` : ''} · {s.oauth ? 'signed in (OAuth)' : s.has_token ? 'token set' : 'no token'}</>}</span></span>
+                {s.transport !== 'stdio' && <Button size="sm" variant="ghost" onClick={() => void test(s.name)}>Test</Button>}
+                {s.transport !== 'stdio' && <Button size="sm" variant="ghost" onClick={() => void signIn(s.name)}>{s.oauth ? 'Sign in again' : 'Sign in'}</Button>}
                 <Button size="sm" variant="ghost" onClick={() => setRemoving(s.name)}>Remove</Button>
               </div>
               {removing === s.name && <ConfirmLine className="mt-2" question={`Remove ${s.name}? Projects that use it lose it.`} yes="Remove" onNo={() => setRemoving(null)}

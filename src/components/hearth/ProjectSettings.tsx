@@ -254,7 +254,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
               <div className="mt-3 rounded-lg border p-2.5 text-sm">
                 <label className="flex items-start gap-2">
                   <input type="checkbox" checked={repoMcp} onChange={(e) => setRepoMcp(e.target.checked)} className="mt-0.5 size-4 accent-primary" />
-                  <span>Use the repo's own .mcp.json<span className="block text-xs text-muted-foreground">Only servers you allow below, only http ones (a command in the repo never runs), and their tools still ask.</span></span>
+                  <span>Use the repo's own .mcp.json<span className="block text-xs text-muted-foreground">Only servers you allow below. A command runs only once you allow that exact entry, on the runner as this project's user. Their tools still ask.</span></span>
                 </label>
                 {repoMcp && (view.repoMcp.found.length === 0
                   ? <p className="mt-2 text-xs text-muted-foreground">Nothing found yet: the file is read when a session starts.</p>
@@ -263,7 +263,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
                         <input type="checkbox" disabled={!f.usable} checked={repoApproved.includes(f.hash)} aria-label={`Allow ${f.name}`}
                           onChange={(e) => setRepoApproved((a) => (e.target.checked ? [...a, f.hash] : a.filter((h) => h !== f.hash)))} className="size-3.5 accent-primary" />
                         <span className="font-mono">{f.name}</span>
-                        <span className="min-w-0 flex-1 truncate text-muted-foreground">{f.usable ? f.url : f.command ? `command: ${f.command} (never run)` : 'not usable'}</span>
+                        <span className="min-w-0 flex-1 truncate text-muted-foreground">{!f.usable ? 'not usable' : f.type === 'stdio' ? `command: ${f.command}` : f.url}</span>
                       </li>))}</ul>)}
               </div>
             )}
