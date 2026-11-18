@@ -52,7 +52,12 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const threadsExt = dir.state === 'ready' && dir.extensions.includes('threads');
-  const menu = threadsExt && dir.state === 'ready' ? (t: ThreadItem) => <ThreadMenu t={t} request={dir.request} onError={setError} /> : undefined;
+  const menu = threadsExt && dir.state === 'ready' ? (t: ThreadItem) => <ThreadMenu t={t} request={dir.request} onError={setError}
+    onChanged={(sessionId, change) => {
+      // A deleted or archived thread leaves the list: close it if it's the one open, then refresh the list.
+      if (change === 'deleted' || change === 'archived') setTarget((cur) => (cur?.sessionId === sessionId ? null : cur));
+      dir.refresh();
+    }} /> : undefined;
   // Admin threads (server extension `admin_threads`): this install types in one only with its admin key, pinned on the
   // laptop runner. Every device lists and watches them; only an admin device with that key opens or finishes one.
   const adminExt = dir.state === 'ready' && dir.extensions.includes('admin_threads');
