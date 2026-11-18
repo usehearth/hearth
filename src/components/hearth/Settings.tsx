@@ -58,7 +58,7 @@ export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged }: {
           {section === 'audit' && dir.state === 'ready' && <AuditLog request={dir.request} />}
           {section === 'admin' && dir.state === 'ready' && <AdminKeySettings request={dir.request} />}
           {section === 'usage' && dir.state === 'ready' && <UsagePage request={dir.request} />}
-          {section === 'extensions' && dir.state === 'ready' && <ExtensionsPage request={dir.request} />}
+          {section === 'extensions' && dir.state === 'ready' && <ExtensionsPage request={dir.request} projects={dir.groups.map((g) => ({ slug: g.project, name: g.name, client: g.client }))} />}
           {section === 'connectors' && dir.state === 'ready' && <ConnectorsPage request={dir.request} />}
           {section === 'schedules' && dir.state === 'ready' && <SchedulesPage request={dir.request} />}
         </div>
