@@ -89,7 +89,10 @@ const KIND_HINT: Record<string, string> = {
  * The owner's own skills, slash commands, subagents, hooks and output styles (admin devices). They reach every
  * session (global) or one project's; a repo's own .claude/ folder is never loaded.
  */
-export function ExtensionsPage({ request }: { request: Request }) {
+/** A project the import can give extensions to (the "for" box suggests these). */
+export interface ProjectChoice { slug: string; name: string; client?: string }
+
+export function ExtensionsPage({ request, projects = [] }: { request: Request; projects?: ProjectChoice[] }) {
   const [items, setItems] = useState<Extension[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [edit, setEdit] = useState<Partial<Extension> | null>(null);
@@ -111,7 +114,7 @@ export function ExtensionsPage({ request }: { request: Request }) {
       <SectionHead title="Extensions" sub="Your own skills, slash commands, subagents, hooks and output styles. They reach every project's agents (or one project's). A repo's own .claude folder is never used."
         action={<Button size="sm" onClick={() => setEdit({ kind: 'command', scope: 'global', enabled: true, name: '', content: '' })}>Add</Button>} />
       {error && <p role="alert" className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
-      <ClaudeImport request={request} onDone={load} onError={setError} />
+      <ClaudeImport request={request} projects={projects} onDone={load} onError={setError} />
       <PluginImport request={request} onDone={load} onError={setError} />
       {edit && (
         <div className="mb-4 space-y-2 rounded-xl border bg-card p-3 text-sm">
@@ -283,7 +286,7 @@ const HELD: Record<string, string> = { 'names-a-client': 'names a client' };
  * Bring Claude Code's own skills, slash commands, subagents, output styles and hooks over from the laptop (the work
  * runner reads ~/.claude). Anything that looks like it holds a secret or names a client stays on the laptop.
  */
-function ClaudeImport({ request, onDone, onError }: { request: Request; onDone: () => void; onError: (m: string) => void }) {
+function ClaudeImport({ request, projects, onDone, onError }: { request: Request; projects: ProjectChoice[]; onDone: () => void; onError: (m: string) => void }) {
   const [items, setItems] = useState<CcItem[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   // Where each group goes: "global" or a project slug (Umbraco skills to the Umbraco repos, your own agents everywhere).
@@ -356,7 +359,7 @@ function ClaudeImport({ request, onDone, onError }: { request: Request; onDone: 
                     <span className="shrink-0 text-xs text-muted-foreground">{on}/{list.length}</span>
                   </button>
                   <input value={scopes[src] ?? ''} onChange={(e) => setScopes((s) => ({ ...s, [src]: e.target.value }))} aria-label={`For (${groupName(src)})`}
-                    placeholder="global" title="global, or a project's slug to give these to one project" className={cn(field, 'h-7 w-36 px-2 text-xs')} />
+                    list="cc-import-projects" placeholder="global" title="global, or pick a project to give these to it only" className={cn(field, 'h-7 w-44 px-2 text-xs')} />
                 </div>
                 {isOpen && (
                   <ul className="divide-y border-t">
@@ -377,6 +380,11 @@ function ClaudeImport({ request, onDone, onError }: { request: Request; onDone: 
               </section>
             );
           })}
+          {/* Suggestions for every group's "for" box: global, then each project (shown by name, filled in as its slug). */}
+          <datalist id="cc-import-projects">
+            <option value="global">Every project</option>
+            {[...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => <option key={p.slug} value={p.slug}>{p.client ? `${p.name} (${p.client})` : p.name}</option>)}
+          </datalist>
           <div className="sticky bottom-0 -mx-3 -mb-3 flex flex-wrap items-center gap-2 rounded-b-xl border-t bg-card px-3 py-2">
             <Button size="sm" disabled={!picked.size || busy || askHooks} onClick={() => void install()}>{busy && <Loader2 className="size-3.5 animate-spin" />}Import {picked.size || ''}</Button>
             <span className="text-xs text-muted-foreground">Each group goes where its box says (empty = global).</span>

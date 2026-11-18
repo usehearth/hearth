@@ -70,7 +70,11 @@ const request = async <T,>(method: string, params?: { source?: string; install?:
 };
 
 const dir: DirectoryState = {
-  state: 'ready', agent: 'Monolith', groups: [], refresh: () => {}, cards: [], answer: async () => {}, extensions: ['schedules', 'usage', 'audit', 'extensions', 'providers'],
+  state: 'ready', agent: 'Monolith', groups: [
+    { project: 'cbg-uk-valsparpaint', name: 'CBG-UK-ValsparPaint', cwd: 'C:/p/valspar', threads: [], client: 'Enjoy' },
+    { project: 'historic-scotland', name: 'historic-scotland', cwd: 'C:/p/hs', threads: [], client: 'Storm' },
+    { project: 'compdev-platform', name: 'compdev-platform', cwd: 'C:/p/compdev', threads: [] },
+  ], refresh: () => {}, cards: [], answer: async () => {}, extensions: ['schedules', 'usage', 'audit', 'extensions', 'providers'],
   clients: [], workDevice: false, admin: true, importedGroups: [], request: request as never,
 };
 
