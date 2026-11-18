@@ -32,24 +32,43 @@ function blocks(m: any): any[] {
   return out;
 }
 
-export interface ChatExport { account: string; label: string; units: LocalUnit[]; bytes: Map<string, Uint8Array>; skipped: number }
+/** A claude.ai memory file (memories-000.zip): what claude.ai has learned about the owner, as markdown. */
+export interface MemoryFile { path: string; content: string; updated_at?: string | null }
+export interface ChatExport { account: string; label: string; units: LocalUnit[]; bytes: Map<string, Uint8Array>; skipped: number; memories: MemoryFile[] }
 
-/** Read an export zip (or its conversations.json alone) into uploadable conversations. */
+/** Two parts of one account's export (claude.ai now sends conversations-000.zip, memories-000.zip, ... separately). */
+export function mergeExports(a: ChatExport, b: ChatExport): ChatExport {
+  const ids = new Set(b.units.map((u) => u.id));
+  const paths = new Set(b.memories.map((m) => m.path));
+  return {
+    account: a.account, label: [a.label, b.label].filter((v, i, all) => all.indexOf(v) === i).join(' + '),
+    units: [...a.units.filter((u) => !ids.has(u.id)), ...b.units], bytes: new Map([...a.bytes, ...b.bytes]),
+    skipped: a.skipped + b.skipped, memories: [...a.memories.filter((m) => !paths.has(m.path)), ...b.memories],
+  };
+}
+
+/** Read an export zip (the old single zip, or one of the new conversations-000 / memories-000 / projects-000 zips), or its conversations.json alone. */
 export async function readClaudeExport(file: { name: string; arrayBuffer(): Promise<ArrayBuffer> }): Promise<ChatExport> {
   const raw = new Uint8Array(await file.arrayBuffer());
   let files: Record<string, Uint8Array>;
   if (/\.json$/i.test(file.name)) files = { 'conversations.json': raw };
   else {
-    try { files = unzipSync(raw, { filter: (f) => /(^|\/)(conversations|projects|users)\.json$/.test(f.name) }); }
+    try { files = unzipSync(raw, { filter: (f) => /(^|\/)(conversations|projects|users)\.json$/.test(f.name) || /(^|\/)(memories|projects)\/[^/]+\.json$/.test(f.name) }); }
     catch { throw new Error('That file is not a zip. Choose the export zip claude.ai emailed you.'); }
   }
   const pick = (n: string) => { const k = Object.keys(files).find((x) => x === n || x.endsWith('/' + n)); return k ? JSON.parse(strFromU8(files[k])) : null; };
-  const conversations = pick('conversations.json');
-  if (!Array.isArray(conversations)) throw new Error('No conversations.json in that file. Choose the export zip from claude.ai.');
-  const projects = new Map<string, string>((pick('projects.json') ?? []).filter((p: any) => p?.uuid).map((p: any) => [p.uuid, String(p.name ?? '').trim()]));
+  const each = (dir: string) => Object.keys(files).filter((k) => new RegExp(`(^|/)${dir}/[^/]+\\.json$`).test(k)).map((k) => { try { return JSON.parse(strFromU8(files[k])); } catch { return null; } }).filter(Boolean);
+  const memoryDocs = each('memories');
+  const memories: MemoryFile[] = memoryDocs.flatMap((d: any) => (Array.isArray(d?.memory_files) ? d.memory_files : []))
+    .filter((m: any) => typeof m?.path === 'string' && typeof m?.content === 'string')
+    .map((m: any) => ({ path: m.path, content: m.content, updated_at: m.updated_at ?? null }));
+  const conversations = pick('conversations.json') ?? (memories.length || each('projects').length ? [] : null);
+  if (!Array.isArray(conversations)) throw new Error('No conversations.json in that file. Choose conversations-000.zip (or the export zip) from claude.ai.');
+  // Project names: the old projects.json, or the new projects/<uuid>.json files.
+  const projects = new Map<string, string>([...(pick('projects.json') ?? []), ...each('projects')].filter((p: any) => p?.uuid).map((p: any) => [p.uuid, String(p.name ?? '').trim()]));
   const users = pick('users.json') ?? [];
   // One folder per account, so two accounts' exports never clash and a newer export replaces only what changed.
-  const accountKey = users[0]?.uuid ?? conversations[0]?.account?.uuid ?? file.name;
+  const accountKey = users[0]?.uuid ?? conversations[0]?.account?.uuid ?? memoryDocs[0]?.account_uuid ?? file.name;
   const account = (await sha(String(accountKey))).slice(0, 10);
   const folder = `claude-ai-${account}`;
   const units: LocalUnit[] = [];
@@ -82,5 +101,5 @@ export async function readClaudeExport(file: { name: string; arrayBuffer(): Prom
       files: [{ rel, size: body.length }], from: `claude.ai export ${file.name}`,
     });
   }
-  return { account, label: `claude.ai export (${file.name})`, units, bytes, skipped };
+  return { account, label: `claude.ai export (${file.name})`, units, bytes, skipped, memories };
 }

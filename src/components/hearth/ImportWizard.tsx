@@ -7,7 +7,7 @@ import { Check, CircleAlert, FileArchive, FolderSearch, HardDrive, Loader2, Lock
 import { Button } from '@/components/ui/button';
 import { errorText } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
-import { readClaudeExport, type ChatExport } from '@/lib/claudeai';
+import { mergeExports, readClaudeExport, type ChatExport } from '@/lib/claudeai';
 import { canScanThisMachine, defaultChoices, localReader, localSources, memoryReader, mergeUnits, previewOf, scanLocal, upload,
   type Begun, type Choice, type LocalSource, type LocalUnit, type Preview, type Progress, type Reader } from '@/lib/importer';
 
@@ -28,6 +28,7 @@ export function ImportWizard({ request, serverName, admin, onDone }: { request: 
   const [exports, setExports] = useState<ChatExport[]>([]);
   const [scan, setScan] = useState<{ done: number; total: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [choices, setChoices] = useState<Record<string, Choice>>({});
   const [pool, setPool] = useState('');
@@ -45,7 +46,8 @@ export function ImportWizard({ request, serverName, admin, onDone }: { request: 
   const addExport = async (files: FileList | null) => {
     setErr(null);
     for (const f of Array.from(files ?? [])) {
-      try { const x = await readClaudeExport(f); setExports((cur) => [...cur.filter((c) => c.account !== x.account), x]); }
+      // The same account's parts (conversations-000.zip, memories-000.zip) add up; a newer copy of a part replaces the old.
+      try { const x = await readClaudeExport(f); setExports((cur) => { const same = cur.find((c) => c.account === x.account); return [...cur.filter((c) => c.account !== x.account), same ? mergeExports(same, x) : x]; }); }
       catch (e) { setErr(`${f.name}: ${errorText(e)}`); }
     }
     if (fileIn.current) fileIn.current.value = '';
@@ -59,7 +61,11 @@ export function ImportWizard({ request, serverName, admin, onDone }: { request: 
       if (picked.size) { const r = await scanLocal([...picked], (done, total) => setScan({ done, total })); home = r.home; lists.push({ units: r.units, reader: localReader }); }
       for (const x of exports) lists.push({ units: x.units, reader: memoryReader(x.bytes) });
       units.current = mergeUnits(lists);
-      if (!units.current.size) { setErr('No conversations found in what you picked.'); return; }
+      if (!units.current.size) {
+        // Only memories picked (a newer memories-000.zip): save them, nothing to review.
+        if (exports.some((x) => x.memories.length)) { const n = await saveMemories(); setErr(null); setNote(`Saved ${n} claude.ai memories to the knowledge hub.`); return; }
+        setErr('No conversations found in what you picked.'); return;
+      }
       const p = await previewOf(request, [...units.current.values()].map((v) => v.unit), home);
       setPreview(p); setChoices(defaultChoices(p)); setPool(p.defaultPool); setStep('review');
     } catch (e) { setErr(errorText(e)); } finally { setScan(null); }
@@ -72,9 +78,17 @@ export function ImportWizard({ request, serverName, admin, onDone }: { request: 
       const begun = await request<Begun>('_hearth/import/begin', { token: preview.token, choices, pool });
       setStep('import'); stopped.current = false;
       const fin = await upload(request, begun, units.current, setProgress, () => stopped.current);
-      setResult({ begun, report: fin.report }); setStep('done');
+      const memories = await saveMemories();
+      setResult({ begun, report: { ...fin.report, memories } }); setStep('done');
     } catch (e) { setErr(errorText(e)); }
   };
+
+  /** claude.ai memories go to the knowledge hub as shared notes (updated in place on a re-run). */
+  async function saveMemories(): Promise<number> {
+    let n = 0;
+    for (const x of exports) if (x.memories.length) n += (await request<{ memories: number }>('_hearth/import/memories', { account: x.account, files: x.memories })).memories;
+    return n;
+  }
 
   const current = STEPS.findIndex((s) => s.id === step);
   return (
@@ -90,6 +104,7 @@ export function ImportWizard({ request, serverName, admin, onDone }: { request: 
           ))}
         </ol>
         {err && <p className="mt-4 flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive"><CircleAlert className="mt-0.5 size-4 shrink-0" />{err}</p>}
+        {note && <p className="mt-4 flex items-start gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm"><Check className="mt-0.5 size-4 shrink-0 text-primary" />{note}</p>}
         {!admin && <p className="mt-4 rounded-lg border bg-card px-3 py-2 text-sm">Only an admin device can import. Tick "admin device" for this device on the server's page, then come back.</p>}
         {admin && info && !info.available && <p className="mt-4 rounded-lg border bg-card px-3 py-2 text-sm">This server has no place to keep imported history yet (its import store isn't set up).</p>}
 
@@ -113,7 +128,7 @@ export function ImportWizard({ request, serverName, admin, onDone }: { request: 
               <div className="flex items-center gap-2 border-b px-4 py-2.5 text-sm font-medium"><FileArchive className="size-4 text-muted-foreground" />claude.ai chats (also the desktop app's Chat tab)</div>
               <div className="space-y-2 px-4 py-3 text-sm">
                 <p className="text-muted-foreground">On claude.ai: Settings, Privacy, Export data. Add the zip it emails you. One per account.</p>
-                {exports.map((x) => <p key={x.account} className="flex items-center gap-2"><Check className="size-3.5 text-primary" />{x.label}: {x.units.length} chats{x.skipped ? ` (${x.skipped} empty skipped)` : ''}</p>)}
+                {exports.map((x) => <p key={x.account} className="flex items-center gap-2"><Check className="size-3.5 text-primary" />{x.label}: {x.units.length} chats{x.skipped ? ` (${x.skipped} empty skipped)` : ''}{x.memories.length ? `, ${x.memories.length} memories` : ''}</p>)}
                 <input ref={fileIn} type="file" accept=".zip,.json" multiple className="hidden" onChange={(e) => void addExport(e.target.files)} />
                 <Button variant="outline" size="sm" onClick={() => fileIn.current?.click()}><Upload className="size-3.5" />Add an export</Button>
               </div>
@@ -147,7 +162,7 @@ export function ImportWizard({ request, serverName, admin, onDone }: { request: 
         {step === 'done' && result && (
           <section className="mt-5 space-y-3">
             <p className="flex items-center gap-2 text-sm"><Check className="size-4 text-primary" />
-              Imported {result.report?.uploaded ?? 0} conversations{result.begun.created.length ? `, made ${result.begun.created.length} projects` : ''}{result.begun.refiled ? `, moved ${result.begun.refiled} to their project` : ''}{result.begun.unchanged ? `; ${result.begun.unchanged} were already here` : ''}.</p>
+              Imported {result.report?.uploaded ?? 0} conversations{result.begun.created.length ? `, made ${result.begun.created.length} projects` : ''}{result.begun.refiled ? `, moved ${result.begun.refiled} to their project` : ''}{result.begun.unchanged ? `; ${result.begun.unchanged} were already here` : ''}.{result.report?.memories ? ` Saved ${result.report.memories} claude.ai memories to the knowledge hub.` : ''}</p>
             {(progress?.failed.length ?? 0) > 0 && (
               <details className="rounded-lg border bg-card px-3 py-2 text-sm"><summary className="cursor-pointer">{progress!.failed.length} not imported</summary>
                 <ul className="mt-2 space-y-1 text-xs text-muted-foreground">{progress!.failed.slice(0, 50).map((f, i) => <li key={i}>{f.title}: {f.error}</li>)}</ul></details>
