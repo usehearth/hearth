@@ -41,12 +41,19 @@ const extensions = [
   { id: 'e1', kind: 'command', name: 'standup', scope: 'global', description: 'Three lines on yesterday, today and blockers', enabled: true, source: 'owner' },
   { id: 'e2', kind: 'skill', name: 'release-notes', scope: 'todo-api', description: 'Write release notes from merged PRs', enabled: true, source: 'claude-code:skills' },
 ];
+// Shaped like a real ~/.claude: your own items (source "user"), then plugins ("plugin:<name>"), some of them big.
+const ccItem = (source: string, kind: string, name: string, description: string | null, extra: object = {}) =>
+  ({ key: `${source}/${kind}/${name}`, source, kind, name, description, bytes: 1200, files: 0, importable: true, ...extra });
 const ccItems = [
-  { key: 'skill:review', source: 'skills', kind: 'skill', name: 'review', description: 'Review a diff for bugs', bytes: 2100, files: 1, importable: true },
-  { key: 'command:ship', source: 'commands', kind: 'command', name: 'ship', description: 'Tag and push a release', bytes: 640, files: 0, importable: true },
-  { key: 'agent:tester', source: 'agents', kind: 'agent', name: 'tester', description: 'Writes and runs tests', bytes: 1300, files: 0, importable: true },
-  { key: 'hook:format', source: 'settings', kind: 'hook', name: 'format on edit', description: 'Runs the formatter after each edit', bytes: 120, files: 0, importable: true },
-  { key: 'skill:acme-deploy', source: 'skills', kind: 'skill', name: 'acme-deploy', description: null, bytes: 900, files: 0, importable: false, held: ['names-a-client'] },
+  ...['scout', 'grunt', 'reviewer', 'test-runner', 'test-writer', 'docs-writer'].map((n) => ccItem('user', 'agent', n, `The ${n} subagent`)),
+  ...['code-walkthrough', 'graphify', 'home-infra', 'hf-cli'].map((n) => ccItem('user', 'skill', n, `Your ${n} skill`)),
+  ccItem('user', 'command', 'tars', 'Set TARS personality dials'),
+  ccItem('user', 'hook', 'state-reminder', 'Asks for a STATE.md update after work changes'),
+  ccItem('user', 'skill', 'acme-deploy', null, { importable: false, held: ['names-a-client'] }),
+  ...Array.from({ length: 35 }, (_, i) => ccItem('plugin:claude-seo', 'skill', `seo-${i + 1}`, 'An SEO analysis skill')),
+  ...Array.from({ length: 22 }, (_, i) => ccItem('plugin:claude-seo', 'agent', `seo-agent-${i + 1}`, 'An SEO subagent')),
+  ...Array.from({ length: 12 }, (_, i) => ccItem('plugin:ponytail', 'skill', `ponytail-${i + 1}`, 'Lazy senior dev mode')),
+  ...Array.from({ length: 13 }, (_, i) => ccItem('plugin:umbraco-mcp-skills', 'skill', `umbraco-${i + 1}`, 'Umbraco MCP skill')),
 ];
 const providers = [
   { name: 'meridian', kind: 'anthropic', base_url: 'http://192.0.2.10:3456', has_key: true, models: { default: 'claude-sonnet-5-5', strong: 'claude-opus-5-5', fast: 'claude-haiku-5-5' }, priority: 10, enabled: true, sensitive_ok: true, status: 'ok', last_ok: ago(0.1), last_error: null },

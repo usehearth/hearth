@@ -1,7 +1,7 @@
 // Settings sections that read the server's own records (each shown only when the server has the extension):
 // the audit log (`audit`, admin devices). Nothing here is chat content.
-import { useCallback, useEffect, useState } from 'react';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ChevronRight, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { errorText } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
@@ -286,7 +286,9 @@ const HELD: Record<string, string> = { 'names-a-client': 'names a client' };
 function ClaudeImport({ request, onDone, onError }: { request: Request; onDone: () => void; onError: (m: string) => void }) {
   const [items, setItems] = useState<CcItem[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [scope, setScope] = useState('global');
+  // Where each group goes: "global" or a project slug (Umbraco skills to the Umbraco repos, your own agents everywhere).
+  const [scopes, setScopes] = useState<Record<string, string>>({});
+  const [open, setOpen] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [askHooks, setAskHooks] = useState(false);
   const [done, setDone] = useState<string | null>(null);
@@ -295,50 +297,89 @@ function ClaudeImport({ request, onDone, onError }: { request: Request; onDone: 
     try {
       const r = await request<{ items: CcItem[] }>('_hearth/extensions/import', { source: 'claude-code' });
       setItems(r.items);
-      setPicked(new Set(r.items.filter((i) => i.importable && i.kind !== 'hook').map((i) => i.key)));
+      // Your own items start ticked; a plugin's start unticked and folded, so a big plugin is one decision, not 50.
+      setPicked(new Set(r.items.filter((i) => i.importable && i.kind !== 'hook' && i.source === 'user').map((i) => i.key)));
+      setOpen(new Set(['user']));
+      setScopes({});
     } catch (e) { onError(errorText(e)); } finally { setBusy(false); }
   };
+  const groups = useMemo(() => {
+    const m = new Map<string, CcItem[]>();
+    for (const i of items ?? []) m.set(i.source, [...(m.get(i.source) ?? []), i]);
+    return [...m.entries()].sort(([a], [b]) => (a === 'user' ? -1 : b === 'user' ? 1 : a.localeCompare(b)));
+  }, [items]);
+  const groupName = (src: string) => (src === 'user' ? 'Your own (~/.claude)' : src.startsWith('plugin:') ? `Plugin: ${src.slice(7)}` : src);
   const hooksPicked = !!items?.some((i) => i.kind === 'hook' && picked.has(i.key));
   const install = async (confirmed = false) => {
     if (hooksPicked && !confirmed) { setAskHooks(true); return; }
     setAskHooks(false); setBusy(true);
     try {
-      const picks = [...picked].map((key) => ({ key, scope: scope.trim() || 'global' }));
+      const src = new Map((items ?? []).map((i) => [i.key, i.source]));
+      const picks = [...picked].map((key) => ({ key, scope: (scopes[src.get(key) ?? ''] ?? '').trim() || 'global' }));
       const r = await request<{ saved: string[]; skipped: string[] }>('_hearth/extensions/import', { source: 'claude-code', install: true, picks, confirmHooks: hooksPicked });
       setDone(`Imported ${r.saved.length}${r.skipped.length ? `, left out ${r.skipped.length}: ${r.skipped.join(', ')}` : ''}.`);
       setItems(null); onDone();
     } catch (e) { onError(errorText(e)); } finally { setBusy(false); }
   };
   const toggle = (k: string) => setPicked((cur) => { const n = new Set(cur); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const toggleGroup = (list: CcItem[], on: boolean) => setPicked((cur) => {
+    const n = new Set(cur);
+    for (const i of list) if (i.importable && i.kind !== 'hook') { if (on) n.add(i.key); else n.delete(i.key); }
+    return n;
+  });
+  const fold = (src: string) => setOpen((cur) => { const n = new Set(cur); if (n.has(src)) n.delete(src); else n.add(src); return n; });
   return (
     <div className="mb-4 rounded-xl border bg-card p-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="font-medium">Import from Claude Code</div>
-          <p className="text-xs text-muted-foreground">Your skills, slash commands, subagents, output styles and hooks, read from Claude Code on the work runner.</p>
+          <p className="text-xs text-muted-foreground">Your skills, slash commands, subagents, output styles and hooks, read from Claude Code on the work runner. Grouped by where they come from: your own, then each plugin.</p>
         </div>
         <Button size="sm" variant="outline" disabled={busy} onClick={() => void look()}>{busy && !items && <Loader2 className="size-3.5 animate-spin" />}{items ? 'Look again' : 'Look'}</Button>
       </div>
       {items && !items.length && <p className="mt-2 text-xs text-muted-foreground">Claude Code has nothing Hearth can import on that runner.</p>}
       {items && items.length > 0 && (
-        <div className="mt-2 space-y-2">
-          <ul className="max-h-72 divide-y overflow-y-auto rounded-lg border">
-            {items.map((i) => (
-              <li key={i.key} className="flex items-start gap-2 px-2 py-1.5">
-                <input type="checkbox" className="mt-0.5 size-4 accent-primary" aria-label={`Import ${i.name}`} disabled={!i.importable}
-                  checked={picked.has(i.key)} onChange={() => toggle(i.key)} />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate"><span className="text-xs text-muted-foreground">{KIND_LABEL[i.kind] ?? i.kind}</span> {i.name}</div>
-                  {i.importable
-                    ? i.description && <div className="truncate text-xs text-muted-foreground">{i.description}</div>
-                    : <div className="text-xs text-muted-foreground">Stays on the laptop: {(i.held ?? []).map((h) => HELD[h] ?? `looks like it holds a ${h}`).join(', ') || 'not readable'}</div>}
+        <div className="mt-3 space-y-2">
+          {groups.map(([src, list]) => {
+            const usable = list.filter((i) => i.importable && i.kind !== 'hook');
+            const on = usable.filter((i) => picked.has(i.key)).length;
+            const isOpen = open.has(src);
+            return (
+              <section key={src} className="rounded-lg border">
+                <div className="flex flex-wrap items-center gap-2 px-2 py-1.5">
+                  <input type="checkbox" className="size-4 accent-primary" aria-label={`Import all of ${groupName(src)}`} disabled={!usable.length}
+                    checked={!!usable.length && on === usable.length} ref={(el) => { if (el) el.indeterminate = on > 0 && on < usable.length; }}
+                    onChange={() => toggleGroup(list, on < usable.length)} />
+                  <button type="button" onClick={() => fold(src)} aria-expanded={isOpen} className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+                    <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', isOpen && 'rotate-90')} />
+                    <span className="truncate font-medium">{groupName(src)}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{on}/{list.length}</span>
+                  </button>
+                  <input value={scopes[src] ?? ''} onChange={(e) => setScopes((s) => ({ ...s, [src]: e.target.value }))} aria-label={`For (${groupName(src)})`}
+                    placeholder="global" title="global, or a project's slug to give these to one project" className={cn(field, 'h-7 w-36 px-2 text-xs')} />
                 </div>
-              </li>
-            ))}
-          </ul>
-          <div className="flex flex-wrap items-center gap-2">
-            <input value={scope} onChange={(e) => setScope(e.target.value)} aria-label="For" placeholder="global or a project" className={cn(field, 'h-8 w-40 px-2 text-xs')} />
+                {isOpen && (
+                  <ul className="divide-y border-t">
+                    {list.map((i) => (
+                      <li key={i.key} className="flex items-start gap-2 px-2 py-1.5 pl-8">
+                        <input type="checkbox" className="mt-0.5 size-4 accent-primary" aria-label={`Import ${i.name}`} disabled={!i.importable}
+                          checked={picked.has(i.key)} onChange={() => toggle(i.key)} />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate"><span className="text-xs text-muted-foreground">{KIND_LABEL[i.kind] ?? i.kind}</span> {i.name}</div>
+                          {i.importable
+                            ? i.description && <div className="truncate text-xs text-muted-foreground">{i.description}</div>
+                            : <div className="text-xs text-muted-foreground">Stays on the laptop: {(i.held ?? []).map((h) => HELD[h] ?? `looks like it holds a ${h}`).join(', ') || 'not readable'}</div>}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            );
+          })}
+          <div className="sticky bottom-0 -mx-3 -mb-3 flex flex-wrap items-center gap-2 rounded-b-xl border-t bg-card px-3 py-2">
             <Button size="sm" disabled={!picked.size || busy || askHooks} onClick={() => void install()}>{busy && <Loader2 className="size-3.5 animate-spin" />}Import {picked.size || ''}</Button>
+            <span className="text-xs text-muted-foreground">Each group goes where its box says (empty = global).</span>
           </div>
           {askHooks && <ConfirmLine question="Hooks run shell commands as the agent on every matching tool call. Import the ticked hooks?"
             yes="Import with hooks" no="Not yet" destructive={false} busy={busy} onYes={() => void install(true)} onNo={() => setAskHooks(false)} />}
