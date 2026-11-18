@@ -45,6 +45,8 @@ export default function App() {
   // Phones: the sidebar is a drawer, closed whenever something is picked in it.
   const [navOpen, setNavOpen] = useState(false);
   const go = useCallback((v: View) => { setView(v); setNavOpen(false); }, []);
+  // Each click on "Import Claude history" starts the wizard afresh (a finished run stays on its Done page otherwise).
+  const [importRun, setImportRun] = useState(0);
   const { dark, toggle } = useTheme();
   // Thread management (server extension `threads`): search, the archived list, a menu on each thread.
   const [query, setQuery] = useState('');
@@ -216,7 +218,7 @@ export default function App() {
             </button>
           )}
           {dir.state === 'ready' && dir.admin && dir.extensions.includes('import') && (
-            <button onClick={() => go('import')} aria-current={view === 'import' ? 'page' : undefined}
+            <button onClick={() => { setImportRun((n) => n + 1); go('import'); }} aria-current={view === 'import' ? 'page' : undefined}
               className={cn('mx-3 mb-1 flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] hover:bg-sidebar-accent', view === 'import' && 'bg-sidebar-accent font-medium')}>
               <Download className="size-4 text-muted-foreground" /><span>Import Claude history</span>
             </button>
@@ -328,7 +330,7 @@ export default function App() {
             <div className="min-h-0 flex-1"><ImportedThread key={imported.id} request={dir.request} summary={imported} onContinue={continued} /></div>
           )}
           {view === 'import' && dir.state === 'ready' && (
-            <div className="min-h-0 flex-1"><ImportWizard request={dir.request} serverName={server?.name ?? 'your server'} admin={dir.admin}
+            <div className="min-h-0 flex-1"><ImportWizard key={importRun} request={dir.request} serverName={server?.name ?? 'your server'} admin={dir.admin}
               onDone={(p) => { dir.refresh(); if (p) openHistory({ project: p.slug, name: p.name }); else setView('thread'); }} /></div>
           )}
           {view === 'newproject' && dir.state === 'ready' && (
