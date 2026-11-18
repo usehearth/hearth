@@ -15,9 +15,16 @@ export type Request = <T = unknown>(method: string, params?: unknown) => Promise
 const errText = (e: unknown) => (e as Error)?.message ?? String(e);
 
 /** The "…" menu on a thread row. Main threads can be renamed by nobody and never archived or deleted, so get none. */
-export function ThreadMenu({ t, request, onError }: { t: ThreadItem; request: Request; onError: (m: string) => void }) {
+/**
+ * onChanged runs after a change lands on the server: the list refreshes, and a thread that is now gone (deleted) or out
+ * of the list (archived) is closed if it was open. Without it the sidebar kept a deleted thread, and deleting it again
+ * said "Resource not found".
+ */
+export function ThreadMenu({ t, request, onError, onChanged }: { t: ThreadItem; request: Request; onError: (m: string) => void;
+  onChanged?: (sessionId: string, change: 'deleted' | 'archived' | 'renamed' | 'pinned') => void }) {
   const [dialog, setDialog] = useState<'rename' | 'delete' | null>(null);
-  const call = (method: string, params: Record<string, unknown>) => request(method, { sessionId: t.sessionId, ...params }).catch((e) => onError(errText(e)));
+  const call = (method: string, params: Record<string, unknown>, change: 'archived' | 'pinned') =>
+    request(method, { sessionId: t.sessionId, ...params }).then(() => onChanged?.(t.sessionId, change), (e) => onError(errText(e)));
   return (
     <>
       <DropdownMenu.Root modal={false}>
@@ -31,15 +38,15 @@ export function ThreadMenu({ t, request, onError }: { t: ThreadItem; request: Re
         <DropdownMenu.Portal>
           <DropdownMenu.Content align="start" sideOffset={4} className="z-50 min-w-40 rounded-lg border bg-popover p-1 text-sm text-popover-foreground shadow-md">
             <Item icon={<Pencil className="size-3.5" />} onSelect={() => setDialog('rename')}>Rename</Item>
-            <Item icon={t.pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />} onSelect={() => void call('_hearth/thread/pin', { pinned: !t.pinned })}>{t.pinned ? 'Unpin' : 'Pin'}</Item>
-            <Item icon={<Archive className="size-3.5" />} onSelect={() => void call('_hearth/thread/archive', { archived: true })}>Archive</Item>
+            <Item icon={t.pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />} onSelect={() => void call('_hearth/thread/pin', { pinned: !t.pinned }, 'pinned')}>{t.pinned ? 'Unpin' : 'Pin'}</Item>
+            <Item icon={<Archive className="size-3.5" />} onSelect={() => void call('_hearth/thread/archive', { archived: true }, 'archived')}>Archive</Item>
             <DropdownMenu.Separator className="my-1 h-px bg-border" />
             <Item icon={<Trash2 className="size-3.5" />} danger onSelect={() => setDialog('delete')}>Delete…</Item>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
-      {dialog === 'rename' && <RenameDialog t={t} onClose={() => setDialog(null)} save={(title) => request('_hearth/thread/rename', { sessionId: t.sessionId, title })} />}
-      {dialog === 'delete' && <DeleteDialog t={t} onClose={() => setDialog(null)} remove={() => request('_hearth/thread/delete', { sessionId: t.sessionId })} />}
+      {dialog === 'rename' && <RenameDialog t={t} onClose={() => setDialog(null)} save={(title) => request('_hearth/thread/rename', { sessionId: t.sessionId, title }).then(() => onChanged?.(t.sessionId, 'renamed'))} />}
+      {dialog === 'delete' && <DeleteDialog t={t} onClose={() => setDialog(null)} remove={() => request('_hearth/thread/delete', { sessionId: t.sessionId }).then(() => onChanged?.(t.sessionId, 'deleted'))} />}
     </>
   );
 }
