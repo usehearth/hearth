@@ -49,6 +49,8 @@ export interface FakeServerOptions {
   /** `_hearth` extensions announced in `initialize`. */
   extensions?: string[];
   title?: string;
+  /** The import counts a receipt and takes skills and memories in the run (default). false: an older server. */
+  importReceipts?: boolean;
 }
 
 export const DEFAULT_KEY = 'test-device-key';
@@ -122,7 +124,10 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
   };
   /** Error replies sent (method and message), faults included. */
   const errors: { method: string; message: string }[] = [];
-  const imports = { runs: 0, files: new Map<string, number>() };
+  // The guided import (src/lib/importer.ts): what the app found, what arrived, and the receipts counted from that.
+  const imports = { runs: 0, files: new Map<string, number>(), inventory: null as any, committed: new Set<string>(), ext: new Set<string>(), mem: new Set<string>(),
+    receipts: [] as any[], decisions: {} as Record<string, { decision: string; at: string }> };
+  const receiptsOn = opts.importReceipts !== false;
   let connIds = 0;
   let newIds = 0;
   let cardIds = 0;
@@ -377,7 +382,8 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
       { id: 'x1', kind: 'command', name: 'standup', scope: 'global', description: 'Write a three-line standup', content: 'Write a standup: done, doing, blocked.', enabled: true, updated_at: iso(60) },
       { id: 'x2', kind: 'skill', name: 'house-style', scope: 'todo-api', description: 'How this project writes', content: 'Short sentences.', enabled: true, updated_at: iso(120) },
     ] }),
-    '_hearth/import/info': () => ({ available: true, conversations: 0, sealed: 0, legacy: 0, projects: 0, lastRun: null }),
+    '_hearth/import/info': () => ({ available: true, conversations: imports.committed.size, sealed: imports.committed.size, legacy: 0, projects: 0, lastRun: null,
+      ...(receiptsOn ? { receipts: true, hub: true, clientTerms: ['Globex'], decisions: imports.decisions, lastReceipt: imports.receipts.length ? summaryOf(imports.receipts[imports.receipts.length - 1]) : null } : {}) }),
     '_hearth/import/preview': (params) => {
       const units: any[] = params?.units ?? [];
       const bytes = units.reduce((n, u) => n + (u.bytes ?? 0), 0);
@@ -388,6 +394,8 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
       };
     },
     '_hearth/import/begin': (params) => {
+      for (const [t, d] of Object.entries(params?.remember ?? {})) { if (d) imports.decisions[t] = { decision: String(d), at: new Date().toISOString() }; else delete imports.decisions[t]; }
+      imports.committed.clear(); imports.ext.clear(); imports.mem.clear();
       const created = Object.values(params?.choices ?? {}).filter((c: any) => c?.action === 'new').map((c: any) => c.slug);
       imports.runs++;
       const pending = lastPreviewUnits;
@@ -399,13 +407,49 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
       imports.files.set(k, next);
       return { next };
     },
-    '_hearth/import/commit': () => ({ ok: true }),
-    '_hearth/import/finish': (params) => ({ runId: params.runId, report: { uploaded: lastPreviewUnits.length } }),
-    '_hearth/import/memories': (params) => ({ memories: (params?.files ?? []).length }),
+    '_hearth/import/commit': (params) => { imports.committed.add(String(params?.id)); return { ok: true }; },
+    '_hearth/import/extensions': (params) => {
+      const results: Record<string, unknown> = {};
+      for (const it of params?.items ?? []) { imports.ext.add(String(it.key)); results[it.key] = { outcome: 'kept', fresh: true }; }
+      return { results };
+    },
+    '_hearth/import/memories': (params) => {
+      for (const f of params?.files ?? []) imports.mem.add(`${params.account}:${f.path}`);
+      return { memories: (params?.files ?? []).length };
+    },
+    '_hearth/import/finish': (params) => {
+      const report = { uploaded: imports.committed.size };
+      if (!receiptsOn) return { runId: params.runId, report };
+      const receipt = receiptOf(params.runId);
+      imports.receipts.push(receipt);
+      return { runId: params.runId, report, receipt };
+    },
+    '_hearth/import/receipts': () => ({ receipts: [...imports.receipts].reverse().map(summaryOf) }),
+    '_hearth/import/receipt': (params) => ({ receipt: imports.receipts.find((r) => r.runId === Number(params?.runId)) ?? imports.receipts[imports.receipts.length - 1] }),
   };
+
+  /** A receipt counted from what arrived here: the same shape the real server counts from its store. */
+  function receiptOf(runId: number) {
+    const inv = imports.inventory ?? { sources: [], items: [] };
+    const zero = () => ({ found: 0, kept: 0, here: 0, notKept: 0 });
+    const sources = new Map<string, any>(inv.sources.map((x: any) => [x.id, { ...x, detail: x.detail ?? null, ...zero(), byKind: {}, notKeptItems: [], notes: [] }]));
+    const totals = zero();
+    for (const i of inv.items) {
+      const s = sources.get(i.source);
+      const arrived = i.kind === 'conversation' || i.kind === 'chat' ? imports.committed.has(i.id) : i.kind === 'memory' ? imports.mem.has(i.id) : imports.ext.has(i.id);
+      const outcome = i.reason ? 'notKept' : i.dupOf ? 'here' : arrived ? 'kept' : 'notKept';
+      for (const c of [s, s.byKind[i.kind] ??= zero(), totals]) { c.found++; c[outcome]++; }
+      if (outcome === 'notKept') s.notKeptItems.push({ kind: i.kind, title: i.title, reason: i.reason ?? 'failed', detail: i.detail ?? (i.reason ? null : 'it did not arrive') });
+    }
+    const last = imports.receipts[imports.receipts.length - 1];
+    return { v: 1, runId, at: new Date().toISOString(), by: 'Test device', totals, sources: [...sources.values()], fresh: totals.kept, changed: 0,
+      sinceLast: last ? { runId: last.runId, at: last.at, new: totals.kept, changed: 0 } : null, check: { ok: true, problems: [] } };
+  }
+  const summaryOf = (r: any) => ({ runId: r.runId, at: r.at, by: r.by, totals: r.totals, sinceLast: r.sinceLast, fresh: r.fresh, changed: r.changed, ok: r.check.ok,
+    sources: r.sources.map((x: any) => ({ id: x.id, kind: x.kind, label: x.label, found: x.found, kept: x.kept, here: x.here, notKept: x.notKept })) });
   let lastPreviewUnits: any[] = [];
   const preview = methods['_hearth/import/preview'];
-  methods['_hearth/import/preview'] = (params, c, id) => { lastPreviewUnits = params?.units ?? []; return preview(params, c, id); };
+  methods['_hearth/import/preview'] = (params, c, id) => { lastPreviewUnits = params?.units ?? []; imports.inventory = params?.inventory ?? null; return preview(params, c, id); };
 
   async function handle(c: Conn, raw: string) {
     if (c.silent) return; // half-open: what the client sends goes nowhere
