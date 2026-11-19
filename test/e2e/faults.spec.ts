@@ -120,6 +120,17 @@ test.describe('what is typed survives', () => {
   });
 });
 
+test('switching away from a thread that is still opening shows no error', async ({ page, fake }) => {
+  knownFailure('N2: the pane left behind disposes its client mid-open, and "AcpClient disposed" lands in the shared error banner');
+  fake.setDelay(800); // every reply takes 0.8 s, so the main thread is still opening when the switch comes
+  await connect(page, fake, { waitForThread: false });
+  await expect.poll(() => fake.callsOf('session/load').length).toBeGreaterThan(0); // the main thread has started opening
+  await threadRow(page, 'Run the tests').click();
+  await expect(assistantMessages(page).last()).toContainText('0 tests ran');
+  await page.waitForTimeout(500);
+  await expect(errorBanner(page)).toBeHidden();
+});
+
 test('a permission answered on another device stops asking here', async ({ page, fake }) => {
   knownFailure('AcpClient.ts: the server withdraws its request with $/cancel_request, which the client ignores, so the buttons stay live');
   await connect(page, fake);

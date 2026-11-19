@@ -8,6 +8,7 @@ npx playwright install chromium   # once
 npx playwright test               # all journeys and fault drills (starts Vite on port 5191)
 npx playwright test --ui          # watch them run
 E2E_IGNORE_KNOWN=1 npx playwright test test/e2e/faults.spec.ts   # see each known failure fail
+E2E_PORT=5193 npx playwright test # another Vite port, when 5191 is taken (another checkout running the tests)
 ```
 
 ## What is here
