@@ -1,11 +1,12 @@
 // A card: something the agent or its workers need from you (a question, a merge approval, a permission). One look for
 // all kinds; answered from any window, first answer wins. Once answered it greys out with who answered.
 import { useState } from 'react';
-import { Check, CircleHelp, GitMerge, Loader2, Send, ShieldQuestion, TriangleAlert, X } from 'lucide-react';
+import { Check, CircleHelp, GitMerge, ListChecks, Loader2, Send, ShieldQuestion, TriangleAlert, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { type Card, type CardAnswer, decidedLine, errorText } from '@/lib/hearth';
+import { type Card, type CardAnswer, cardPlan, decidedLine, errorText } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
 import { FormQuestion } from '@/components/hearth/FormQuestion';
+import { Markdown } from '@/components/hearth/Markdown';
 
 const ICON: Record<string, typeof CircleHelp> = { question: CircleHelp, review_merge: GitMerge, permission: ShieldQuestion, failure: TriangleAlert };
 
@@ -22,7 +23,9 @@ export function CardView({ card, onAnswer, where, compact, onOpenAdmin }: {
   const [err, setErr] = useState<string | null>(null);
   const [text, setText] = useState('');
   const open = card.status === 'open';
-  const Icon = ICON[card.kind] ?? CircleHelp;
+  // A plan to approve (Claude Code's "Ready to code?"): the plan itself is the card's body, as in Claude's app.
+  const plan = cardPlan(card);
+  const Icon = plan ? ListChecks : ICON[card.kind] ?? CircleHelp;
   const go = async (key: string, a: CardAnswer) => {
     setBusy(key); setErr(null);
     try { await onAnswer(a); } catch (e) { setErr(errorText(e)); } finally { setBusy(null); }
@@ -37,11 +40,16 @@ export function CardView({ card, onAnswer, where, compact, onOpenAdmin }: {
           <Icon className="size-3.5" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{card.label}</div>
+          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{plan ? 'Plan ready' : card.label}</div>
           {where && <div className="text-xs text-muted-foreground">{where}</div>}
-          <div className="mt-0.5 text-sm font-medium break-words">{card.title}</div>
-          {why && <p className="mt-1 max-h-40 overflow-y-auto text-sm whitespace-pre-wrap text-muted-foreground">{why}</p>}
-          {card.toolCall?.title && card.kind === 'permission' && (
+          <div className="mt-0.5 text-sm font-medium break-words">{plan ? card.title.replace(/^Allow:\s*/, '') : card.title}</div>
+          {why && !plan && <p className="mt-1 max-h-40 overflow-y-auto text-sm whitespace-pre-wrap text-muted-foreground">{why}</p>}
+          {plan && (
+            <div className={cn('mt-2 overflow-y-auto rounded-lg border bg-background px-3 py-2', compact ? 'max-h-80' : 'max-h-[60vh]')} aria-label="The plan">
+              <Markdown text={plan} />
+            </div>
+          )}
+          {card.toolCall?.title && card.kind === 'permission' && !plan && (
             <code className="mt-1.5 block truncate rounded-md bg-muted px-2 py-1 text-xs">{card.toolCall.title}</code>
           )}
           {!open && <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground"><Check className="size-3.5" />{decidedLine(card)}</div>}

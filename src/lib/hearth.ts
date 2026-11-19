@@ -22,7 +22,7 @@ export interface Card {
   createdAt?: string;
   decidedBy?: string | null;
   answer?: string | null;
-  toolCall?: { title?: string; rawInput?: unknown } | null;
+  toolCall?: { title?: string; kind?: string; rawInput?: unknown; content?: unknown; _meta?: unknown } | null;
   options?: { optionId: string; name: string; kind: string }[];
   /** An admin thread's card (a CLIProxyAPI change): answered only with this install's admin key (lib/admin.ts). */
   admin?: { requestId: string; line?: string; reason?: string };
@@ -82,6 +82,33 @@ export function planPref(sessionId: string | undefined): 'open' | 'closed' | und
 export function setPlanPref(sessionId: string | undefined, v: 'open' | 'closed') {
   if (!sessionId) return;
   try { localStorage.setItem(`hearth.plan.${sessionId}`, v); } catch { /* private mode */ }
+}
+
+/**
+ * The plan an agent asks you to approve before it starts work (Claude Code's ExitPlanMode, "Ready to code?"), as
+ * markdown. Claude Code's ACP adapter sends it as the call's input (`rawInput.plan`) and repeats it as the call's text
+ * content; either is enough. Anything else, including EnterPlanMode (also a `switch_mode` call), has no plan: null.
+ */
+export function planOf(call: { tool?: string; kind?: string; content?: unknown } | null | undefined, rawInput: unknown): string | null {
+  const fromInput = (rawInput as { plan?: unknown } | null)?.plan;
+  if (typeof fromInput === 'string' && fromInput.trim()) return fromInput.trim();
+  if (call?.tool !== 'ExitPlanMode') return null;
+  const text: string[] = [];
+  for (const c of Array.isArray(call.content) ? call.content : []) {
+    if ((c as { type?: string })?.type !== 'content') continue;
+    const inner = (c as { content?: unknown }).content;
+    for (const b of (Array.isArray(inner) ? inner : [inner]) as { type?: string; text?: unknown }[]) if (b?.type === 'text' && typeof b.text === 'string') text.push(b.text);
+  }
+  return text.join('\n').trim() || null;
+}
+
+/** A permission card's plan, when the card asks you to approve one (its tool call is the agent's plan). */
+export function cardPlan(card: Pick<Card, 'kind' | 'toolCall'>): string | null {
+  if (card.kind !== 'permission' || !card.toolCall) return null;
+  const tc = card.toolCall as { rawInput?: unknown; kind?: string; content?: unknown; _meta?: { claudeCode?: { toolName?: string } } };
+  // A permission request may not carry the engine's tool name; "Ready to code?" is the only switch_mode that asks.
+  const tool = tc._meta?.claudeCode?.toolName ?? (tc.kind === 'switch_mode' ? 'ExitPlanMode' : undefined);
+  return planOf({ tool, kind: tc.kind, content: tc.content }, tc.rawInput);
 }
 
 export function errorText(e: unknown): string {
