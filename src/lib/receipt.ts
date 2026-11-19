@@ -3,7 +3,7 @@
 // top, each reason, a file to save, and the copy the setup guide may read. Nothing here decides what was kept.
 
 export type ItemKind = 'conversation' | 'chat' | 'memory' | 'skill' | 'agent' | 'command' | 'output_style' | 'hook' | 'other';
-export type Reason = 'empty' | 'secret' | 'client' | 'unreadable' | 'unsupported' | 'skipped' | 'failed' | 'stopped' | 'no_store';
+export type Reason = 'empty' | 'secret' | 'client' | 'unreadable' | 'unsupported' | 'skipped' | 'failed' | 'stopped' | 'no_store' | 'not_loadable';
 export interface Counts { found: number; kept: number; here: number; notKept: number }
 export interface NotKept { kind: ItemKind; title: string; reason: Reason; detail?: string | null; client?: boolean; profile?: string | null }
 export interface SourceReceipt extends Counts {
@@ -34,6 +34,7 @@ export const REASON_WORDS: Record<Reason, string> = {
   empty: 'Empty', secret: 'Held back: looks like it holds a secret', client: 'Held back: names a client', unreadable: "Couldn't be read",
   unsupported: "Hearth can't keep this yet", skipped: 'You chose to leave it out', failed: "Didn't arrive (tried again next time)",
   stopped: 'Not sent: the import was stopped', no_store: 'This server has nowhere to keep it',
+  not_loadable: "Not where Claude Code loads it, so not brought (tick it to bring it)",
 };
 
 /** Does every count add up? (The server checks too; the app never shows a receipt that doesn't without saying so.) */

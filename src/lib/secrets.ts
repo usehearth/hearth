@@ -30,6 +30,22 @@ export function secretHits(text: string): string[] {
   return hits;
 }
 
+/** The lines that matched, with the secret part mostly hidden, so the owner can tell a real key from a false alarm. */
+export function secretLines(text: string, max = 3): string[] {
+  const out: string[] = [];
+  const lines = text.split(/\r?\n/);
+  const mask = (v: string) => (v.length <= 6 ? '•'.repeat(v.length) : `${v.slice(0, 3)}${'•'.repeat(Math.min(12, v.length - 5))}${v.slice(-2)}`);
+  for (let i = 0; i < lines.length && out.length < max; i++) {
+    const l = lines[i];
+    if (!secretHits(l).length) continue;
+    let shown = l;
+    for (const [, rx] of SECRET) shown = shown.replace(new RegExp(rx.source, rx.flags.includes('g') ? rx.flags : rx.flags + 'g'), (m) => mask(m));
+    shown = shown.replace(new RegExp(ASSIGNMENT.source, 'gi'), (m: string, v: string) => m.replace(v, mask(v)));
+    out.push(`line ${i + 1}: ${shown.trim().slice(0, 160)}`);
+  }
+  return out;
+}
+
 const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** A matcher for client names (whole words, any case), or null when there are none. Terms under 3 letters are ignored. */
 export function clientMatcher(terms: string[]): RegExp | null {

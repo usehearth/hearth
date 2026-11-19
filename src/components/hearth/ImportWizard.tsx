@@ -14,9 +14,10 @@ import { cn } from '@/lib/utils';
 import { readExports, type ChatExport, type ExportFile } from '@/lib/claudeai';
 import { filesFromDrop, filesFromInput } from '@/lib/dropfiles';
 import {
-  bringAcross, canScanThisMachine, configGroup, defaultChoices, gather, homeWords, localSources, previewOf, readConfig, scanLocal,
-  type Choice, type ConfigItem, type Gathered, type LocalSource, type LocalUnit, type Odd, type Preview, type Proposal, type RunProgress,
+  applyPlaceDecisions, bringAcross, canScanThisMachine, configGroup, dateRange, defaultChoices, gather, homeStats, homeWords, leftOutFrom, localSources, previewOf, readConfig, rememberOf, scanLocal,
+  type Choice, type ConfigItem, type Decisions, type Gathered, type LocalSource, type LocalUnit, type Odd, type Preview, type Proposal, type RunProgress,
 } from '@/lib/importer';
+import { clientMatcher, holdBack, secretLines } from '@/lib/secrets';
 import { oneLine, type Receipt } from '@/lib/receipt';
 import { setImportSnapshot, type ImportSnapshot } from '@/lib/importState';
 
@@ -36,7 +37,9 @@ const inputCls = 'w-full rounded-md border bg-background px-2 py-1 text-sm outli
 
 interface Info { available: boolean; conversations: number; clientTerms?: string[]; hub?: boolean; lastReceipt?: { runId: number; at: string } | null;
   /** The server counts a receipt and takes skills and the like in the same run (older servers don't). */
-  receipts?: boolean }
+  receipts?: boolean;
+  /** What earlier imports left out or brought anyway: this run starts from the same choices. */
+  decisions?: Decisions }
 
 export function ImportWizard({ request, serverName, admin, part, onDone, setup }: {
   request: Request; serverName: string; admin: boolean;
@@ -59,6 +62,10 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
   const [leftOutSources, setLeftOutSources] = useState<Set<string>>(new Set());
   const [leftOutGroups, setLeftOutGroups] = useState<Set<string>>(new Set());
   const [scopes, setScopes] = useState<Record<string, string>>({});
+  // Single skills and the like left out, and held-back or not-loadable ones brought anyway (their keys).
+  const [leftOutItems, setLeftOutItems] = useState<Set<string>>(new Set());
+  const [bring, setBring] = useState<Set<string>>(new Set());
+  const since = useMemo(() => leftOutFrom(info?.decisions).since, [info?.decisions]);
   const [gathered, setGathered] = useState<Gathered | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [planning, setPlanning] = useState(false);
@@ -79,7 +86,12 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
   // 1. What this server holds, and what is on this computer: read it all straight away (read-only).
   useEffect(() => {
     if (!admin) return;
-    request<Info>('_hearth/import/info').then(setInfo, (e) => setErr(errorText(e)));
+    request<Info>('_hearth/import/info').then((i) => {
+      // Start from what was left out (or brought anyway) last time: the same things stay out until changed.
+      const d = leftOutFrom(i.decisions);
+      setLeftOutSources(d.sources); setLeftOutGroups(d.configGroups); setLeftOutItems(d.items); setBring(d.bring);
+      setInfo(i);
+    }, (e) => setErr(errorText(e)));
     if (!canScanThisMachine) return;
     let live = true;
     (async () => {
@@ -104,7 +116,7 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
   const ready = !!info?.available && (!canScanThisMachine || scan !== null);
   useEffect(() => {
     if (!ready || !finding) return;
-    const g = gather({ sources: sources ?? [], scan, config, exports, clientTerms: info?.clientTerms ?? [], leftOut: { sources: leftOutSources, configGroups: leftOutGroups } });
+    const g = gather({ sources: sources ?? [], scan, config, exports, clientTerms: info?.clientTerms ?? [], leftOut: { sources: leftOutSources, configGroups: leftOutGroups, items: leftOutItems, bring, since } });
     setGathered(g);
     if (!g.inventory.items.length) { setPreview(null); setPhase('ready'); return; }
     let live = true;
@@ -113,12 +125,12 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
       if (!live) return;
       setPreview(p);
       // Keep the person's own changes for folders that are still there; suggestions for the rest.
-      setChoices((cur) => { const d = defaultChoices(p); for (const k of Object.keys(d)) if (cur[k]) d[k] = cur[k]; return d; });
+      setChoices((cur) => { const d = applyPlaceDecisions(defaultChoices(p), info?.decisions); for (const k of Object.keys(d)) if (cur[k]) d[k] = cur[k]; return d; });
       setPool((cur) => cur || p.defaultPool);
       setPhase((ph) => (ph === 'finding' ? 'ready' : ph));
     }, (e) => live && setErr(errorText(e))).finally(() => live && setPlanning(false));
     return () => { live = false; };
-  }, [ready, sources, scan, config, exports, leftOutSources, leftOutGroups, info?.clientTerms]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ready, sources, scan, config, exports, leftOutSources, leftOutGroups, leftOutItems, bring, info?.clientTerms]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (part === 'skills' && phase === 'ready') skillsRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, [part, phase]);
 
@@ -136,7 +148,9 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
     setErr(null); setPhase('importing'); stopped.current = false;
     try {
       const p = preview ?? await previewOf(request, [], scan?.home ?? '', gathered.inventory);
-      const r = await bringAcross({ request, preview: p, choices, pool, gathered, scopes, onProgress: setProgress, stop: () => stopped.current, receipts: info?.receipts === true });
+      const remember = rememberOf({ decisions: info?.decisions, leftOut: { sources: leftOutSources, configGroups: leftOutGroups, items: leftOutItems, bring },
+        sourceIds: [...(sources ?? []).map((x) => x.path), ...exports.map((x) => `claude-ai:${x.account}`)], choices, configKeys: config.map((c) => c.key), groups: [...new Set(config.map(configGroup))] });
+      const r = await bringAcross({ request, preview: p, choices, pool, gathered, scopes, onProgress: setProgress, stop: () => stopped.current, receipts: info?.receipts === true, remember });
       setReceipt(r.receipt); setCreated(r.begun.created);
       if (!r.receipt) setPlain(`Imported ${n(r.report?.uploaded ?? 0)} conversations${r.begun.unchanged ? `; ${n(r.begun.unchanged)} were already here` : ''}. This server is older: it can't count a receipt, and skills and the like need it updated. Update Hearth Server, then run this again: nothing will be sent twice.`);
       setPhase('done');
@@ -196,7 +210,7 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
               {canScanThisMachine && sources?.length === 0 && <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-muted-foreground">No Claude Code on this computer. If you use it on another computer, run Hearth there too.</p>}
               {!!sources?.length && (
                 <ul className="divide-y rounded-xl border bg-card">
-                  {sources.map((s) => <HomeRow key={s.path} s={s} />)}
+                  {sources.map((s) => <HomeRow key={s.path} s={s} units={scan?.units.filter((u) => u.from === s.path || u.also?.includes(s.path)) ?? null} />)}
                 </ul>
               )}
               {scanning && <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />{scanning.total ? `Reading conversations: ${n(scanning.done)} of ${n(scanning.total)}…` : 'Reading…'} Nothing is sent yet.</p>}
@@ -231,12 +245,14 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
             </section>
 
             <Summary gathered={gathered} preview={preview} choices={choices} info={info} planning={planning} busy={!gathered || planning || !!scanning || reading}
+              lastTime={Object.entries(info?.decisions ?? {}).filter(([, v]) => v.decision === 'leave-out').length}
               onGo={() => void go()} onReview={() => setPhase('review')} />
           </div>
         )}
 
         {phase === 'review' && preview && gathered && (
           <Review preview={preview} gathered={gathered} sources={homes} exports={exports} choices={choices} setChoices={setChoices} pool={pool} setPool={setPool}
+            leftOutItems={leftOutItems} setLeftOutItems={setLeftOutItems} bring={bring} setBring={setBring} since={since} clientTerms={info?.clientTerms ?? []}
             leftOutSources={leftOutSources} setLeftOutSources={setLeftOutSources} leftOutGroups={leftOutGroups} setLeftOutGroups={setLeftOutGroups}
             scopes={scopes} setScopes={setScopes} config={config} busy={planning} onBack={() => setPhase('ready')} onGo={() => void go()} />
         )}
@@ -269,15 +285,24 @@ function planOf(p: Preview, choices: Record<string, Choice>) {
   return { projects: targets.size, newProjects: fresh, clientProjects: client, conversationsNew: p.totals.new + p.totals.changed, conversationsAlreadyHere: p.totals.unchanged + p.totals.refile };
 }
 
-function HomeRow({ s }: { s: LocalSource }) {
+function HomeRow({ s, units }: { s: LocalSource; units: LocalUnit[] | null }) {
   const w = homeWords(s);
   const last = when(s.lastUsed);
+  // At a glance, to decide about old or test-looking homes: when, where most of it is, the commonest projects.
+  const st = units && units.length ? homeStats(units) : null;
+  const range = st ? dateRange(st.from, st.to) : null;
   return (
     <li className="px-3 py-2.5">
       <p className="text-sm font-medium">{w.title}</p>
       {w.who && <p className="text-xs text-muted-foreground">{w.who}</p>}
       {w.profiles && <p className="mt-0.5 text-xs">{w.profiles}</p>}
       <p className="mt-0.5 text-xs text-muted-foreground">{w.holds}{last ? ` · last used ${last}` : ''}</p>
+      {st && (
+        <p className="mt-0.5 text-xs" title={st.mostlyIn?.path}>
+          {count(st.count, 'conversation')}{range ? `, ${range}` : ''}{st.mostlyIn ? ` · ${st.mostlyIn.n === st.count ? 'all' : `${n(st.mostlyIn.n)}`} in ${st.mostlyIn.name}` : ''}
+          {st.top.length ? ` · most in ${st.top.map((t) => `${t.name} (${n(t.n)})`).join(', ')}` : ''}
+        </p>
+      )}
       {s.home && <p className="font-mono text-xs text-muted-foreground/80" title={s.homePath}>{s.home}</p>}
     </li>
   );
@@ -303,6 +328,7 @@ function SkillsSummary({ gathered, config, scanning }: { gathered: Gathered | nu
   const byKind = (k: string) => gathered.config.filter((c) => c.kind === k).length;
   const held = items.filter((i) => i.reason === 'secret' || i.reason === 'client');
   const odd = items.filter((i) => i.reason === 'unreadable');
+  const elsewhere = items.filter((i) => i.reason === 'not_loadable');
   const plugins = new Set(config.filter((c) => c.origin.startsWith('plugin:')).map((c) => c.origin));
   const local = gathered.config.filter((c) => c.origin === 'repo').length;
   return (
@@ -311,11 +337,12 @@ function SkillsSummary({ gathered, config, scanning }: { gathered: Gathered | nu
       <p className="text-xs text-muted-foreground">They go to every project{local ? `, except ${local === 1 ? 'one' : n(local)} kept inside a project folder, which ${local === 1 ? 'goes' : 'go'} to that folder's project` : ''}. Hooks arrive switched off until you turn them on.</p>
       {held.length > 0 && <p className="flex items-start gap-1.5 text-xs"><Lock className="mt-0.5 size-3 shrink-0" />{count(held.length, 'item stays', 'items stay')} on this computer: {held.map((h) => h.title).slice(0, 5).join(', ')}{held.length > 5 ? '…' : ''}. {held.some((h) => h.reason === 'secret') ? 'They look like they hold a secret' : 'They name a client'}{held.some((h) => h.reason === 'secret') && held.some((h) => h.reason === 'client') ? ', or name a client' : ''}. The receipt names each one.</p>}
       {odd.length > 0 && <p className="text-xs text-muted-foreground">{count(odd.length, 'item')} couldn't be read; the receipt says why.</p>}
+      {elsewhere.length > 0 && <p className="text-xs">{count(elsewhere.length, 'skill was', 'skills were')} found where Claude Code doesn't load them ({[...new Set(config.filter((c) => c.nested).map((c) => c.nested!.split('/').slice(0, 2).join('/')))].slice(0, 3).join(', ')}). They aren't brought unless you tick them on the review page.</p>}
     </div>
   );
 }
 
-function Summary({ gathered, preview, choices, info, planning, busy, onGo, onReview }: { gathered: Gathered | null; preview: Preview | null; choices: Record<string, Choice>; info: Info | null; planning: boolean; busy: boolean; onGo: () => void; onReview: () => void }) {
+function Summary({ gathered, preview, choices, info, planning, busy, onGo, onReview, lastTime }: { gathered: Gathered | null; preview: Preview | null; choices: Record<string, Choice>; info: Info | null; planning: boolean; busy: boolean; onGo: () => void; onReview: () => void; lastTime: number }) {
   if (!gathered) return null;
   const items = gathered.inventory.items;
   const by = (k: string) => items.filter((i) => i.kind === k).length;
@@ -336,6 +363,7 @@ function Summary({ gathered, preview, choices, info, planning, busy, onGo, onRev
         </p>
       )}
       {nothing && <p className="mt-1 text-sm text-muted-foreground">Add a claude.ai export above, or use Claude Code on this computer first.</p>}
+      {lastTime > 0 && <p className="mt-1 text-sm">As in your last import, {count(lastTime, 'thing you left out stays', 'things you left out stay')} out. The review page shows which, and the receipt will list them.</p>}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Button onClick={onGo} disabled={busy || nothing}>{planning ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}Bring everything across</Button>
         <Button variant="outline" onClick={onReview} disabled={busy || nothing || !preview}>Review the suggestions</Button>
@@ -392,7 +420,9 @@ function groupOf(p: Proposal, c: Choice | undefined): GroupId {
   return c.client ? 'client' : 'new';
 }
 
-function Review({ preview, gathered, sources, exports, choices, setChoices, pool, setPool, leftOutSources, setLeftOutSources, leftOutGroups, setLeftOutGroups, scopes, setScopes, config, busy, onBack, onGo }: {
+function Review({ preview, gathered, sources, exports, choices, setChoices, pool, setPool, leftOutSources, setLeftOutSources, leftOutGroups, setLeftOutGroups, scopes, setScopes, config, busy, onBack, onGo,
+  leftOutItems, setLeftOutItems, bring, setBring, since, clientTerms }: {
+  leftOutItems: Set<string>; setLeftOutItems: (s: Set<string>) => void; bring: Set<string>; setBring: (s: Set<string>) => void; since: Record<string, string>; clientTerms: string[];
   preview: Preview; gathered: Gathered; sources: LocalSource[]; exports: ChatExport[];
   choices: Record<string, Choice>; setChoices: (f: (c: Record<string, Choice>) => Record<string, Choice>) => void; pool: string; setPool: (p: string) => void;
   leftOutSources: Set<string>; setLeftOutSources: (s: Set<string>) => void; leftOutGroups: Set<string>; setLeftOutGroups: (s: Set<string>) => void;
@@ -411,14 +441,21 @@ function Review({ preview, gathered, sources, exports, choices, setChoices, pool
     return m;
   }, [preview, choices, query]);
   const toggle = <T,>(set: Set<T>, v: T) => { const x = new Set(set); if (x.has(v)) x.delete(v); else x.add(v); return x; };
+  // Held back (a secret, a client name) and not loadable where they are: worked out here, so a ticked one keeps its row.
+  const client = useMemo(() => clientMatcher(clientTerms), [clientTerms]);
+  const heldList = useMemo(() => config.filter((c) => c.content != null && !c.problem).map((c) => {
+    const h = holdBack(c.name, c.content!, c.files, client);
+    return h ? { c, ...h, lines: h.reason === 'secret' ? [c.content!, ...Object.values(c.files ?? {})].flatMap((t) => secretLines(t)).slice(0, 3) : [] } : null;
+  }).filter((x): x is NonNullable<typeof x> => !!x), [config, client]);
+  const heldKeys = useMemo(() => new Set(heldList.map((h) => h.c.key)), [heldList]);
+  const elsewhere = useMemo(() => config.filter((c) => c.nested && c.content != null && !heldKeys.has(c.key)), [config, heldKeys]);
   const cfgGroups = useMemo(() => {
     const m = new Map<string, ConfigItem[]>();
-    // Only what can go (held-back items stay on this computer whatever is picked here). A left-out group keeps its row.
-    const sendable = new Set(gathered.config.map((c) => c.key));
-    for (const c of config) if (sendable.has(c.key) || (leftOutGroups.has(configGroup(c)) && c.content != null && !gathered.inventory.items.some((i) => i.id === c.key && (i.reason === 'secret' || i.reason === 'client'))))
-      m.set(configGroup(c), [...(m.get(configGroup(c)) ?? []), c]);
+    for (const c of config) if (c.content != null && !c.problem && !c.nested && !heldKeys.has(c.key)) m.set(configGroup(c), [...(m.get(configGroup(c)) ?? []), c]);
     return [...m.entries()];
-  }, [config, gathered, leftOutGroups]);
+  }, [config, heldKeys]);
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+  const day = (target: string) => (since[target] ? new Date(since[target]).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : null);
   const labelOf = (items: ConfigItem[]) => {
     const c = items[0];
     const home = sources.find((s) => s.path === c.source);
@@ -437,7 +474,7 @@ function Review({ preview, gathered, sources, exports, choices, setChoices, pool
             <li key={s.id} className="flex items-center gap-3 px-3 py-2">
               <input type="checkbox" className="size-4 accent-primary" checked={!leftOutSources.has(s.id)} onChange={() => setLeftOutSources(toggle(leftOutSources, s.id))} aria-label={`Bring ${s.label}`} />
               <span className="min-w-0 flex-1"><span className="block text-sm">{s.label}</span><span className="block text-xs text-muted-foreground">{s.sub}</span></span>
-              {leftOutSources.has(s.id) && <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">Left out</span>}
+              {leftOutSources.has(s.id) && <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{day(`import:source:${s.id}`) ? `Left out on ${day(`import:source:${s.id}`)}` : 'Left out'}</span>}
             </li>
           ))}
         </ul>
@@ -461,7 +498,7 @@ function Review({ preview, gathered, sources, exports, choices, setChoices, pool
                   <span className="text-sm font-medium">{g.label}</span><span className="text-xs text-muted-foreground tabular-nums">{n(list.length)}</span>
                   <span className="ml-auto truncate text-xs text-muted-foreground max-sm:hidden">{g.sub}</span>
                 </button>
-                {isOpen && <ul className="divide-y border-t">{list.slice(0, 300).map((p) => <ProposalRow key={p.key} p={p} preview={preview} choices={choices} setChoices={setChoices} />)}</ul>}
+                {isOpen && <ul className="divide-y border-t">{list.slice(0, 300).map((p) => <ProposalRow key={p.key} p={p} preview={preview} choices={choices} setChoices={setChoices} leftOutOn={choices[p.key]?.action === 'skip' ? day(`import:place:${p.key}`) : null} />)}</ul>}
               </div>
             );
           })}
@@ -484,8 +521,13 @@ function Review({ preview, gathered, sources, exports, choices, setChoices, pool
               const suggested = items[0].origin === 'repo' ? 'its project' : 'every project';
               const value = leftOutGroups.has(g) ? 'out' : scopes[g] ?? '';
               return (
-                <li key={g} className="flex flex-wrap items-center gap-2 px-3 py-2">
-                  <span className="min-w-0 flex-1"><span className="block text-sm">{labelOf(items)}</span><span className="block truncate text-xs text-muted-foreground">{items.map((c) => c.name).slice(0, 6).join(', ')}{items.length > 6 ? `, and ${n(items.length - 6)} more` : ''}</span></span>
+                <li key={g} className="px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={() => setOpenGroups(toggle(openGroups, g))} aria-expanded={openGroups.has(g)} className="flex min-w-0 flex-1 items-start gap-1.5 text-left">
+                    <ChevronRight className={cn('mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform', openGroups.has(g) && 'rotate-90')} />
+                    <span className="min-w-0"><span className="block text-sm">{labelOf(items)}{day(`import:group:${g}`) && leftOutGroups.has(g) ? <span className="ml-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">Left out on {day(`import:group:${g}`)}</span> : null}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{n(items.filter((c) => !leftOutItems.has(c.key)).length)} of {n(items.length)} ticked: {items.map((c) => c.name).slice(0, 6).join(', ')}{items.length > 6 ? `, and ${n(items.length - 6)} more` : ''}</span></span>
+                  </button>
                   <select aria-label={`Where ${labelOf(items)} goes`} value={value} className={cn(inputCls, 'w-52')}
                     onChange={(e) => { const v = e.target.value; const out = new Set(leftOutGroups); out.delete(g); if (v === 'out') out.add(g); setLeftOutGroups(out); setScopes((s) => { const x = { ...s }; if (v && v !== 'out') x[g] = v; else delete x[g]; return x; }); }}>
                     <option value="">As suggested ({suggested})</option>
@@ -493,9 +535,58 @@ function Review({ preview, gathered, sources, exports, choices, setChoices, pool
                     <optgroup label="One project">{projects.map((p) => <option key={p.slug} value={p.slug}>{p.name}{p.client ? ` (${p.client})` : ''}</option>)}</optgroup>
                     <option value="out">Leave out</option>
                   </select>
+                  </div>
+                  {openGroups.has(g) && (
+                    <ul className="mt-1.5 space-y-1 pl-5">
+                      {items.map((c) => (
+                        <li key={c.key} className="flex items-start gap-2 text-sm">
+                          <input type="checkbox" className="mt-0.5 size-4 accent-primary" checked={!leftOutItems.has(c.key) && !leftOutGroups.has(g)} disabled={leftOutGroups.has(g)}
+                            onChange={() => setLeftOutItems(toggle(leftOutItems, c.key))} aria-label={`Bring ${c.name}`} />
+                          <span className="min-w-0 flex-1"><span>{c.name}</span> <span className="text-xs text-muted-foreground">{KIND_NAME[c.kind] ?? c.kind}{c.description ? ` · ${c.description}` : ''}</span>
+                            {leftOutItems.has(c.key) && day(`import:ext:${c.key}`) && <span className="ml-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">Left out on {day(`import:ext:${c.key}`)}</span>}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </li>
               );
             })}
+          </ul>
+        </div>
+      )}
+
+      {heldList.length > 0 && (
+        <div>
+          <h3 className="mb-1 text-sm font-semibold">Held back on this computer</h3>
+          <p className="mb-2 text-xs text-muted-foreground">They look like they hold a secret, or name a client, so they stay here. If it's a false alarm, tick it to bring it anyway: the receipt will say you chose to. The lines shown never leave this computer.</p>
+          <ul className="divide-y rounded-xl border bg-card">
+            {heldList.map((h) => (
+              <li key={h.c.key} className="flex items-start gap-3 px-3 py-2">
+                <input type="checkbox" className="mt-0.5 size-4 accent-primary" checked={bring.has(h.c.key)} onChange={() => setBring(toggle(bring, h.c.key))} aria-label={`Bring ${h.c.name} anyway`} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm">{h.c.name} <span className="text-xs text-muted-foreground">{KIND_NAME[h.c.kind] ?? h.c.kind}{h.c.origin.startsWith('plugin:') ? ` · plugin ${h.c.origin.slice(7)}` : ''}</span></span>
+                  <span className="block text-xs">{h.detail}</span>
+                  {h.lines.map((l, k) => <code key={k} className="mt-0.5 block truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]" title={l}>{l}</code>)}
+                </span>
+                {bring.has(h.c.key) && <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[11px] font-medium text-warning-text">Bring anyway</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {elsewhere.length > 0 && (
+        <div>
+          <h3 className="mb-1 text-sm font-semibold">Found where Claude Code doesn't load them</h3>
+          <p className="mb-2 text-xs text-muted-foreground">Skills one folder down (like skills/development/) and loose files in skills/. Claude Code doesn't use them from there, so they stay behind unless you tick them.</p>
+          <ul className="divide-y rounded-xl border bg-card">
+            {elsewhere.map((c) => (
+              <li key={c.key} className="flex items-start gap-3 px-3 py-2">
+                <input type="checkbox" className="mt-0.5 size-4 accent-primary" checked={bring.has(c.key)} onChange={() => setBring(toggle(bring, c.key))} aria-label={`Bring ${c.name}`} />
+                <span className="min-w-0 flex-1"><span className="block text-sm">{c.name}{c.description ? <span className="text-xs text-muted-foreground"> · {c.description}</span> : null}</span>
+                  <span className="block font-mono text-xs text-muted-foreground">{c.nested}</span></span>
+              </li>
+            ))}
           </ul>
         </div>
       )}
@@ -509,7 +600,9 @@ function Review({ preview, gathered, sources, exports, choices, setChoices, pool
   );
 }
 
-function ProposalRow({ p, preview, choices, setChoices }: { p: Proposal; preview: Preview; choices: Record<string, Choice>; setChoices: (f: (c: Record<string, Choice>) => Record<string, Choice>) => void }) {
+const KIND_NAME: Record<string, string> = { skill: 'skill', agent: 'subagent', command: 'slash command', output_style: 'output style', hook: 'hooks' };
+
+function ProposalRow({ p, preview, choices, setChoices, leftOutOn }: { p: Proposal; preview: Preview; choices: Record<string, Choice>; setChoices: (f: (c: Record<string, Choice>) => Record<string, Choice>) => void; leftOutOn?: string | null }) {
   const set = (c: Choice) => setChoices((cur) => ({ ...cur, [p.key]: c }));
   const c = choices[p.key] ?? { action: 'skip' };
   const value = c.action === 'new' ? 'new' : c.action === 'existing' ? `existing:${c.slug}` : c.action === 'merge' ? `merge:${c.into}` : 'skip';
@@ -525,7 +618,7 @@ function ProposalRow({ p, preview, choices, setChoices }: { p: Proposal; preview
           </div>
         ) : <p className="truncate text-sm font-medium">{c.action === 'existing' ? preview.projects.find((x) => x.slug === c.slug)?.name ?? p.name : p.name}</p>}
         <p className="mt-0.5 truncate text-xs text-muted-foreground">{p.path || (p.key === 'temp' ? 'Folders in the temp folder' : p.key === 'home' ? 'Your home folder' : p.key.startsWith('chat:') ? 'claude.ai' : p.key.startsWith('dated:') ? 'Dated one-off folders' : 'No folder')}{' · '}
-          {count(p.conversations, 'conversation')}{p.new ? ` · ${n(p.new)} new` : ''}{p.changed ? ` · ${n(p.changed)} changed` : ''}{p.unchanged ? ` · ${n(p.unchanged)} already here` : ''}</p>
+          {count(p.conversations, 'conversation')}{p.new ? ` · ${n(p.new)} new` : ''}{p.changed ? ` · ${n(p.changed)} changed` : ''}{p.unchanged ? ` · ${n(p.unchanged)} already here` : ''}{p.bytes >= 5 << 20 ? ` · ${mb(p.bytes)}` : ''}{leftOutOn ? ` · left out on ${leftOutOn}` : ''}</p>
       </div>
       <select aria-label={`Where ${p.name} goes`} value={value} className={cn(inputCls, 'w-52 self-start')}
         onChange={(e) => {

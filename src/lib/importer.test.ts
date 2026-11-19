@@ -1,6 +1,6 @@
 // The import's inventory (src/lib/importer.ts gather and homeWords) and what stays on this computer (secrets.ts).
 import { describe, expect, it } from 'vitest';
-import { gather, homeWords, type ConfigItem, type LocalSource, type LocalUnit } from './importer';
+import { applyPlaceDecisions, dateRange, gather, homeStats, homeWords, leftOutFrom, rememberOf, type ConfigItem, type LocalSource, type LocalUnit } from './importer';
 import { clientMatcher, holdBack, secretHits } from './secrets';
 import type { ChatExport } from './claudeai';
 
@@ -84,5 +84,72 @@ describe('what stays on this computer', () => {
     expect(holdBack('x', 'Fine.', { 'ref.md': 'Acme notes' }, c)?.reason).toBe('client');
     expect(holdBack('x', 'Acmeology is a word.', null, c)).toBeNull();
     expect(holdBack('x', 'anything', null, clientMatcher([]))).toBeNull();
+  });
+});
+
+describe('a home at a glance', () => {
+  const at = (cwd: string, started: string, ended = started): LocalUnit => unit(Math.random().toString(36).slice(2), H1, { cwd, repo: null, started, ended });
+  it('says when, where most of it is, and the commonest projects (the test-run home on Zed\'s laptop)', () => {
+    const units = [
+      ...Array.from({ length: 6 }, (_, i) => at(`C:/Projects/Other/pm-hq/test-clients/acme-api/.worktrees/t${i}`, '2026-10-07T10:00:00Z')),
+      ...Array.from({ length: 4 }, (_, i) => at(`C:/Projects/Other/pm-hq/test-playground/.worktrees/t${i}`, '2026-10-08T10:00:00Z')),
+      at('C:/Projects/Other/pm-hq/sandbox', '2026-10-09T09:00:00Z', '2026-10-10T18:00:00Z'),
+      at('C:/Users/sam/AppData/Local/Temp', '2026-10-09T12:00:00Z'),
+    ];
+    const s = homeStats(units);
+    expect(s.count).toBe(12);
+    expect(dateRange(s.from, s.to)).toBe('7 to 10 Oct 2026');
+    expect(s.mostlyIn).toEqual({ name: 'pm-hq', path: 'C:/Projects/Other/pm-hq', n: 11 });
+    expect(s.top).toEqual([{ name: 'acme-api', n: 6 }, { name: 'test-playground', n: 4 }, { name: 'sandbox', n: 1 }]);
+  });
+  it('dates across months and years read plainly; a spread-out home has no "mostly in"', () => {
+    expect(dateRange('2026-10-03T00:00:00Z', '2026-11-19T00:00:00Z')).toBe('3 Oct to 19 Nov 2026');
+    expect(dateRange('2025-02-12T00:00:00Z', '2026-11-19T00:00:00Z')).toBe('12 Feb 2025 to 19 Nov 2026');
+    expect(dateRange('2026-10-10T08:00:00Z', '2026-10-10T09:00:00Z')).toBe('10 Oct 2026');
+    const spread = homeStats(['C:/Projects/a', 'C:/Projects/b', 'D:/Work/c', 'C:/Users/sam'].map((c) => at(c, '2026-10-01T00:00:00Z')));
+    expect(spread.mostlyIn).toBeNull();
+  });
+});
+
+describe('what was offered and not taken', () => {
+  const sources = [home()];
+  const config = [
+    cfg(`${H1}/user/skill/tidy`, H1, 'tidy', 'Tidy up.'), cfg(`${H1}/user/command/tars`, H1, 'tars', 'Talk like TARS.', { kind: 'command' }),
+    cfg(`${H1}/user/skill/mfa`, H1, 'umbraco-mfa-login-provider', 'Set password = Placeholder123 in the sample config.'),
+    cfg(`${H1}/user/skill-elsewhere/skills/development/upgrade`, H1, 'upgrade', 'Upgrade a site.', { nested: 'skills/development/upgrade' }),
+    cfg(`${H1}/user/skill-elsewhere/skills/synced/pdf`, H1, 'pdf', 'Claude\'s own.', { nested: 'skills/synced/pdf' }),
+  ];
+  const scan = { units: [unit('a', H1)] };
+  it('skills one folder down are found and named, not brought unless ticked; a single item can be left out', () => {
+    const g = gather({ sources, scan, config, exports: [], leftOut: { items: new Set([`${H1}/user/command/tars`]), since: { [`import:ext:${H1}/user/command/tars`]: '2026-11-15T10:00:00Z' } } });
+    const why = (t: string) => g.inventory.items.find((i) => i.title === t);
+    expect(why('upgrade')).toMatchObject({ reason: 'not_loadable', detail: "in skills/development/upgrade, where Claude Code doesn't load it" });
+    expect(why('pdf')?.detail).toMatch(/Claude app's own skills/);
+    expect(why('tars')).toMatchObject({ reason: 'skipped', detail: 'you chose to leave it out on 15 Nov, and it stays out until you change it' });
+    expect(g.config.map((c) => c.name)).toEqual(['tidy']);
+  });
+  it('a held-back item shows its matching line here (masked), names only the line on the receipt, and can be brought anyway', () => {
+    const g = gather({ sources, scan, config, exports: [] });
+    const h = g.held.get(`${H1}/user/skill/mfa`)!;
+    expect(h.lines).toEqual(['line 1: Set password = Pla•••••••••23 in the sample config.']);
+    const item = g.inventory.items.find((i) => i.title === 'umbraco-mfa-login-provider')!;
+    expect(item.reason).toBe('secret');
+    expect(item.detail).toContain('(line 1)');
+    expect(item.detail).not.toContain('Placeholder123');
+    const anyway = gather({ sources, scan, config, exports: [], leftOut: { bring: new Set([`${H1}/user/skill/mfa`, `${H1}/user/skill-elsewhere/skills/development/upgrade`]) } });
+    expect(anyway.config.map((c) => [c.name, !!c.overrule])).toEqual([['tidy', false], ['tars', false], ['umbraco-mfa-login-provider', true], ['upgrade', false]]);
+  });
+  it('earlier choices come back as this run\'s starting point, and what changed is remembered', () => {
+    const d = { [`import:source:${H2}`]: { decision: 'leave-out' as const, at: '2026-11-18T19:30:00Z' }, 'import:place:c:/projects/other/ai-test': { decision: 'leave-out' as const, at: '2026-11-18T19:30:00Z' },
+      [`import:ext:${H1}/user/skill/mfa`]: { decision: 'bring' as const, at: '2026-11-18T19:30:00Z' } };
+    const lo = leftOutFrom(d);
+    expect([...lo.sources]).toEqual([H2]);
+    expect([...lo.bring]).toEqual([`${H1}/user/skill/mfa`]);
+    expect(applyPlaceDecisions({ 'c:/projects/other/ai-test': { action: 'new', name: 'ai-test', slug: 'ai-test', client: null }, x: { action: 'existing', slug: 'x' } }, d))
+      .toEqual({ 'c:/projects/other/ai-test': { action: 'skip' }, x: { action: 'existing', slug: 'x' } });
+    // This time: H2 is back in, the ai-test folder still out, tars newly left out, the mfa skill still brought.
+    const r = rememberOf({ decisions: d, leftOut: { sources: new Set(), items: new Set([`${H1}/user/command/tars`]), bring: new Set([`${H1}/user/skill/mfa`]) }, sourceIds: [H1, H2],
+      choices: { 'c:/projects/other/ai-test': { action: 'skip' } }, configKeys: [`${H1}/user/command/tars`, `${H1}/user/skill/mfa`], groups: [] });
+    expect(r).toEqual({ [`import:source:${H2}`]: null, [`import:ext:${H1}/user/command/tars`]: 'leave-out' });
   });
 });

@@ -249,7 +249,13 @@ pub fn sources() -> Vec<Source> {
 // ---------- conversations ----------
 
 #[derive(Serialize, Clone)]
-pub struct FileOut { rel: String, size: u64 }
+pub struct FileOut {
+    rel: String, size: u64,
+    /// The main transcript's content hash (sha256, hex), read in the same pass as its facts. The server compares it
+    /// with the hash it stored, so a file whose date changed but whose words didn't is "already here".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sha256: Option<String>,
+}
 #[derive(Serialize, Clone)]
 pub struct Unit {
     id: String, folder: String, uuid: String, source: &'static str, fingerprint: String,
@@ -286,16 +292,18 @@ fn walk(dir: &Path, base: &Path, out: &mut Vec<(String, u64, u128)>) {
     }
 }
 
-struct Facts { cwd: Option<String>, started: Option<String>, ended: Option<String>, messages: u64, custom: Option<String>, ai: Option<String>, first_user: Option<String>, unreadable: Option<String> }
+struct Facts { cwd: Option<String>, started: Option<String>, ended: Option<String>, messages: u64, custom: Option<String>, ai: Option<String>, first_user: Option<String>, unreadable: Option<String>, sha256: Option<String> }
 
 fn facts(file: &Path) -> Facts {
-    let mut f = Facts { cwd: None, started: None, ended: None, messages: 0, custom: None, ai: None, first_user: None, unreadable: None };
+    let mut f = Facts { cwd: None, started: None, ended: None, messages: 0, custom: None, ai: None, first_user: None, unreadable: None, sha256: None };
     let h = match fs::File::open(file) { Ok(h) => h, Err(e) => { f.unreadable = Some(e.to_string()); return f } };
     let mut r = BufReader::with_capacity(1 << 20, h);
     let mut buf = Vec::new();
+    let mut hash = Sha256::new();
     loop {
         buf.clear();
         match r.read_until(b'\n', &mut buf) { Ok(0) => break, Err(e) => { f.unreadable = Some(e.to_string()); break } _ => {} }
+        hash.update(&buf);
         // Huge records are tool output; the facts never live there.
         if buf.len() > 512 * 1024 { continue; }
         let Ok(v) = serde_json::from_slice::<serde_json::Value>(&buf) else { continue };
@@ -318,6 +326,7 @@ fn facts(file: &Path) -> Facts {
             }
         }
     }
+    if f.unreadable.is_none() { f.sha256 = Some(hash.finalize().iter().map(|b| format!("{b:02x}")).collect()); }
     f
 }
 
@@ -380,8 +389,6 @@ pub fn scan(progress: &dyn Fn(usize, usize), paths: &[String], st: &Scanned) -> 
                 let mut files: Vec<(String, u64, u128)> = all.iter().filter(|(r, _, _)| r == mrel || r.starts_with(&prefix)).cloned().collect();
                 files.sort_by(|a, b| (a.0 != *mrel).cmp(&(b.0 != *mrel)).then(a.0.cmp(&b.0))); // main thread first
                 for f in &files { claimed.insert(f.0.clone()); }
-                let mut fp: Vec<String> = files.iter().map(|(r, s, m)| format!("{r}:{s}:{m}")).collect();
-                fp.sort();
                 let id = sha_hex(&format!("{folder}/{uuid}"))[..24].to_string();
                 let bytes: u64 = files.iter().map(|f| f.1).sum();
                 // The same conversation in two places (e.g. two homes, or the archive and ~/.claude): keep the larger copy.
@@ -391,6 +398,11 @@ pub fn scan(progress: &dyn Fn(usize, usize), paths: &[String], st: &Scanned) -> 
                 let mut also: Vec<String> = units.get(&id).map(|u| { let mut a = u.also.clone(); if u.from != from { a.push(u.from.clone()); } a }).unwrap_or_default();
                 also.retain(|a| a != &from);
                 let f = facts(&root.join(mrel));
+                // Changed or not: names, sizes and the main transcript's content, never modified times (a copy, a
+                // restore or a sync tool touches those without changing a word: 212 transcripts on 12 Nov 2026).
+                let mut fp: Vec<String> = files.iter().map(|(r, s, _)| format!("{r}:{s}")).collect();
+                fp.sort();
+                fp.push(format!("main:{}", f.sha256.as_deref().unwrap_or("unread")));
                 let s = index.get(&uuid);
                 let title = s.and_then(|s| s.title.clone()).or(f.custom.clone()).or(f.ai.clone()).or(f.first_user.clone()).unwrap_or_else(|| "Untitled conversation".into());
                 let repo = f.cwd.as_deref().and_then(|c| repo_of(&c.replace('\\', "/").split("/.claude/worktrees/").next().unwrap_or(c).to_string(), &h, &mut repo_cache));
@@ -398,7 +410,7 @@ pub fn scan(progress: &dyn Fn(usize, usize), paths: &[String], st: &Scanned) -> 
                 units.insert(id.clone(), Unit {
                     id: id.clone(), folder: folder.clone(), uuid: uuid.clone(), source: "claude-code", fingerprint: sha_hex(&fp.join("\n"))[..32].to_string(),
                     cwd: f.cwd, repo, title, started: f.started, ended: f.ended, messages: f.messages, threads, bytes,
-                    files: files.iter().map(|(r, s, _)| FileOut { rel: r.clone(), size: *s }).collect(), from: from.clone(), root: fwd(&root),
+                    files: files.iter().map(|(r, s, _)| FileOut { rel: r.clone(), size: *s, sha256: if r == mrel { f.sha256.clone() } else { None } }).collect(), from: from.clone(), root: fwd(&root),
                     profile: s.map(|s| s.profile.clone()), empty: *msize == 0 && files.len() == 1, unreadable: f.unreadable, also,
                 });
                 reg.insert(id, (root.clone(), files.iter().map(|(r, s, _)| (r.clone(), *s)).collect()));
@@ -453,6 +465,9 @@ pub struct ConfigItem {
     left_out: Vec<String>,
     /// Why it can't be read, if it couldn't.
     problem: Option<String>,
+    /// Found where Claude Code doesn't load it (a skill one folder down, a loose file in skills/): where it is.
+    /// The app lists it and brings it only when the person ticks it.
+    nested: Option<String>,
 }
 #[derive(Serialize)]
 pub struct ConfigOut { items: Vec<ConfigItem> }
@@ -519,12 +534,14 @@ fn read_skill(dir: &Path) -> Option<(String, BTreeMap<String, String>, Vec<Strin
 
 /// One Claude Code layout (a home, a plugin's folder, or a project folder's .claude).
 fn read_layout(root: &Path, source: &str, origin: &str, key_base: &str, repo: Option<&str>, hooks: bool, out: &mut Vec<ConfigItem>) {
-    let mut push = |kind: &'static str, raw: &str, content: Option<String>, files: Option<BTreeMap<String, String>>, left: Vec<String>, bytes: usize, desc: Option<String>, problem: Option<String>| {
+    let mut push_at = |kind: &'static str, raw: &str, content: Option<String>, files: Option<BTreeMap<String, String>>, left: Vec<String>, bytes: usize, desc: Option<String>, problem: Option<String>, nested: Option<String>| {
         let name = ext_name(raw);
         if name.is_empty() { return; }
-        out.push(ConfigItem { key: format!("{key_base}/{kind}/{name}"), source: source.to_string(), origin: origin.to_string(), repo: repo.map(String::from), kind, name,
-            description: desc.or_else(|| content.as_deref().and_then(desc_of)), bytes: bytes as u64, content, files, left_out: left, problem });
+        let key = match &nested { Some(at) => format!("{key_base}/{kind}-elsewhere/{at}"), None => format!("{key_base}/{kind}/{name}") };
+        out.push(ConfigItem { key, source: source.to_string(), origin: origin.to_string(), repo: repo.map(String::from), kind, name,
+            description: desc.or_else(|| content.as_deref().and_then(desc_of)), bytes: bytes as u64, content, files, left_out: left, problem, nested });
     };
+    macro_rules! push { ($($a:expr),*) => { push_at($($a),*, None) } }
     fn md_files(d: &Path, prefix: &str, deep: bool, out: &mut Vec<(String, PathBuf)>) {
         let mut es: Vec<_> = fs::read_dir(d).into_iter().flatten().flatten().collect();
         es.sort_by_key(|e| e.file_name());
@@ -540,19 +557,49 @@ fn read_layout(root: &Path, source: &str, origin: &str, key_base: &str, repo: Op
         md_files(&root.join(sub), "", deep, &mut l);
         for (n, p) in l {
             match read_text(&p) {
-                Some(t) => { let b = t.len(); push(kind, &n, Some(t), None, vec![], b, None, None) }
-                None => push(kind, &n, None, None, vec![], fs::metadata(&p).map(|m| m.len() as usize).unwrap_or(0), None, Some("it could not be read as text (too big, or not text)".into())),
+                Some(t) => { let b = t.len(); push!(kind, &n, Some(t), None, vec![], b, None, None) }
+                None => push!(kind, &n, None, None, vec![], fs::metadata(&p).map(|m| m.len() as usize).unwrap_or(0), None, Some("it could not be read as text (too big, or not text)".into())),
             }
         }
     }
-    let mut skills: Vec<_> = fs::read_dir(root.join("skills")).into_iter().flatten().flatten().filter(|e| e.path().is_dir()).collect();
+    // Skills: skills/<name>/SKILL.md. A folder without one is looked into once more (skills/development/<name>/SKILL.md),
+    // and loose .md files are listed too: Claude Code doesn't load either from there, so they come only if ticked.
+    let mut skills: Vec<_> = fs::read_dir(root.join("skills")).into_iter().flatten().flatten().collect();
     skills.sort_by_key(|e| e.file_name());
+    let mut elsewhere: Vec<(String, PathBuf, bool)> = vec![]; // (where, path, is a skill folder)
     for s in skills {
         let n = s.file_name().to_string_lossy().to_string();
-        if !s.path().join("SKILL.md").exists() { continue; }
-        match read_skill(&s.path()) {
-            Some((c, f, l, total)) => push("skill", &n, Some(c), if f.is_empty() { None } else { Some(f) }, l, total, None, None),
-            None => push("skill", &n, None, None, vec![], 0, None, Some("its SKILL.md could not be read as text".into())),
+        if n.starts_with('.') { continue; }
+        let p = s.path();
+        if p.is_dir() && p.join("SKILL.md").exists() {
+            match read_skill(&p) {
+                Some((c, f, l, total)) => push!("skill", &n, Some(c), if f.is_empty() { None } else { Some(f) }, l, total, None, None),
+                None => push!("skill", &n, None, None, vec![], 0, None, Some("its SKILL.md could not be read as text".into())),
+            }
+        } else if p.is_dir() {
+            let mut inner: Vec<_> = fs::read_dir(&p).into_iter().flatten().flatten().collect();
+            inner.sort_by_key(|e| e.file_name());
+            for c in inner {
+                let cn = c.file_name().to_string_lossy().to_string();
+                if cn.starts_with('.') { continue; }
+                let cp = c.path();
+                if cp.is_dir() && cp.join("SKILL.md").exists() { elsewhere.push((format!("skills/{n}/{cn}"), cp, true)); }
+                else if cp.is_file() && cn.ends_with(".md") { elsewhere.push((format!("skills/{n}/{cn}"), cp, false)); }
+            }
+        } else if p.is_file() && n.ends_with(".md") { elsewhere.push((format!("skills/{n}"), p, false)); }
+    }
+    for (at, p, folder) in elsewhere {
+        let raw = p.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
+        if folder {
+            match read_skill(&p) {
+                Some((c, f, l, total)) => push_at("skill", &raw, Some(c), if f.is_empty() { None } else { Some(f) }, l, total, None, None, Some(at)),
+                None => push_at("skill", &raw, None, None, vec![], 0, None, Some("its SKILL.md could not be read as text".into()), Some(at)),
+            }
+        } else {
+            match read_text(&p) {
+                Some(t) => { let b = t.len(); push_at("skill", &raw, Some(t), None, vec![], b, None, None, Some(at)) }
+                None => push_at("skill", &raw, None, None, vec![], 0, None, Some("it could not be read as text".into()), Some(at)),
+            }
         }
     }
     if hooks {
@@ -560,8 +607,8 @@ fn read_layout(root: &Path, source: &str, origin: &str, key_base: &str, repo: Op
         if f.is_file() {
             let n = format!("{}-hooks", origin.strip_prefix("plugin:").unwrap_or(origin));
             match read_text(&f).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
-                Some(j) => { let c = serde_json::to_string(j.get("hooks").unwrap_or(&j)).unwrap_or_default(); let b = c.len(); push("hook", &n, Some(c), None, vec![], b, Some(format!("Hooks from {}", origin.strip_prefix("plugin:").unwrap_or(origin))), None) }
-                None => push("hook", &n, None, None, vec![], 0, None, Some("its hooks.json is not valid JSON".into())),
+                Some(j) => { let c = serde_json::to_string(j.get("hooks").unwrap_or(&j)).unwrap_or_default(); let b = c.len(); push!("hook", &n, Some(c), None, vec![], b, Some(format!("Hooks from {}", origin.strip_prefix("plugin:").unwrap_or(origin))), None) }
+                None => push!("hook", &n, None, None, vec![], 0, None, Some("its hooks.json is not valid JSON".into())),
             }
         }
     }
@@ -583,7 +630,7 @@ pub fn config(homes_in: &[String], repos: &[String], st: &Scanned) -> Result<Con
             let origin = format!("plugin:{}", ext_name(&name));
             if !p.is_dir() {
                 items.push(ConfigItem { key: format!("{}/{origin}", s.home_path), source: s.path.clone(), origin: origin.clone(), repo: None, kind: "plugin", name: ext_name(&name), description: None, bytes: 0,
-                    content: None, files: None, left_out: vec![], problem: Some("the plugin is listed as installed, but its folder is not on this computer".into()) });
+                    content: None, files: None, left_out: vec![], problem: Some("the plugin is listed as installed, but its folder is not on this computer".into()), nested: None });
                 continue;
             }
             read_layout(&p, &s.path, &origin, &format!("{}/{origin}", s.home_path), None, true, &mut items);
@@ -718,6 +765,13 @@ mod tests {
         fs::write(c1.join("skills").join("tidy").join("SKILL.md"), "---\nname: tidy\ndescription: \"Tidy up\"\n---\nTidy.").unwrap();
         fs::write(c1.join("skills").join("tidy").join("refs").join("a.md"), "ref").unwrap();
         fs::write(c1.join("skills").join("tidy").join("logo.png"), [0u8, 1, 2]).unwrap();
+        // Skills one folder down, a loose file, Claude's own synced ones, and a .trash folder (skipped).
+        fs::create_dir_all(c1.join("skills").join("development").join("upgrade")).unwrap();
+        fs::write(c1.join("skills").join("development").join("upgrade").join("SKILL.md"), "---\ndescription: Upgrade a site\n---\nUpgrade.").unwrap();
+        fs::write(c1.join("skills").join("development").join("notes.md"), "Loose notes.").unwrap();
+        fs::write(c1.join("skills").join("loose.md"), "A loose skill file.").unwrap();
+        fs::create_dir_all(c1.join("skills").join(".trash").join("old")).unwrap();
+        fs::write(c1.join("skills").join(".trash").join("old").join("SKILL.md"), "Old.").unwrap();
         fs::create_dir_all(c1.join("agents")).unwrap();
         fs::write(c1.join("agents").join("Reviewer.md"), "Review things.").unwrap();
         fs::create_dir_all(c1.join("commands").join("git")).unwrap();
@@ -776,13 +830,29 @@ mod tests {
         assert_eq!(by("ccc").profile, None, "a terminal session");
         assert_eq!(by("aaa").also.len(), 1, "the copy in the second home is named, not counted twice");
         assert!(by("empty").empty);
+        // The main transcript's content hash, read in the same pass; the fingerprint ignores modified times.
+        let a = by("aaa");
+        let want: String = Sha256::digest(fs::read(p1.join("aaa.jsonl")).unwrap()).iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(a.files[0].sha256.as_deref(), Some(want.as_str()));
+        let before = a.fingerprint.clone();
+        fs::File::options().write(true).open(p1.join("aaa.jsonl")).unwrap().set_modified(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000)).unwrap();
+        let again = scan(&|_, _| {}, &src.iter().map(|s| s.path.clone()).collect::<Vec<_>>(), &Scanned::default()).unwrap();
+        assert_eq!(again.units.iter().find(|x| x.uuid == "aaa").unwrap().fingerprint, before, "a new date alone is not a change");
+        fs::write(p1.join("aaa.jsonl"), line(&repo, "personal ONE", "user")).unwrap(); // same size, different words
+        let changed = scan(&|_, _| {}, &src.iter().map(|s| s.path.clone()).collect::<Vec<_>>(), &Scanned::default()).unwrap();
+        assert_ne!(changed.units.iter().find(|x| x.uuid == "aaa").unwrap().fingerprint, before, "different words are a change, even at the same size");
+        fs::write(p1.join("aaa.jsonl"), line(&repo, "personal one", "user")).unwrap();
         assert!(!by("aaa").empty);
         assert_eq!(out.odd.len(), 1, "an odd file name is named, not dropped silently");
         assert_eq!(out.units.len(), 5);
 
         let cfg = config(&[src[0].home_path.clone()], &[real(&repo)], &st).unwrap();
         let keys: Vec<String> = cfg.items.iter().map(|i| format!("{}:{}:{}", i.origin, i.kind, i.name)).collect();
-        assert_eq!(keys, vec!["user:command:git-ship", "user:agent:reviewer", "user:skill:tidy", "plugin:gone:plugin:gone", "plugin:helper:skill:helping", "plugin:helper:hook:helper-hooks", "repo:skill:watering"], "{keys:?}");
+        assert_eq!(keys, vec!["user:command:git-ship", "user:agent:reviewer", "user:skill:tidy", "user:skill:notes", "user:skill:upgrade", "user:skill:loose", "plugin:gone:plugin:gone", "plugin:helper:skill:helping", "plugin:helper:hook:helper-hooks", "repo:skill:watering"], "{keys:?}");
+        let nested: Vec<_> = cfg.items.iter().filter_map(|i| i.nested.clone()).collect();
+        assert_eq!(nested, vec!["skills/development/notes.md", "skills/development/upgrade", "skills/loose.md"], "found where Claude Code doesn't load them, and said so");
+        assert_eq!(cfg.items.iter().find(|i| i.name == "upgrade").unwrap().description.as_deref(), Some("Upgrade a site"));
+        assert!(cfg.items.iter().find(|i| i.name == "tidy").unwrap().nested.is_none());
         let tidy = cfg.items.iter().find(|i| i.name == "tidy").unwrap();
         assert_eq!(tidy.description.as_deref(), Some("Tidy up"));
         assert_eq!(tidy.files.as_ref().unwrap().keys().collect::<Vec<_>>(), vec!["refs/a.md"]);

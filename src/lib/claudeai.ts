@@ -243,11 +243,12 @@ export async function readExports(files: ExportFile[]): Promise<{ exports: ChatE
       // Same fingerprint as earlier versions of this reader, so a re-run finds what is already here.
       const fingerprint = (await sha(`${c.updated_at ?? ''}|${msgs.length}|${body.length}`)).slice(0, 32);
       bytes.set(rel, body);
+      const content = [...new Uint8Array(await crypto.subtle.digest('SHA-256', body))].map((b) => b.toString(16).padStart(2, '0')).join('');
       units.push({
         id: (await sha(`${folder}/${nid}`)).slice(0, 24), folder, uuid: nid, source: 'claude-ai', fingerprint, cwd: null, repo: null,
         hint: projectName || null, title: name || firstUser.replace(/\s+/g, ' ').slice(0, 80) || 'Untitled chat',
         started: c.created_at ?? null, ended: c.updated_at ?? c.created_at ?? null, messages, threads: 0, bytes: body.length,
-        files: [{ rel, size: body.length }], from: `claude.ai export ${[...a.inputs].join(', ')}`,
+        files: [{ rel, size: body.length, sha256: content }], from: `claude.ai export ${[...a.inputs].join(', ')}`,
       });
     }
     const inputs = [...a.inputs];
