@@ -1,7 +1,8 @@
-// Draws Hearth's 8-bit logo on a 32x32 grid and writes brand/logo.svg (crisp pixels at any size).
+// Draws Hearth's 8-bit hearth-and-devices illustration on a 32x32 grid and writes brand/hearth-and-devices.svg
+// (crisp pixels at any size). It was the logo until the flame mark replaced it; it is kept as an illustration.
 // The hearth sits in the middle; around it are devices (a monitor, two laptops, two phones), each joined to the
 // hearth by a warm line, with screens lit by its fire: every device is a window onto the one hearth.
-//   node brand/make-logo.mjs && bash brand/render.sh
+//   node brand/make-illustration.mjs
 import { writeFileSync } from 'node:fs';
 
 const N = 32;
@@ -87,5 +88,5 @@ for (let y = 0; y < N; y++) {
   }
 }
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${N} ${N}" width="512" height="512" shape-rendering="crispEdges">\n<title>Hearth</title>\n${rects.join('\n')}\n</svg>\n`;
-writeFileSync(new URL('./logo.svg', import.meta.url), svg);
-console.log(`logo.svg: ${rects.length} rects`);
+writeFileSync(new URL('./hearth-and-devices.svg', import.meta.url), svg);
+console.log(`hearth-and-devices.svg: ${rects.length} rects`);

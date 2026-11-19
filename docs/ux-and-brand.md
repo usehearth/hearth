@@ -12,25 +12,26 @@ Sources of truth: `src/index.css` (tokens), `components.json` (shadcn, new-york 
 
 **Tagline.** *Your AI, at home.* (README, About). The longer line is: *A polished chat app for any ACP server, where the server owns the chats.*
 
-**What it stands for.** It is your own AI, on your own server, the same on every device. The logo tells the same story: one hearth in the middle, with a monitor, two laptops and two phones around it. Each device is joined to the fire by a warm line, and each screen is lit by the fire.
+**What it stands for.** It is your own AI, on your own server, the same on every device. The logo says it in one picture: a flame with a small arched doorway in its base, so it is both the fire and the home it warms.
 
-**Logo** (`brand/logo.svg`, 32 × 32 pixel art; PNGs at 512 and 1024).
-- Regenerate it with `node brand/make-logo.mjs && bash brand/render.sh`. Never edit the SVG by hand.
-- It is pixel art. Scale it by whole multiples and keep `image-rendering: pixelated`. Don't blur, smooth, recolour, rotate, outline or add a shadow.
-- The tile is its own background (night blue `#141A2B` with stepped corners), so it works on light and dark. Don't put it on a busy picture.
-- Minimum size is 16 px (favicon). Use 24 to 32 px in the app chrome and 96 px at the top of the README.
+**Logo** (`brand/logo.svg`, a 64 × 64 vector; PNGs at 512 and 1024).
+- It is a cream flame on an ember tile with rounded corners. The doorway is cut out of the flame in the tile colour.
+- `brand/logo.svg` is the source. Edit it by hand only to change the mark, and keep `public/logo.svg` an identical copy (the app, the favicon and notifications load that one).
+- Regenerate the PNGs with `bash brand/render.sh`. It writes `brand/logo-512.png` and `logo-1024.png`, and the web icons in `public/` (`icon-192.png`, `icon-512.png`, the full-bleed `apple-touch-icon.png` and `icon-maskable-512.png`, where the flame is scaled to 62% to sit inside the safe zone). Then regenerate the desktop icons with `npx --yes @tauri-apps/cli@2.12.4 icon brand/logo-1024.png -o src-tauri/icons` and delete the `android/` and `ios/` folders it adds. Regenerate the installer images with `bash brand/make-installer.sh`.
+- Don't recolour, rotate, stretch, outline or add a shadow to it, and don't put the flame on any other background.
+- The tile is its own background, so it works on light and dark. Don't put it on a busy picture.
+- Minimum size is 16 px (favicon, taskbar). At that size the doorway blurs, but the flame still reads. Use 24 to 32 px in the app chrome and 96 px at the top of the README.
 - Leave clear space around it of at least a quarter of its width.
 
 **Logo colours.** These belong to the mark only and are not UI tokens.
 
 | Name | Hex | Where |
 |---|---|---|
-| Night | `#141A2B` | tile |
-| Stone | `#EADBC8` / `#BFAE98` | the hearth's arch |
-| Flame | `#FFD166` `#F78C2F` `#E4501E` | the fire |
-| Screen glow | `#F2A04A` `#FFD49A` | device screens |
-| Frame | `#D8E0EC` `#A9B6C9` | device frames |
-| Line | `#E08A35` | the warm lines |
+| Ember | `#E4501E` | tile, and the doorway |
+| Cream | `#FFF3C4` | the flame |
+| Warm dark | `#1F1A17` | installer sidebar background and header text |
+
+**The old picture.** The 32 × 32 pixel-art hearth with a monitor, two laptops and two phones around it was the logo until it was replaced, because it could not be read at taskbar size. It is kept as an illustration in `brand/hearth-and-devices.svg` (made by `node brand/make-illustration.mjs`). It is pixel art: scale it by whole multiples with `image-rendering: pixelated`. Don't use it as the logo or the app icon.
 
 **UI palette in one line.** Warm stone neutrals with one ember accent. The orange `primary` is the fire and the stone `background`/`muted` are the hearthstone. There is no second brand colour.
 
