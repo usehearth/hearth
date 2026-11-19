@@ -12,7 +12,7 @@ export interface Made { slug: string; name: string; client: boolean; sessionId: 
 
 const slugFrom = (name: string) => name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
 
-export function NewProject({ request, onDone }: { request: Request; onDone: (m: Made) => void }) {
+export function NewProject({ request, onDone, clients = [] }: { request: Request; onDone: (m: Made) => void; /** Client names in use, suggested in the Client box. */ clients?: string[] }) {
   const [opts, setOpts] = useState<Options | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -59,7 +59,9 @@ export function NewProject({ request, onDone }: { request: Request; onDone: (m: 
         </Field>
         {opts.clientAllowed && (
           <Field label="Client" sub="Leave empty for a personal project. Client work stays on machines that allow it.">
-            <input value={client} onChange={(e) => setClient(e.target.value)} maxLength={60} className={field} />
+            <input value={client} onChange={(e) => setClient(e.target.value)} maxLength={60} className={field} list="new-project-clients" autoComplete="off"
+              placeholder={clients.length ? `For example ${clients[0]}` : undefined} />
+            <datalist id="new-project-clients">{clients.map((c) => <option key={c} value={c} />)}</datalist>
             {clientBlocked && <p className="mt-1 text-xs text-destructive">{poolInfo?.title} doesn't take client work: pick another machine.</p>}
           </Field>
         )}
