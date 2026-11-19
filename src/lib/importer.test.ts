@@ -25,6 +25,8 @@ describe('homes in the person\'s terms', () => {
     expect(homeWords(home({ account: 'work', terminal: 14 })).title).toBe('Claude Code: work');
     expect(homeWords(home({ account: 'work', terminal: 14 })).profiles).toBe('14 sessions from the terminal.');
     expect(homeWords(home({ profiles: [{ name: 'Main', sessions: 3 }] })).title).toBe('Claude Code: the main Claude app');
+    // A separate setup holding a copy of a desktop profile's session doesn't claim to be that profile's home.
+    expect(homeWords(home({ account: 'agency', terminal: 2, profiles: [{ name: 'Personal', sessions: 1 }] })).profiles).toBe('2 sessions from the terminal and 1 session from the Personal profile.');
   });
 });
 

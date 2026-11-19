@@ -81,6 +81,7 @@ interface Extension { id: string; kind: string; name: string; scope: string; sou
 function sourceLabel(source: string | null | undefined): string {
   if (!source) return 'Added here';
   if (source === 'claude-code:user') return 'Your own (from Claude Code)';
+  if (source === 'claude-code:repo') return 'From your project folders (Claude Code)';
   if (source.startsWith('claude-code:plugin:')) return `Plugin: ${source.slice('claude-code:plugin:'.length)}`;
   if (source.startsWith('plugin:')) return `Plugin: ${source.slice('plugin:'.length)} (GitHub)`;
   return source;

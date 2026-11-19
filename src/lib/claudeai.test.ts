@@ -93,6 +93,16 @@ describe('claude.ai export', () => {
     expect(exports.find((x) => x.email === 'sam@work.example')!.units.map((u) => u.title)).toEqual(['Quarterly plan']);
   });
 
+  it("the parts picked as loose zips, with another account's zip beside them, still come together", async () => {
+    const parts = splitFolder('claude-export-personal', 'acct-1', 'sam@example.com', [conv('c1', 'One')]).map((f) => ({ ...f, path: f.path.split('/').pop()! }));
+    const other = ef('data-agency.zip', zip({ 'conversations.json': [conv('w1', 'Kickoff', 'acct-2')], 'users.json': [{ uuid: 'acct-2', email_address: 'sam@agency.example' }] }));
+    const { exports } = await readExports([...parts, other]);
+    expect(exports.map((x) => x.label).sort()).toEqual(['claude.ai, sam@agency.example', 'claude.ai, sam@example.com']);
+    const p = exports.find((x) => x.email === 'sam@example.com')!;
+    expect(p.notKept.filter((n) => n.id.startsWith('artifact:'))).toHaveLength(1);
+    expect(p.inputs).toContain('frames-000.zip');
+  });
+
   it('a zip inside a zip is opened too', async () => {
     const outer = zip({ 'claude-export/conversations-000.zip': zip({ 'conversations.json': [conv('c1', 'One')] }) });
     const { exports } = await readExports([ef('download.zip', outer)]);

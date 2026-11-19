@@ -57,7 +57,7 @@ export function ImportView(props: { request: Request; serverName: string; admin:
       <div className="relative min-w-0 flex-1">
         <ImportWizard {...props} />
         {isDesktop && panel === 'closed' && (
-          <Button size="sm" variant="outline" className="absolute right-4 top-4 bg-card" onClick={() => setPanel('open')}><Sparkles className="size-3.5 text-primary" />Ask the guide</Button>
+          <Button size="sm" variant="outline" className="absolute bottom-4 right-6 bg-card shadow-xs" onClick={() => setPanel('open')}><Sparkles className="size-3.5 text-primary" />Ask the guide</Button>
         )}
       </div>
       {showPanel && (

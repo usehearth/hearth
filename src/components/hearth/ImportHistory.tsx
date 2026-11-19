@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { ImportReceipt } from '@/components/hearth/ImportReceipt';
 import { SectionHead } from '@/components/hearth/ServerSettings';
 import { errorText } from '@/lib/hearth';
-import { headline, type Receipt, type ReceiptSummary } from '@/lib/receipt';
+import { countsLine, type Receipt, type ReceiptSummary } from '@/lib/receipt';
 
 type Request = <T = unknown>(method: string, params?: unknown) => Promise<T>;
 const n = (x: number) => x.toLocaleString('en-GB');
@@ -46,7 +46,7 @@ export function ImportHistory({ request, serverName, onStart }: { request: Reque
                 {r.totals.notKept ? <CircleAlert className="mt-0.5 size-3.5 shrink-0 text-warning-text" /> : <Check className="mt-0.5 size-3.5 shrink-0 text-success" />}
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-medium">{at(r.at)}</span>
-                  <span className="block text-xs">{headline(r)}{r.sinceLast ? ` ${n(r.sinceLast.new)} new since the import before.` : ''}</span>
+                  <span className="block text-xs tabular-nums">{countsLine(r.totals)}{r.sinceLast ? (r.sinceLast.new ? ` · ${n(r.sinceLast.new)} new since the import before` : ' · nothing new since the import before') : ''}</span>
                   <span className="block truncate text-xs text-muted-foreground">{r.sources.map((s) => `${s.label}: ${n(s.kept + s.here)} of ${n(s.found)}`).join(' · ')}</span>
                 </span>
                 {loading === r.runId ? <Loader2 className="size-3.5 animate-spin" /> : <ChevronRight className="mt-0.5 size-3.5 text-muted-foreground" />}

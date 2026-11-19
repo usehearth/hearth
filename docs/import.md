@@ -21,6 +21,23 @@ Nothing is ever removed from Claude, from the computer or from the export. Heart
 
 The same flow opens from the sidebar ("Bring everything from Claude"), from Settings, Import from Claude, from Settings, Extensions (at its skills part), after adding a server that has no history yet, and as step 5 of first-run setup.
 
+### What it looks like
+
+Made-up data on the desktop dev build, against a throwaway server (19 Nov):
+
+| Step | |
+|---|---|
+| Setup's checklist, with the new Import step | ![](images/import/01-setup-checklist.png) |
+| Find: two homes in the person's terms, a claude.ai export added as loose zips, skills, the one button | ![](images/import/02-find.png) |
+| Review (optional): what to bring, where conversations go (grouped, searchable), where skills go | ![](images/import/03-review.png) |
+| Bringing it across | ![](images/import/04-bringing-across.png) |
+| The receipt | ![](images/import/05-receipt.png) |
+| The guide answering from the receipt (a scripted stand-in model; no real key) | ![](images/import/06-guide.png) |
+| Setup's Done step | ![](images/import/07-setup-done.png) |
+| A second run: everything already here | ![](images/import/08-rerun-receipt.png) |
+| Settings, Import from Claude: every receipt, reopened and saved | ![](images/import/09-settings-import-history.png) |
+| Settings, Extensions opens the same flow at its skills part | ![](images/import/10-settings-extensions.png) |
+
 ## What stays on the computer
 
 - A skill, subagent, slash command or output style that looks like it holds a secret (the same patterns as the server's scrubber and runner), or that names a client (the server's client names), is never sent. It is on the receipt as held back, with the reason. The server checks everything again before it saves.

@@ -1,6 +1,6 @@
 // The receipt in words (src/lib/receipt.ts): the top line, the sums, the saved file, and the guide's copy.
 import { describe, expect, it } from 'vitest';
-import { addsUp, forGuide, headline, receiptCsv, receiptText, sinceLastLine, type Receipt } from './receipt';
+import { addsUp, forGuide, headline, oneLine, receiptCsv, receiptText, sinceLastLine, type Receipt } from './receipt';
 
 const receipt = (over: Partial<Receipt> = {}): Receipt => ({
   v: 1, runId: 4, at: '2026-11-19T10:00:00Z', by: 'owner', fresh: 2, changed: 1, check: { ok: true, problems: [] },
@@ -24,6 +24,7 @@ describe('import receipt', () => {
     expect(headline({ totals: { found: 3, kept: 0, here: 3, notKept: 0 } })).toBe('Everything found was already here (3 things).');
     expect(headline({ totals: { found: 1, kept: 0, here: 0, notKept: 1 } })).toBe('1 of 1 was not kept: see why below.');
     expect(headline({ totals: { found: 0, kept: 0, here: 0, notKept: 0 } })).toBe('Nothing was found to bring across.');
+    expect(oneLine(receipt())).toBe('4 of 6 things are on your server; 2 were not kept, and the receipt in Settings, Import from Claude says why.');
   });
 
   it('checks that found = kept + already here + not kept, everywhere, and that every not-kept thing is named', () => {

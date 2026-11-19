@@ -115,8 +115,10 @@ export function homeWords(s: LocalSource): { title: string; who: string | null; 
     : s.account ? `Claude Code: ${s.account}` : names.length ? `Claude Code: ${list(names)}` : 'Claude Code on this computer';
   const who = s.email ? `Signed in as ${s.email}${s.org && !s.org.includes(s.email) ? ` (${s.org})` : ''}` : null;
   const term = s.terminal ? `${count(s.terminal, 'session')} from the terminal` : '';
-  const prof = profiles.length > 1
-    ? `${list(names)} all keep their Code sessions here: ${profiles.length === 2 ? 'both are' : 'all are'} included${term ? `, with ${term}` : ''}.`
+  const fromProfiles = profiles.map((p, i) => `${count(p.sessions, 'session')} from ${names[i] === 'the main Claude app' ? names[i] : `the ${names[i]} profile`}`);
+  // A ~/.claude-something home is its own setup: a desktop profile's session in it is a copy, not where that profile lives.
+  const prof = s.account ? ([term, ...fromProfiles].filter(Boolean).length ? `${list([term, ...fromProfiles].filter(Boolean))}.`.replace(/^./, (c) => c.toUpperCase()) : null)
+    : profiles.length > 1 ? `${list(names)} all keep their Code sessions here: ${profiles.length === 2 ? 'both are' : 'all are'} included${term ? `, with ${term}` : ''}.`
     : profiles.length === 1 ? `The ${names[0]} profile keeps its Code sessions here${term ? `, with ${term}` : ''}.` : term ? `${term[0].toUpperCase()}${term.slice(1)}.` : null;
   const parts = [s.conversations ? `${count(s.conversations, 'conversation')}${s.folders ? ` from ${count(s.folders, 'folder')}` : ''}` : '',
     s.skills ? count(s.skills, 'skill') : '', s.agents ? count(s.agents, 'subagent') : '', s.commands ? count(s.commands, 'slash command') : '',
@@ -288,20 +290,24 @@ export interface RunProgress { phase: Phase; conversations: Progress | null; ext
 export async function bringAcross(o: {
   request: Request; preview: Preview; choices: Record<string, Choice>; pool?: string; gathered: Gathered; scopes?: Record<string, string>;
   onProgress: (p: RunProgress) => void; stop?: () => boolean;
-}): Promise<{ begun: Begun; receipt: Receipt; report: any }> {
+  /** The server counts receipts (`_hearth/import/info` says `receipts: true`). An older one takes the conversations and
+   * memories as before, no skills, and answers with no receipt. */
+  receipts?: boolean;
+}): Promise<{ begun: Begun; receipt: Receipt | null; report: any }> {
+  const receipts = o.receipts !== false;
   const { request, gathered: g } = o;
   const begun = await request<Begun>('_hearth/import/begin', { token: o.preview.token, choices: o.choices, ...(o.pool ? { pool: o.pool } : {}) });
-  const rp: RunProgress = { phase: 'conversations', conversations: null, extensions: { done: 0, total: g.config.length }, memories: { done: 0, total: g.memories.reduce((n, m) => n + m.files.length, 0) } };
+  const rp: RunProgress = { phase: 'conversations', conversations: null, extensions: { done: 0, total: receipts ? g.config.length : 0 }, memories: { done: 0, total: g.memories.reduce((n, m) => n + m.files.length, 0) } };
   const tell = () => o.onProgress({ ...rp, extensions: { ...rp.extensions }, memories: { ...rp.memories } });
   let failed: Progress['failed'] = [];
   await upload(request, begun, g.units, (p) => { rp.conversations = p; failed = p.failed; tell(); }, o.stop, false);
-  if (!o.stop?.()) {
+  if (!o.stop?.() && receipts) {
     rp.phase = 'extensions'; tell();
     // In batches that stay well under the connection's message size.
     let batch: ConfigItem[] = [], size = 0;
     const send = async () => {
       if (!batch.length) return;
-      await request('_hearth/import/extensions', { runId: begun.runId, items: batch.map((c) => ({ key: c.key, kind: c.kind, name: c.name, description: c.description, content: c.content, files: c.files, repo: c.repo, origin: c.origin === 'repo' ? 'project folder' : c.origin,
+      await request('_hearth/import/extensions', { runId: begun.runId, items: batch.map((c) => ({ key: c.key, kind: c.kind, name: c.name, description: c.description, content: c.content, files: c.files, repo: c.repo, origin: c.origin,
         ...(o.scopes?.[configGroup(c)] ? { scope: o.scopes[configGroup(c)] } : {}) })) });
       rp.extensions.done += batch.length; tell();
       batch = []; size = 0;
@@ -317,11 +323,11 @@ export async function bringAcross(o: {
     rp.phase = 'memories'; tell();
     for (const m of g.memories) for (let i = 0; i < m.files.length; i += 500) {
       const part = m.files.slice(i, i + 500);
-      await request('_hearth/import/memories', { runId: begun.runId, account: m.account, files: part });
+      await request('_hearth/import/memories', { ...(receipts ? { runId: begun.runId } : {}), account: m.account, files: part });
       rp.memories.done += part.length; tell();
     }
   }
   rp.phase = 'counting'; tell();
-  const fin = await request<{ runId: number; report: any; receipt: Receipt }>('_hearth/import/finish', { runId: begun.runId, failed: failed.map((f) => ({ id: f.id, error: f.error })), stopped: !!o.stop?.() });
-  return { begun, receipt: fin.receipt, report: fin.report };
+  const fin = await request<{ runId: number; report: any; receipt?: Receipt }>('_hearth/import/finish', { runId: begun.runId, failed: failed.map((f) => ({ id: f.id, error: f.error })), stopped: !!o.stop?.() });
+  return { begun, receipt: fin.receipt ?? null, report: fin.report };
 }

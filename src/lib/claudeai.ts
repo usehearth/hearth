@@ -144,7 +144,12 @@ export async function readExports(files: ExportFile[]): Promise<{ exports: ChatE
   for (const { e, j } of memDocs) if (j.account_uuid && !groupAccount.has(e.group)) groupAccount.set(e.group, String(j.account_uuid));
   // Old single-file pick (a conversations.json alone, or a zip without account ids): the file's name stands in.
   const known = [...new Set(groupAccount.values())];
-  const accountOf = (e: Entry, own?: string | null) => own || groupAccount.get(e.group) || (known.length === 1 ? known[0] : e.group);
+  // claude.ai's split parts picked as loose zips (conversations-000.zip, frames-000.zip, ...) are one export: a part with
+  // no account id of its own (the artifacts, the Projects) goes with the other parts' account.
+  const SPLIT = /-\d{3}\.zip$/i;
+  const splitKnown = [...new Set([...groupAccount.entries()].filter(([g]) => SPLIT.test(g)).map(([, a]) => a))];
+  const accountOf = (e: Entry, own?: string | null) => own || groupAccount.get(e.group)
+    || (SPLIT.test(e.group) && splitKnown.length === 1 ? splitKnown[0] : known.length === 1 ? known[0] : e.group);
   if (!convs.length && !memDocs.length) {
     throw new Error(files.length ? 'No claude.ai chats or memories in what you added. Add the whole export: the zip claude.ai emailed you, or the folder you unzipped it into.' : 'Nothing added yet.');
   }

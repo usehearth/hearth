@@ -14,10 +14,10 @@ import { cn } from '@/lib/utils';
 import { readExports, type ChatExport, type ExportFile } from '@/lib/claudeai';
 import { filesFromDrop, filesFromInput } from '@/lib/dropfiles';
 import {
-  bringAcross, canScanThisMachine, configGroup, configTitle, defaultChoices, gather, homeWords, localSources, previewOf, readConfig, scanLocal,
+  bringAcross, canScanThisMachine, configGroup, defaultChoices, gather, homeWords, localSources, previewOf, readConfig, scanLocal,
   type Choice, type ConfigItem, type Gathered, type LocalSource, type LocalUnit, type Odd, type Preview, type Proposal, type RunProgress,
 } from '@/lib/importer';
-import { headline, type Receipt } from '@/lib/receipt';
+import { oneLine, type Receipt } from '@/lib/receipt';
 import { setImportSnapshot, type ImportSnapshot } from '@/lib/importState';
 
 type Request = <T = unknown>(method: string, params?: unknown) => Promise<T>;
@@ -34,7 +34,9 @@ const when = (ms: number | null | undefined) => {
 };
 const inputCls = 'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-ring/40';
 
-interface Info { available: boolean; conversations: number; clientTerms?: string[]; hub?: boolean; lastReceipt?: { runId: number; at: string } | null }
+interface Info { available: boolean; conversations: number; clientTerms?: string[]; hub?: boolean; lastReceipt?: { runId: number; at: string } | null;
+  /** The server counts a receipt and takes skills and the like in the same run (older servers don't). */
+  receipts?: boolean }
 
 export function ImportWizard({ request, serverName, admin, part, onDone, setup }: {
   request: Request; serverName: string; admin: boolean;
@@ -65,6 +67,8 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
   const [progress, setProgress] = useState<RunProgress | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [created, setCreated] = useState<string[]>([]);
+  /** An older server answers with no receipt: what it said instead. */
+  const [plain, setPlain] = useState<string | null>(null);
   const [drag, setDrag] = useState(false);
   const stopped = useRef(false);
   const zipIn = useRef<HTMLInputElement>(null);
@@ -132,8 +136,10 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
     setErr(null); setPhase('importing'); stopped.current = false;
     try {
       const p = preview ?? await previewOf(request, [], scan?.home ?? '', gathered.inventory);
-      const r = await bringAcross({ request, preview: p, choices, pool, gathered, scopes, onProgress: setProgress, stop: () => stopped.current });
-      setReceipt(r.receipt); setCreated(r.begun.created); setPhase('done');
+      const r = await bringAcross({ request, preview: p, choices, pool, gathered, scopes, onProgress: setProgress, stop: () => stopped.current, receipts: info?.receipts === true });
+      setReceipt(r.receipt); setCreated(r.begun.created);
+      if (!r.receipt) setPlain(`Imported ${n(r.report?.uploaded ?? 0)} conversations${r.begun.unchanged ? `; ${n(r.begun.unchanged)} were already here` : ''}. This server is older: it can't count a receipt, and skills and the like need it updated. Update Hearth Server, then run this again: nothing will be sent twice.`);
+      setPhase('done');
     } catch (e) { setErr(errorText(e)); setPhase('ready'); }
   };
 
@@ -164,7 +170,7 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
             <span className="text-muted-foreground">Setting up Hearth · step 5 of 6</span>
             <span className="ml-auto flex gap-2">
               {phase !== 'done' && phase !== 'importing' && <Button size="sm" variant="ghost" onClick={setup.onSkip}>Skip for now</Button>}
-              {phase === 'done' && receipt && <Button size="sm" onClick={() => setup.onContinue(headline(receipt))}>Continue setup</Button>}
+              {phase === 'done' && <Button size="sm" onClick={() => setup.onContinue(receipt ? oneLine(receipt) : plain ?? '')}>Continue setup</Button>}
             </span>
           </div>
         )}
@@ -237,9 +243,9 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
 
         {phase === 'importing' && <Running p={progress} onStop={() => { stopped.current = true; }} />}
 
-        {phase === 'done' && receipt && (
+        {phase === 'done' && (receipt || plain) && (
           <div className="mt-5 space-y-4">
-            <ImportReceipt receipt={receipt} serverName={serverName} />
+            {receipt ? <ImportReceipt receipt={receipt} serverName={serverName} /> : <p role="status" className="rounded-xl border bg-card px-4 py-3 text-sm">{plain}</p>}
             <p className="text-sm text-muted-foreground">Each project's history is in the sidebar, under the project. Search history finds anything you said or were told. Run this again any time: only what is new or changed will move.</p>
             {!setup && <Button onClick={() => { const slug = created[0]; const c = Object.values(choices).find((x) => x.action === 'new' && x.slug === slug) as { name?: string } | undefined; onDone(slug ? { slug, name: c?.name || slug } : undefined); }}>Open Hearth</Button>}
           </div>
@@ -302,7 +308,7 @@ function SkillsSummary({ gathered, config, scanning }: { gathered: Gathered | nu
   return (
     <div className="space-y-1.5 rounded-xl border bg-card px-4 py-3 text-sm">
       <p>{gathered.config.length ? `${n(gathered.config.length)} to bring: ${[byKind('skill') && count(byKind('skill'), 'skill'), byKind('agent') && count(byKind('agent'), 'subagent'), byKind('command') && count(byKind('command'), 'slash command'), byKind('output_style') && count(byKind('output_style'), 'output style'), byKind('hook') && count(byKind('hook'), 'set of hooks', 'sets of hooks')].filter(Boolean).join(', ')}${plugins.size ? `, from your own setup and ${count(plugins.size, 'plugin')}` : ''}.` : 'Nothing to bring.'}</p>
-      <p className="text-xs text-muted-foreground">They go to every project{local ? `, except ${n(local)} kept inside a project folder, which go to that project` : ''}. Hooks arrive switched off until you turn them on.</p>
+      <p className="text-xs text-muted-foreground">They go to every project{local ? `, except ${local === 1 ? 'one' : n(local)} kept inside a project folder, which ${local === 1 ? 'goes' : 'go'} to that folder's project` : ''}. Hooks arrive switched off until you turn them on.</p>
       {held.length > 0 && <p className="flex items-start gap-1.5 text-xs"><Lock className="mt-0.5 size-3 shrink-0" />{count(held.length, 'item stays', 'items stay')} on this computer: {held.map((h) => h.title).slice(0, 5).join(', ')}{held.length > 5 ? '…' : ''}. {held.some((h) => h.reason === 'secret') ? 'They look like they hold a secret' : 'They name a client'}{held.some((h) => h.reason === 'secret') && held.some((h) => h.reason === 'client') ? ', or name a client' : ''}. The receipt names each one.</p>}
       {odd.length > 0 && <p className="text-xs text-muted-foreground">{count(odd.length, 'item')} couldn't be read; the receipt says why.</p>}
     </div>
@@ -312,14 +318,17 @@ function SkillsSummary({ gathered, config, scanning }: { gathered: Gathered | nu
 function Summary({ gathered, preview, choices, info, planning, busy, onGo, onReview }: { gathered: Gathered | null; preview: Preview | null; choices: Record<string, Choice>; info: Info | null; planning: boolean; busy: boolean; onGo: () => void; onReview: () => void }) {
   if (!gathered) return null;
   const items = gathered.inventory.items;
-  const by = (k: string) => items.filter((i) => i.kind === k && !i.dupOf).length;
-  const cfg = items.filter((i) => ['skill', 'agent', 'command', 'output_style', 'hook'].includes(i.kind) && !i.dupOf).length;
+  const by = (k: string) => items.filter((i) => i.kind === k).length;
+  const cfg = items.filter((i) => ['skill', 'agent', 'command', 'output_style', 'hook'].includes(i.kind)).length;
+  const twice = items.filter((i) => i.dupOf).length;
+  const other = items.filter((i) => i.kind === 'other').length;
   const plan = preview ? planOf(preview, choices) : null;
   const nothing = !items.length;
   return (
     <section aria-labelledby="h-summary" className="rounded-xl border bg-card p-4">
       <h3 id="h-summary" className="text-sm font-semibold">{nothing ? 'Nothing found yet' : `Found ${count(items.length, 'thing')}`}</h3>
-      {!nothing && <p className="mt-1 text-sm">{[by('conversation') && count(by('conversation'), 'Claude Code conversation'), by('chat') && count(by('chat'), 'claude.ai chat'), by('memory') && count(by('memory'), 'memory', 'memories'), cfg && count(cfg, 'skill or the like', 'skills and the like')].filter(Boolean).join(', ')}.</p>}
+      {!nothing && <p className="mt-1 text-sm">{[by('conversation') && count(by('conversation'), 'Claude Code conversation'), by('chat') && count(by('chat'), 'claude.ai chat'), by('memory') && count(by('memory'), 'memory', 'memories'), cfg && count(cfg, 'skill or the like', 'skills and the like'), other && count(other, 'other part', 'other parts')].filter(Boolean).join(', ')}.
+        {twice ? ` ${count(twice, 'is the same thing', 'are the same things')} found in a second place: brought once.` : ''}</p>}
       {plan && (
         <p className="mt-1 text-sm text-muted-foreground">
           Suggested: conversations go into {count(plan.projects, 'project')}, one per repo or folder{plan.newProjects ? ` (${n(plan.newProjects)} new` : ''}{plan.clientProjects ? `${plan.newProjects ? ', ' : ' ('}${n(plan.clientProjects)} tagged as client work` : ''}{plan.newProjects || plan.clientProjects ? ')' : ''}.
@@ -404,9 +413,12 @@ function Review({ preview, gathered, sources, exports, choices, setChoices, pool
   const toggle = <T,>(set: Set<T>, v: T) => { const x = new Set(set); if (x.has(v)) x.delete(v); else x.add(v); return x; };
   const cfgGroups = useMemo(() => {
     const m = new Map<string, ConfigItem[]>();
-    for (const c of config) if (c.content != null) m.set(configGroup(c), [...(m.get(configGroup(c)) ?? []), c]);
+    // Only what can go (held-back items stay on this computer whatever is picked here). A left-out group keeps its row.
+    const sendable = new Set(gathered.config.map((c) => c.key));
+    for (const c of config) if (sendable.has(c.key) || (leftOutGroups.has(configGroup(c)) && c.content != null && !gathered.inventory.items.some((i) => i.id === c.key && (i.reason === 'secret' || i.reason === 'client'))))
+      m.set(configGroup(c), [...(m.get(configGroup(c)) ?? []), c]);
     return [...m.entries()];
-  }, [config]);
+  }, [config, gathered, leftOutGroups]);
   const labelOf = (items: ConfigItem[]) => {
     const c = items[0];
     const home = sources.find((s) => s.path === c.source);
@@ -473,7 +485,7 @@ function Review({ preview, gathered, sources, exports, choices, setChoices, pool
               const value = leftOutGroups.has(g) ? 'out' : scopes[g] ?? '';
               return (
                 <li key={g} className="flex flex-wrap items-center gap-2 px-3 py-2">
-                  <span className="min-w-0 flex-1"><span className="block text-sm">{labelOf(items)}</span><span className="block truncate text-xs text-muted-foreground">{items.map((c) => configTitle(c)).slice(0, 6).join(', ')}{items.length > 6 ? `, and ${n(items.length - 6)} more` : ''}</span></span>
+                  <span className="min-w-0 flex-1"><span className="block text-sm">{labelOf(items)}</span><span className="block truncate text-xs text-muted-foreground">{items.map((c) => c.name).slice(0, 6).join(', ')}{items.length > 6 ? `, and ${n(items.length - 6)} more` : ''}</span></span>
                   <select aria-label={`Where ${labelOf(items)} goes`} value={value} className={cn(inputCls, 'w-52')}
                     onChange={(e) => { const v = e.target.value; const out = new Set(leftOutGroups); out.delete(g); if (v === 'out') out.add(g); setLeftOutGroups(out); setScopes((s) => { const x = { ...s }; if (v && v !== 'out') x[g] = v; else delete x[g]; return x; }); }}>
                     <option value="">As suggested ({suggested})</option>

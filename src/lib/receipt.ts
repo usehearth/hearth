@@ -51,6 +51,13 @@ export function headline(r: Pick<Receipt, 'totals'>): string {
   return `${n(t.notKept)} of ${n(t.found)} ${t.notKept === 1 ? 'was' : 'were'} not kept: see why below.`;
 }
 
+/** The receipt in one sentence that stands on its own (setup's Done step, elsewhere away from the receipt). */
+export function oneLine(r: Pick<Receipt, 'totals'>): string {
+  const t = r.totals;
+  if (!t.notKept) return headline(r);
+  return `${n(t.kept + t.here)} of ${n(t.found)} things are on your server; ${n(t.notKept)} ${t.notKept === 1 ? 'was' : 'were'} not kept, and the receipt in Settings, Import from Claude says why.`;
+}
+
 /** "12 new since your last import on 18 Nov (3 changed)", or null on a first import. */
 export function sinceLastLine(r: Pick<Receipt, 'sinceLast'>): string | null {
   const s = r.sinceLast;
