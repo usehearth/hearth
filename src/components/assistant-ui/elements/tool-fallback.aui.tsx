@@ -42,6 +42,7 @@ import {
 } from "./collapsible-root";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { readableToolName } from "@/components/hearth/toolNames";
 
 const ANIMATION_DURATION = 200;
 
@@ -1279,7 +1280,7 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   return (
     <ToolFallbackRoot open={open} onOpenChange={setOpen} data-tool-call-id={(part as { toolCallId?: string }).toolCallId}>
       <ToolFallbackTrigger
-        toolName={label}
+        toolName={readableToolName(label)}
         status={status}
         isError={isError}
         responseDeliveryStatus={responseDeliveryStatus}
