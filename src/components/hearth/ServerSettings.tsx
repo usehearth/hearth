@@ -1,7 +1,7 @@
 // Settings sections that read the server's own records (each shown only when the server has the extension):
 // the audit log (`audit`, admin devices). Nothing here is chat content.
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronRight, Loader2, RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { errorText } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
@@ -101,7 +101,7 @@ const KIND_HINT: Record<string, string> = {
 /** A project the import can give extensions to (the "for" box suggests these). */
 export interface ProjectChoice { slug: string; name: string; client?: string }
 
-export function ExtensionsPage({ request, projects = [] }: { request: Request; projects?: ProjectChoice[] }) {
+export function ExtensionsPage({ request, onImport }: { request: Request; projects?: ProjectChoice[]; onImport?: () => void }) {
   const [items, setItems] = useState<Extension[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [edit, setEdit] = useState<Partial<Extension> | null>(null);
@@ -136,7 +136,7 @@ export function ExtensionsPage({ request, projects = [] }: { request: Request; p
       <SectionHead title="Extensions" sub="Your own skills, slash commands, subagents, hooks and output styles. They reach every project's agents (or one project's). A repo's own .claude folder is never used."
         action={<Button size="sm" onClick={() => setEdit({ kind: 'command', scope: 'global', enabled: true, name: '', content: '' })}>Add</Button>} />
       {error && <p role="alert" className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
-      <ClaudeImport request={request} projects={projects} onDone={load} onError={setError} />
+      {onImport && <ClaudeImport onImport={onImport} />}
       <PluginImport request={request} onDone={load} onError={setError} />
       {edit && (
         <div className="mb-4 space-y-2 rounded-xl border bg-card p-3 text-sm">
@@ -318,126 +318,22 @@ export function ConnectorsPage({ request }: { request: Request }) {
 // Schedules moved to its own file (Schedules.tsx); re-exported so Settings keeps one import.
 export { SchedulesPage } from '@/components/hearth/Schedules';
 
-interface CcItem { key: string; source: string; kind: string; name: string; description: string | null; bytes: number; importable: boolean; held?: string[]; leftOut?: string[] }
-const HELD: Record<string, string> = { 'names-a-client': 'names a client' };
-
 /**
- * Bring Claude Code's own skills, slash commands, subagents, output styles and hooks over from the laptop (the work
- * runner reads ~/.claude). Anything that looks like it holds a secret or names a client stays on the laptop.
+ * Claude Code's own skills, slash commands, subagents, output styles and plugins come over with everything else, in
+ * the guided import (src/components/hearth/ImportWizard.tsx, docs/import.md): this opens it at that part.
  */
-function ClaudeImport({ request, projects, onDone, onError }: { request: Request; projects: ProjectChoice[]; onDone: () => void; onError: (m: string) => void }) {
-  const [items, setItems] = useState<CcItem[] | null>(null);
-  const [picked, setPicked] = useState<Set<string>>(new Set());
-  // Where each group goes: "global" or a project slug (Umbraco skills to the Umbraco repos, your own agents everywhere).
-  const [scopes, setScopes] = useState<Record<string, string>>({});
-  const [open, setOpen] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState(false);
-  const [askHooks, setAskHooks] = useState(false);
-  const [done, setDone] = useState<string | null>(null);
-  const look = async () => {
-    setBusy(true); setItems(null); setDone(null);
-    try {
-      const r = await request<{ items: CcItem[] }>('_hearth/extensions/import', { source: 'claude-code' });
-      setItems(r.items);
-      // Your own items start ticked; a plugin's start unticked and folded, so a big plugin is one decision, not 50.
-      setPicked(new Set(r.items.filter((i) => i.importable && i.kind !== 'hook' && i.source === 'user').map((i) => i.key)));
-      setOpen(new Set(['user']));
-      setScopes({});
-    } catch (e) { onError(errorText(e)); } finally { setBusy(false); }
-  };
-  const groups = useMemo(() => {
-    const m = new Map<string, CcItem[]>();
-    for (const i of items ?? []) m.set(i.source, [...(m.get(i.source) ?? []), i]);
-    return [...m.entries()].sort(([a], [b]) => (a === 'user' ? -1 : b === 'user' ? 1 : a.localeCompare(b)));
-  }, [items]);
-  const groupName = (src: string) => (src === 'user' ? 'Your own (~/.claude)' : src.startsWith('plugin:') ? `Plugin: ${src.slice(7)}` : src);
-  const hooksPicked = !!items?.some((i) => i.kind === 'hook' && picked.has(i.key));
-  const install = async (confirmed = false) => {
-    if (hooksPicked && !confirmed) { setAskHooks(true); return; }
-    setAskHooks(false); setBusy(true);
-    try {
-      const src = new Map((items ?? []).map((i) => [i.key, i.source]));
-      const picks = [...picked].map((key) => ({ key, scope: (scopes[src.get(key) ?? ''] ?? '').trim() || 'global' }));
-      const r = await request<{ saved: string[]; skipped: string[] }>('_hearth/extensions/import', { source: 'claude-code', install: true, picks, confirmHooks: hooksPicked });
-      setDone(`Imported ${r.saved.length}${r.skipped.length ? `, left out ${r.skipped.length}: ${r.skipped.join(', ')}` : ''}.`);
-      setItems(null); onDone();
-    } catch (e) { onError(errorText(e)); } finally { setBusy(false); }
-  };
-  const toggle = (k: string) => setPicked((cur) => { const n = new Set(cur); if (n.has(k)) n.delete(k); else n.add(k); return n; });
-  const toggleGroup = (list: CcItem[], on: boolean) => setPicked((cur) => {
-    const n = new Set(cur);
-    for (const i of list) if (i.importable && i.kind !== 'hook') { if (on) n.add(i.key); else n.delete(i.key); }
-    return n;
-  });
-  const fold = (src: string) => setOpen((cur) => { const n = new Set(cur); if (n.has(src)) n.delete(src); else n.add(src); return n; });
+function ClaudeImport({ onImport }: { onImport: () => void }) {
   return (
-    <div className="mb-4 rounded-xl border bg-card p-3 text-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <div className="font-medium">Import from Claude Code</div>
-          <p className="text-xs text-muted-foreground">Your skills, slash commands, subagents, output styles and hooks, read from Claude Code on the work runner. Grouped by where they come from: your own, then each plugin.</p>
-        </div>
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => void look()}>{busy && !items && <Loader2 className="size-3.5 animate-spin" />}{items ? 'Look again' : 'Look'}</Button>
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-card p-3 text-sm">
+      <div className="min-w-0 flex-1">
+        <div className="font-medium">Import from Claude Code</div>
+        <p className="text-xs text-muted-foreground">Your skills, slash commands, subagents, output styles and plugins, from every Claude Code home on this computer, with your conversations and chats in one go. Anything that looks like it holds a secret or names a client stays on the computer.</p>
       </div>
-      {items && !items.length && <p className="mt-2 text-xs text-muted-foreground">Claude Code has nothing Hearth can import on that runner.</p>}
-      {items && items.length > 0 && (
-        <div className="mt-3 space-y-2">
-          {groups.map(([src, list]) => {
-            const usable = list.filter((i) => i.importable && i.kind !== 'hook');
-            const on = usable.filter((i) => picked.has(i.key)).length;
-            const isOpen = open.has(src);
-            return (
-              <section key={src} className="rounded-lg border">
-                <div className="flex flex-wrap items-center gap-2 px-2 py-1.5">
-                  <input type="checkbox" className="size-4 accent-primary" aria-label={`Import all of ${groupName(src)}`} disabled={!usable.length}
-                    checked={!!usable.length && on === usable.length} ref={(el) => { if (el) el.indeterminate = on > 0 && on < usable.length; }}
-                    onChange={() => toggleGroup(list, on < usable.length)} />
-                  <button type="button" onClick={() => fold(src)} aria-expanded={isOpen} className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
-                    <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', isOpen && 'rotate-90')} />
-                    <span className="truncate font-medium">{groupName(src)}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">{on}/{list.length}</span>
-                  </button>
-                  <input value={scopes[src] ?? ''} onChange={(e) => setScopes((s) => ({ ...s, [src]: e.target.value }))} aria-label={`For (${groupName(src)})`}
-                    list="cc-import-projects" placeholder="global" title="global, or pick a project to give these to it only" className={cn(field, 'h-7 w-44 px-2 text-xs')} />
-                </div>
-                {isOpen && (
-                  <ul className="divide-y border-t">
-                    {list.map((i) => (
-                      <li key={i.key} className="flex items-start gap-2 px-2 py-1.5 pl-8">
-                        <input type="checkbox" className="mt-0.5 size-4 accent-primary" aria-label={`Import ${i.name}`} disabled={!i.importable}
-                          checked={picked.has(i.key)} onChange={() => toggle(i.key)} />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate"><span className="text-xs text-muted-foreground">{KIND_LABEL[i.kind] ?? i.kind}</span> {i.name}</div>
-                          {i.importable
-                            ? i.description && <div className="truncate text-xs text-muted-foreground">{i.description}</div>
-                            : <div className="text-xs text-muted-foreground">Stays on the laptop: {(i.held ?? []).map((h) => HELD[h] ?? `looks like it holds a ${h}`).join(', ') || 'not readable'}</div>}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-            );
-          })}
-          {/* Suggestions for every group's "for" box: global, then each project (shown by name, filled in as its slug). */}
-          <datalist id="cc-import-projects">
-            <option value="global">Every project</option>
-            {[...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => <option key={p.slug} value={p.slug}>{p.client ? `${p.name} (${p.client})` : p.name}</option>)}
-          </datalist>
-          <div className="sticky bottom-0 -mx-3 -mb-3 flex flex-wrap items-center gap-2 rounded-b-xl border-t bg-card px-3 py-2">
-            <Button size="sm" disabled={!picked.size || busy || askHooks} onClick={() => void install()}>{busy && <Loader2 className="size-3.5 animate-spin" />}Import {picked.size || ''}</Button>
-            <span className="text-xs text-muted-foreground">Each group goes where its box says (empty = global).</span>
-          </div>
-          {askHooks && <ConfirmLine question="Hooks run shell commands as the agent on every matching tool call. Import the ticked hooks?"
-            yes="Import with hooks" no="Not yet" destructive={false} busy={busy} onYes={() => void install(true)} onNo={() => setAskHooks(false)} />}
-        </div>
-      )}
-      {done && <p className="mt-2 text-xs text-muted-foreground">{done}</p>}
+      <Button size="sm" variant="outline" onClick={onImport}>Bring them from Claude</Button>
     </div>
   );
 }
 
-/** Install a Claude Code plugin from GitHub: preview what it holds, then install (hooks need their own tick). */
 function PluginImport({ request, onDone, onError }: { request: Request; onDone: () => void; onError: (m: string) => void }) {
   const [url, setUrl] = useState('');
   const [scope, setScope] = useState('global');

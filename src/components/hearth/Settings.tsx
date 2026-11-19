@@ -1,12 +1,13 @@
 // Settings: servers and this device's key, the server's model providers (read-only here, with health and a Test),
 // and appearance. Channels come when the server has them. Nothing here is chat content; keys are never shown.
 import { useCallback, useEffect, useState } from 'react';
-import { BarChart3, CalendarClock, Check, CircleAlert, Plug, Puzzle, KeyRound, Laptop, Loader2, MoonStar, Palette, Pencil, Plus, Radio, RefreshCw, ScrollText, Server as ServerIcon, ShieldAlert, Sparkles, Sun, Trash2, X, Zap } from 'lucide-react';
+import { BarChart3, CalendarClock, Download, Check, CircleAlert, Plug, Puzzle, KeyRound, Laptop, Loader2, MoonStar, Palette, Pencil, Plus, Radio, RefreshCw, ScrollText, Server as ServerIcon, ShieldAlert, Sparkles, Sun, Trash2, X, Zap } from 'lucide-react';
 import { AdminKeySettings } from '@/components/hearth/Admin';
 import { Button } from '@/components/ui/button';
 import { KeyPrompt } from '@/components/hearth/AddServer';
 import { DeviceKeys, ProviderForm } from '@/components/hearth/AdminSettings';
 import { AuditLog, ConnectorsPage, ExtensionsPage, SchedulesPage, SectionHead, UsagePage } from '@/components/hearth/ServerSettings';
+import { ImportHistory } from '@/components/hearth/ImportHistory';
 import type { DirectoryState } from '@/lib/directory';
 import { forgetKey, isDesktop, keyFor, removeServer, renameServer, type Server } from '@/lib/servers';
 import { setThemeMode, useThemeMode, type ThemeMode } from '@/lib/theme';
@@ -14,10 +15,12 @@ import { errorText } from '@/lib/hearth';
 import { notifyPref, setNotifyPref } from '@/lib/notify';
 import { cn } from '@/lib/utils';
 
-type Section = 'servers' | 'providers' | 'appearance' | 'audit' | 'usage' | 'extensions' | 'connectors' | 'schedules' | 'admin';
+type Section = 'servers' | 'providers' | 'appearance' | 'audit' | 'usage' | 'extensions' | 'connectors' | 'schedules' | 'admin' | 'import';
 
-export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged }: {
+export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged, onImport }: {
   servers: Server[];
+  /** Open the guided import ("skills": at its skills part). */
+  onImport?: (part?: 'skills') => void;
   server?: Server;
   dir: DirectoryState;
   onAdd: () => void;
@@ -34,6 +37,7 @@ export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged }: {
     ...(dir.state === 'ready' && dir.extensions.includes('schedules') ? [{ id: 'schedules' as const, label: 'Schedules', icon: CalendarClock }] : []),
     ...(dir.state === 'ready' && dir.extensions.includes('mcp') ? [{ id: 'connectors' as const, label: 'Connectors', icon: Plug }] : []),
     ...(dir.state === 'ready' && dir.extensions.includes('extensions') ? [{ id: 'extensions' as const, label: 'Extensions', icon: Puzzle }] : []),
+    ...(dir.state === 'ready' && dir.admin && dir.extensions.includes('import') ? [{ id: 'import' as const, label: 'Import from Claude', icon: Download }] : []),
     ...(dir.state === 'ready' && dir.extensions.includes('audit') ? [{ id: 'audit' as const, label: 'Audit log', icon: ScrollText }] : []),
     ...(dir.state === 'ready' && dir.extensions.includes('admin_threads') ? [{ id: 'admin' as const, label: 'Admin threads', icon: ShieldAlert }] : []),
   ];
@@ -58,7 +62,9 @@ export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged }: {
           {section === 'audit' && dir.state === 'ready' && <AuditLog request={dir.request} />}
           {section === 'admin' && dir.state === 'ready' && <AdminKeySettings request={dir.request} />}
           {section === 'usage' && dir.state === 'ready' && <UsagePage request={dir.request} />}
-          {section === 'extensions' && dir.state === 'ready' && <ExtensionsPage request={dir.request} projects={dir.groups.map((g) => ({ slug: g.project, name: g.name, client: g.client }))} />}
+          {section === 'extensions' && dir.state === 'ready' && <ExtensionsPage request={dir.request} projects={dir.groups.map((g) => ({ slug: g.project, name: g.name, client: g.client }))}
+            onImport={onImport && dir.admin && dir.extensions.includes('import') ? () => onImport('skills') : undefined} />}
+          {section === 'import' && dir.state === 'ready' && <ImportHistory request={dir.request} serverName={server?.name ?? 'your server'} onStart={() => onImport?.()} />}
           {section === 'connectors' && dir.state === 'ready' && <ConnectorsPage request={dir.request} />}
           {section === 'schedules' && dir.state === 'ready' && <SchedulesPage request={dir.request} />}
         </div>

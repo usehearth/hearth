@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { anthropic, findKeys, greeting, linkAllowed, openai, pickModel, runTool, runTurn, scrub, systemPrompt, type ChatItem, type ToolEnv } from './guide';
+import { anthropic, findKeys, greeting, importPrompt, linkAllowed, openai, pickModel, runTool, runTurn, scrub, systemPrompt, toolsFor, type ChatItem, type ToolEnv } from './guide';
 import { nextStep, providerVerdict, type SetupState } from './setup';
 import { friendly } from './directory';
 
@@ -105,7 +105,8 @@ describe('a turn', () => {
 describe('setup state', () => {
   it('walks the steps in order', () => {
     expect(nextStep('key')).toBe('server');
-    expect(nextStep('provider')).toBe('done');
+    expect(nextStep('provider')).toBe('import');
+    expect(nextStep('import')).toBe('done');
     expect(nextStep('done')).toBe('done');
   });
   it('says whether the server has a working model', () => {
@@ -125,5 +126,33 @@ describe('connect errors', () => {
     expect(friendly(new Error(''))).toMatch(/refused the key/);
     expect(friendly(undefined)).toMatch(/refused the key/);
     expect(friendly(new Error('No answer from the server.'))).toBe('No answer from the server.');
+  });
+});
+
+describe('the import step', () => {
+  it('offers two read-only import tools, in setup and in the import view, and no setup checks in the import view', () => {
+    const imp = toolsFor('import').map((t) => t.name);
+    expect(imp).toEqual(expect.arrayContaining(['import_sources', 'import_receipt', 'open_link', 'suggest_replies']));
+    expect(imp).not.toContain('check_docker');
+    expect(toolsFor('setup').map((t) => t.name)).toEqual(expect.arrayContaining(['check_address', 'import_receipt']));
+  });
+  it('reads the receipt and says plainly when there is none; never guesses', async () => {
+    const r = await runTool(env({ importReceipt: async () => ({ headline: 'Everything found was kept (3 things).', sources: [{ source: 'Claude Code: Work', found: 3, kept: 3, here: 0, notKept: 0 }] }) }), { id: '1', name: 'import_receipt', input: {} });
+    expect(r.content).toContain('Claude Code: Work');
+    const none = await runTool(env({ importReceipt: async () => null }), { id: '2', name: 'import_receipt', input: {} });
+    expect(none.content).toMatch(/No import has finished/);
+    const off = await runTool(env(), { id: '3', name: 'import_sources', input: {} });
+    expect(off.error).toBe(true);
+  });
+  it('scrubs anything key-shaped out of what the import found', async () => {
+    const r = await runTool(env({ importSources: async () => ({ homes: [{ title: 'Claude Code', note: 'sk-ant-api03-abcDEF123456789_xyz' }] }) }), { id: '1', name: 'import_sources', input: {} });
+    expect(r.content).not.toContain('sk-ant-api03');
+  });
+  it('tells the guide never to claim a thing was kept unless the receipt says so', () => {
+    for (const p of [importPrompt('Windows'), systemPrompt({ ...state, step: 'import' }, 'Windows')]) {
+      expect(p).toMatch(/Never say something was kept[^.]*unless import_receipt says so/);
+      expect(p).toMatch(/Nothing is ever removed/);
+    }
+    expect(greeting({ ...state, step: 'import' }, true)).toMatch(/bringing everything across/);
   });
 });

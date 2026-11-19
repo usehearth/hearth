@@ -135,7 +135,7 @@ pub fn run() {
             Ok(())
         })
         .manage(import::Scanned::default())
-        .invoke_handler(tauri::generate_handler![key_get, key_set, key_delete, admin_key_public, admin_key_create, admin_sign, import::import_sources, import::import_scan, import::import_read,
+        .invoke_handler(tauri::generate_handler![key_get, key_set, key_delete, admin_key_public, admin_key_create, admin_sign, import::import_sources, import::import_scan, import::import_read, import::import_config,
             guide::guide_check, guide::guide_status, guide::guide_call, guide::guide_forget, guide::guide_check_address, guide::guide_check_docker])
         .run(tauri::generate_context!())
         .expect("error while running Hearth");
