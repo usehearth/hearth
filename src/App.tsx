@@ -316,7 +316,7 @@ export default function App() {
             </div>
           )}
           {error && (
-            <div className="mx-5 mt-3 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
+            <div data-testid="error-banner" className="mx-5 mt-3 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
               <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" /><span className="text-foreground/90">{error}</span>
             </div>
           )}
