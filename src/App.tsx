@@ -15,6 +15,7 @@ import { ProjectSettings } from '@/components/hearth/ProjectSettings';
 import { HistoryView, ImportedThread, type Continued, type HistoryScope, type ImportedSummary } from '@/components/hearth/History';
 import { ImportWizard } from '@/components/hearth/ImportWizard';
 import { NewProject, type Made } from '@/components/hearth/NewProject';
+import { clientNames } from '@/lib/choices';
 import { ArchivedList, SearchResults, SidebarSearch, ThreadMenu, type SearchHit } from '@/components/hearth/ThreadTools';
 import type { CardEntry } from '@/lib/hearth';
 import { useDirectory, type ClientLine, type ImportedGroup, type ProjectGroup, type ThreadItem } from '@/lib/directory';
@@ -339,7 +340,7 @@ export default function App() {
               onDone={(p) => { dir.refresh(); if (p) openHistory({ project: p.slug, name: p.name }); else setView('thread'); }} /></div>
           )}
           {view === 'newproject' && dir.state === 'ready' && (
-            <div className="min-h-0 flex-1"><NewProject request={dir.request} onDone={made} /></div>
+            <div className="min-h-0 flex-1"><NewProject request={dir.request} clients={clientNames(dir.groups, dir.clients)} onDone={made} /></div>
           )}
           {view === 'needs' && dir.state === 'ready' && (
             <div className="min-h-0 flex-1"><NeedsYou cards={dir.cards} onAnswer={dir.answer} onOpen={openCard}
