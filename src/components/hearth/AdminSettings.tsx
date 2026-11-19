@@ -2,6 +2,7 @@
 // says this device is an admin device (the "admin device" tick on the server's page). Keys are write-only: a provider
 // key is sent once and never shown again; a new device key is shown here once, to copy into the other device.
 import { useCallback, useEffect, useState } from 'react';
+import { fullWhen, shortWhen } from '@/lib/dates';
 import { Check, Copy, KeyRound, Loader2, Plus, Smartphone, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { errorText } from '@/lib/hearth';
@@ -130,7 +131,7 @@ export function DeviceKeys({ request }: { request: Request }) {
               <Smartphone className="size-4 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1">
                 <span className="font-medium">{d.name}</span>{d.current && <span className="ml-1.5 text-xs text-primary">this device</span>}
-                <span className="block text-xs text-muted-foreground">{d.last_used_at ? `Last used ${new Date(d.last_used_at).toLocaleString()}` : 'Not used yet'}{d.created_by ? ` · made by ${d.created_by}` : ''}</span>
+                <span className="block text-xs text-muted-foreground">{d.last_used_at ? <span title={fullWhen(d.last_used_at)}>Last used {shortWhen(d.last_used_at)}</span> : 'Not used yet'}{d.created_by ? ` · made by ${d.created_by}` : ''}</span>
               </span>
               {!d.current && (confirm === d.id ? (
                 <span className="flex items-center gap-1.5">

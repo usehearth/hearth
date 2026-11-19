@@ -3,6 +3,7 @@
 // client folders refused, CLIProxyAPI changes need your yes). Every call is audited in a hash chain; this file shows that
 // audit beside the chat, the commands handed to you (with Copy), the "worth a look" flags, and the admin key settings.
 import { useCallback, useEffect, useState } from 'react';
+import { clockTime } from '@/lib/dates';
 import { Check, CircleAlert, Copy, KeyRound, Loader2, ShieldAlert, ShieldCheck, Terminal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { adminJson, adminKeyHome, adminPublicKey, createAdminKey, keyFingerprint, LINE_NAMES, type AdminFlag, type AdminInfo, type AuditEntry } from '@/lib/admin';
@@ -167,7 +168,7 @@ export function AdminAudit({ timeline, loading }: { timeline: { entries: AuditEn
                 <span className="font-medium">{e.kind === 'tool' || e.kind === 'card' ? e.tool : e.kind.replace('_', ' ')}</span>
                 {e.line && <span className="rounded bg-admin/15 px-1 text-[10px] font-semibold text-admin-text">{LINE_NAMES[e.line] ?? e.line}</span>}
                 <span className={cn('text-[11px]', bad ? 'text-admin-text' : 'text-muted-foreground')}>{(e.outcome ?? '').replace('_', ' ')}</span>
-                <span className="ml-auto text-[10px] text-muted-foreground">{new Date(e.at).toLocaleTimeString()}</span>
+                <span className="ml-auto text-[10px] text-muted-foreground">{clockTime(e.at)}</span>
               </div>
               {e.detail && <div className="mt-0.5 font-mono text-[11px] break-all text-muted-foreground">{e.detail}</div>}
             </li>
