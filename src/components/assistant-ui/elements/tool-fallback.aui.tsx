@@ -43,6 +43,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { readableToolName } from "@/components/hearth/toolNames";
+import { Markdown } from "@/components/hearth/Markdown";
+import { planOf } from "@/lib/hearth";
 
 const ANIMATION_DURATION = 200;
 
@@ -1235,6 +1237,8 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   // Hearth: pictures the tool returned (a browser screenshot, an image the agent opened) show under the call, open or
   // not, so the owner sees what the agent saw; the result box then holds only the call's text.
   const images = imagesOf(meta);
+  // Hearth: the plan the agent asks you to approve (Claude Code's ExitPlanMode), shown as the plan, not as JSON.
+  const plan = planOf(meta, (part as { args?: unknown }).args);
   const label = meta?.title?.replace(/`/g, "") || toolName;
   const isCancelled =
     status?.type === "incomplete" && status.reason === "cancelled";
@@ -1243,7 +1247,7 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
     approval != null ||
     (isRequiresAction && offersInterruptAction(status, approval, interrupt));
 
-  const [open, setOpen] = useState(isRequiresAction || diffs.length > 0);
+  const [open, setOpen] = useState(isRequiresAction || diffs.length > 0 || !!plan);
   const [prevRequiresAction, setPrevRequiresAction] =
     useState(isRequiresAction);
   if (isRequiresAction !== prevRequiresAction) {
@@ -1287,7 +1291,9 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
       />
       <ToolFallbackContent>
         <ToolFallbackError status={status} />
-        {diffs.length > 0 ? (
+        {plan ? (
+          <div className="rounded-md border bg-background px-3 py-2" aria-label="The plan"><Markdown text={plan} /></div>
+        ) : diffs.length > 0 ? (
           <div className="space-y-2">{diffs.map((d, i) => <DiffView key={i} path={d.path} oldText={d.oldText} newText={d.newText} />)}</div>
         ) : shell ? (
           <TerminalView command={commandOf((part as { args?: unknown }).args) ?? label} output={outputOf(meta) || (typeof result === "string" ? result : "")}
@@ -1335,7 +1341,7 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
             </InsideTaskContext.Provider>
           </div>
         )}
-        {!diffs.length && !shell && <ToolFallbackResult result={shownResult(meta, result)} />}
+        {!diffs.length && !shell && !plan && <ToolFallbackResult result={shownResult(meta, result)} />}
       </ToolFallbackContent>
       <ToolImages images={images} />
     </ToolFallbackRoot>

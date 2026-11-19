@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { KeyPrompt } from '@/components/hearth/AddServer';
 import { DeviceKeys, ProviderForm } from '@/components/hearth/AdminSettings';
 import { AuditLog, ConnectorsPage, ExtensionsPage, SchedulesPage, SectionHead, UsagePage } from '@/components/hearth/ServerSettings';
+import { clientNames } from '@/lib/choices';
 import { ImportHistory } from '@/components/hearth/ImportHistory';
 import type { DirectoryState } from '@/lib/directory';
 import { forgetKey, isDesktop, keyFor, removeServer, renameServer, type Server } from '@/lib/servers';
@@ -65,8 +66,8 @@ export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged, onI
           {section === 'extensions' && dir.state === 'ready' && <ExtensionsPage request={dir.request} projects={dir.groups.map((g) => ({ slug: g.project, name: g.name, client: g.client }))}
             onImport={onImport && dir.admin && dir.extensions.includes('import') ? () => onImport('skills') : undefined} />}
           {section === 'import' && dir.state === 'ready' && <ImportHistory request={dir.request} serverName={server?.name ?? 'your server'} onStart={() => onImport?.()} />}
-          {section === 'connectors' && dir.state === 'ready' && <ConnectorsPage request={dir.request} />}
-          {section === 'schedules' && dir.state === 'ready' && <SchedulesPage request={dir.request} />}
+          {section === 'connectors' && dir.state === 'ready' && <ConnectorsPage request={dir.request} clients={clientNames(dir.groups, dir.clients)} />}
+          {section === 'schedules' && dir.state === 'ready' && <SchedulesPage request={dir.request} projects={dir.groups.map((g) => ({ slug: g.project, name: g.name, client: g.client }))} />}
         </div>
       </div>
     </div>

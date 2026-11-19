@@ -227,7 +227,7 @@ async function openExternal(url: string) {
 }
 
 /** MCP connectors: the servers agents can be given (per project, in project settings). Admin devices. */
-export function ConnectorsPage({ request }: { request: Request }) {
+export function ConnectorsPage({ request, clients = [] }: { request: Request; /** Client names in use, suggested in the Client box. */ clients?: string[] }) {
   const [items, setItems] = useState<McpServer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<McpForm | null>(null);
@@ -275,7 +275,9 @@ export function ConnectorsPage({ request }: { request: Request }) {
             <textarea value={form.env} onChange={(e) => setForm({ ...form, env: e.target.value })} rows={2} autoComplete="off" spellCheck={false} placeholder={'Environment, NAME=value per line (stored encrypted), e.g.\nAZURE_DEVOPS_PAT=…'} aria-label="Environment" className={cn(field, 'font-mono')} />
             <p className="text-xs text-muted-foreground">It runs on the project's runner as the project's own user, started by the agent, as Claude Code does.</p>
           </>)}
-          <input value={form.client} onChange={(e) => setForm({ ...form, client: e.target.value })} placeholder="Client (only for a client's own login)" aria-label="Client" className={field} />
+          <input value={form.client} onChange={(e) => setForm({ ...form, client: e.target.value })} placeholder="Client (only for a client's own login)" aria-label="Client" className={field}
+            list="connector-clients" autoComplete="off" />
+          <datalist id="connector-clients">{clients.map((c) => <option key={c} value={c} />)}</datalist>
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="outline" onClick={() => setForm(null)}>Cancel</Button>
             <Button size="sm" disabled={!form.name || (form.kind === 'http' ? !form.url : !form.command.trim())} onClick={async () => {
