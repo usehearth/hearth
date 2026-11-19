@@ -39,6 +39,7 @@ function useAuiStateOf(runtime: { thread: { getState: () => { isLoading: boolean
 import { Markdown } from '@/components/hearth/Markdown';
 import { FilesList, FileView, type FileContent, type FileItem } from '@/components/hearth/FilesPanel';
 import { openSocket } from '@/lib/servers';
+import { HEARTBEAT_MS, HEARTBEAT_TIMEOUT_MS, reconnectDelay, serverUp } from '@/lib/reach';
 import { HearthAttachments } from '@/lib/attachments';
 import { type Card, type CardAnswer, type CardEntry, type Plan, cardOf, mergeCard, planPref, setPlanPref } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
@@ -81,7 +82,8 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
   // A dropped socket reconnects by itself: a fresh connection opens the thread again with session/load, so everything
   // said meanwhile (another window, a turn that kept running on the server) shows up. `gen` makes that new connection.
   const [gen, setGen] = useState(0);
-  const [reconnecting, setReconnecting] = useState<boolean | 'stopped'>(false);
+  // 'refused': the server is up but turned this device away (reach.ts), so it stops and offers a button.
+  const [reconnecting, setReconnecting] = useState<boolean | 'refused'>(false);
   const known = useRef<string | undefined>(target.kind === 'open' ? target.sessionId : undefined);
   const fails = useRef(0);
   // Read live by the signing hook: the admin key's state arrives after the thread opens.
@@ -94,6 +96,9 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
       cwd: target.cwd || '/',
       clientInfo: { name: 'hearth', version: '0.1.0' },
       webSocketFactory: (u) => openSocket(u, serverKey) as unknown as AcpWebSocketLike,
+      // A socket that stays open but silent (half-open) is noticed and dropped, so the reconnect below takes over.
+      heartbeatMs: HEARTBEAT_MS,
+      heartbeatTimeoutMs: HEARTBEAT_TIMEOUT_MS,
       ...(sid ? { sessionId: sid } : target.kind === 'new' ? { newSessionMeta: target.meta } : {}),
       // Admin threads: every prompt and every admin card answer carries this install's signature (the runner checks it).
       ...(admin ? {
@@ -112,21 +117,29 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
   useEffect(() => {
     let live = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let waiting = false;
     let wasUp = false;
     const off = client.subscribeConnectionChange((s) => {
       if (!live) return;
       if (client.sessionId) known.current = client.sessionId;
       if (s === 'connected' && client.sessionId) { wasUp = true; fails.current = 0; setReconnecting(false); }
-      if (s === 'disconnected' && known.current && !timer && (wasUp || fails.current > 0)) {
-        // Each refused try counts toward the server's bad-key lockout, so stop after a few and offer a button.
-        if (fails.current >= GIVE_UP_AFTER) { setReconnecting('stopped'); return; }
+      if (s === 'disconnected' && known.current && !waiting && (wasUp || fails.current > 0)) {
+        waiting = true;
         setReconnecting(true);
-        const wait = RECONNECT_MS[Math.min(fails.current++, RECONNECT_MS.length - 1)];
-        timer = setTimeout(() => { if (live) setGen((g) => g + 1); }, wait);
+        const later = () => { timer = setTimeout(() => { if (live) setGen((g) => g + 1); }, reconnectDelay(fails.current++)); };
+        if (wasUp) { later(); return; }
+        // A reconnect failed: is the server away (keep trying, it costs nothing) or turning this device away? Each
+        // refused try counts toward its bad-key lockout (5 per 15 minutes), and the sidebar already spends a couple
+        // before it asks for the key, so the thread stops at the first one and offers a button.
+        void serverUp(url).then((up) => {
+          if (!live) return;
+          if (up) { setReconnecting('refused'); return; }
+          later();
+        });
       }
     });
     return () => { live = false; off(); if (timer) clearTimeout(timer); };
-  }, [client]);
+  }, [client]); // eslint-disable-line react-hooks/exhaustive-deps
   // Back online or back to the window: try now rather than wait out the backoff.
   useEffect(() => {
     if (reconnecting !== true) return;
@@ -139,8 +152,8 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
     <div className="relative h-full">
       {reconnecting && (
         <div role="status" className="absolute top-2 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border bg-background/95 px-3 py-1 text-xs text-muted-foreground shadow-sm">
-          {reconnecting === 'stopped'
-            ? <>Disconnected.<button onClick={() => { fails.current = 0; setReconnecting(true); setGen((g) => g + 1); }} className="font-medium text-foreground underline-offset-2 hover:underline">Reconnect</button></>
+          {reconnecting === 'refused'
+            ? <>The server turned this device away.<button onClick={() => { fails.current = 0; setReconnecting(true); setGen((g) => g + 1); }} className="font-medium text-foreground underline-offset-2 hover:underline">Try again</button></>
             : <><Loader2 className="size-3 animate-spin" />Reconnecting…</>}
         </div>
       )}
@@ -149,8 +162,6 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
   );
 }
 
-const RECONNECT_MS = [1000, 2000, 5000, 10000, 30000];
-const GIVE_UP_AFTER = 6;
 
 /** How long an answered card stays on screen (greyed, with who answered) before it goes. */
 const ANSWERED_LINGER_MS = 6000;

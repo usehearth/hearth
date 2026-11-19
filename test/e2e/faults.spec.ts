@@ -33,7 +33,6 @@ async function captureNotifications(page: Page) {
 
 test.describe('server restart', () => {
   test('the sidebar comes back by itself after a 4 s restart', async ({ page, fake }) => {
-    knownFailure('directory.ts GIVE_UP_AFTER = 2: two failed retries (~3 s) turn the sidebar into "Not connected" and a key prompt that needs Retry');
     await connect(page, fake);
     await fake.restart(4000);
     await page.waitForTimeout(12_000); // the server has been back for 12 s
@@ -51,6 +50,42 @@ test.describe('server restart', () => {
     await expect(reconnectPill(page)).toBeHidden();
     await send(page, 'Still there?');
     await expect(assistantMessages(page).last()).toContainText('You said: Still there?');
+  });
+
+  test('a long outage keeps the list on screen and says it is reconnecting', async ({ page, fake }) => {
+    await connect(page, fake);
+    const back = fake.restart(20_000);
+    await expect(sidebar(page)).toContainText('Reconnecting…');
+    await page.waitForTimeout(15_000); // well past the old give-up point
+    await expect(threadRow(page, 'Run the tests')).toBeVisible();
+    await expect(sidebar(page).getByText('Not connected')).toBeHidden();
+    await back;
+    await expect(sidebar(page)).toContainText('Connected to Fake Hearth', { timeout: 40_000 });
+  });
+});
+
+test.describe('server restart, older server (its /healthz not readable from the page)', () => {
+  test.use({ fakeOptions: { healthz: false } });
+  test('the sidebar still comes back by itself', async ({ page, fake }) => {
+    await connect(page, fake);
+    await fake.restart(4000);
+    await expect(sidebar(page)).toContainText('Connected to Fake Hearth', { timeout: 20_000 });
+    await expect(threadRow(page, 'Run the tests')).toBeVisible();
+  });
+});
+
+test.describe('a refused key', () => {
+  test('a revoked key brings back the key prompt, spending few tries, and a new key reconnects', async ({ page, fake }) => {
+    await connect(page, fake);
+    fake.revokeKey('replacement-key'); // the server stays up but refuses the old key from now on
+    await expect(sidebar(page)).toContainText("The server refused this device's key", { timeout: 15_000 });
+    await expect(page.getByText('The server turned this device away.')).toBeVisible(); // the thread stops trying too
+    await page.waitForTimeout(5000);
+    expect(fake.refusedUpgrades).toBeLessThanOrEqual(3); // the real server locks a key out after 5 refusals in 15 minutes
+    await sidebar(page).getByPlaceholder('Paste the key').fill('replacement-key');
+    await sidebar(page).getByRole('button', { name: 'Unlock' }).click();
+    await expect(sidebar(page)).toContainText('Connected to Fake Hearth');
+    await expect(reconnectPill(page)).toBeHidden({ timeout: 15_000 });
   });
 });
 
@@ -154,13 +189,17 @@ test('a reply that never comes is reported', async ({ page, fake }) => {
   await expect(page.getByText(/no answer|not answering|lost|timed out/i)).toBeVisible({ timeout: 5000 });
 });
 
-test('a connection that went silent (half-open) is noticed', async ({ page, fake }) => {
-  knownFailure('no heartbeat on either connection: a socket that stays open but silent still shows as connected');
+test('a connection that went silent (half-open) is noticed and replaced', async ({ page, fake }) => {
   await page.clock.install();
   await connect(page, fake);
-  fake.goSilent();
-  await page.clock.fastForward('02:00');
-  await expect(sidebar(page)).not.toContainText('Connected to Fake Hearth', { timeout: 5000 });
+  fake.goSilent(); // every open socket stays open but says nothing; new connections work
+  fake.addThreads('scratch', 1, () => 'Arrived while silent');
+  // Two minutes of silence, in steps so that each heartbeat and then its deadline come due.
+  for (let i = 0; i < 4; i++) await page.clock.fastForward('00:30');
+  await expect(threadRow(page, 'Arrived while silent')).toBeVisible({ timeout: 15_000 }); // the sidebar listed again
+  await expect(reconnectPill(page)).toBeHidden({ timeout: 15_000 });
+  await send(page, 'Still there?');
+  await expect(assistantMessages(page).last()).toContainText('You said: Still there?');
 });
 
 test('a failed "Needs you" refresh keeps the cards it had', async ({ page, fake }) => {

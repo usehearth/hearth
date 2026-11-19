@@ -236,10 +236,13 @@ export default function App() {
               <div className="mx-1 mt-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm">
                 <div className="flex items-center gap-2 font-medium text-destructive"><TriangleAlert className="size-4" />Not connected</div>
                 <p className="mt-1 text-muted-foreground">{dir.message}</p>
-                <div className="mt-2 flex gap-2">
-                  <Button size="sm" variant="outline" onClick={dir.retry}><RefreshCw className="size-3.5" />Retry</Button>
-                  {server && <KeyPrompt compact server={server} onSaved={() => setKeyVersion((v) => v + 1)} />}
-                </div>
+                {/* Refused while the server is up: the key is the problem, so ask for one. Otherwise it keeps trying. */}
+                {dir.refused && server ? <KeyPrompt server={server} onSaved={() => setKeyVersion((v) => v + 1)} /> : (
+                  <div className="mt-2 flex gap-2">
+                    <Button size="sm" variant="outline" onClick={dir.retry}><RefreshCw className="size-3.5" />{dir.retrying ? 'Try now' : 'Retry'}</Button>
+                    {server && <KeyPrompt compact server={server} onSaved={() => setKeyVersion((v) => v + 1)} />}
+                  </div>
+                )}
               </div>
             )}
             {dir.state === 'ready' && threadsExt && query && <SearchResults query={query} request={dir.request} onOpen={openHit} />}

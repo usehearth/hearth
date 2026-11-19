@@ -49,6 +49,8 @@ export interface FakeServerOptions {
   /** `_hearth` extensions announced in `initialize`. */
   extensions?: string[];
   title?: string;
+  /** Answer GET /healthz (with CORS), as core does once it allows cross-origin reads. Default true. */
+  healthz?: boolean;
 }
 
 export const DEFAULT_KEY = 'test-device-key';
@@ -96,6 +98,10 @@ export type FakeServer = Awaited<ReturnType<typeof startFakeServer>>;
 
 export async function startFakeServer(opts: FakeServerOptions = {}) {
   const key = opts.key ?? DEFAULT_KEY;
+  /** Device keys the server takes (revokeKey swaps them). */
+  const keys = new Set([key]);
+  /** WebSocket upgrades refused for a wrong or revoked key (the real server counts these toward a lockout). */
+  let refusedUpgrades = 0;
   const speed = opts.speed ?? 0.1;
   const maxGap = opts.maxGap ?? 250;
   const pageSize = opts.pageSize ?? 50;
@@ -433,7 +439,8 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
       return reply({ error: { code: fail.code, message: fail.message } });
     }
     if (!fn) {
-      unknown.push(method);
+      // The app's heartbeat: core has no such method and answers "method not found", which proves the socket is alive.
+      if (method !== '_hearth/ping') unknown.push(method);
       return reply({ error: { code: -32601, message: `Method not found: ${method}` } });
     }
     try {
@@ -448,12 +455,20 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
 
   const wss = new WebSocketServer({ noServer: true, handleProtocols: (protocols) => (protocols.has('acp') ? 'acp' : false) });
   const sockets = new Set<Socket>();
-  const server = http.createServer((_req, res) => { res.writeHead(404).end(); });
+  // GET /healthz as core answers it (readable from any page), unless `healthz: false` (an older server).
+  const server = http.createServer((req, res) => {
+    if (req.method === 'GET' && req.url === '/healthz' && opts.healthz !== false) {
+      res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' }).end('{"ok":true}');
+      return;
+    }
+    res.writeHead(404).end();
+  });
   server.on('connection', (s) => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
   server.on('upgrade', (req, socket, head) => {
     const protocols = String(req.headers['sec-websocket-protocol'] ?? '').split(',').map((s) => s.trim());
     const bearer = protocols.find((p) => p.startsWith('bearer.'))?.slice('bearer.'.length);
-    if (!req.url?.startsWith('/acp') || bearer !== key) {
+    if (!req.url?.startsWith('/acp') || !keys.has(String(bearer))) {
+      refusedUpgrades++;
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;
@@ -500,6 +515,8 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     },
     /** Open sockets right now. */
     get connections() { return conns.size; },
+    /** Sockets refused for their key so far (the real server locks a key out after 5 in 15 minutes). */
+    get refusedUpgrades() { return refusedUpgrades; },
     /** Whether a turn is running in this thread. */
     running: (sessionId: string) => turns.has(sessionId),
     notifyAll,
@@ -529,6 +546,8 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
           status: 'idle', pinned: false, archived: false, history: [], modeId: 'default', provider: null, plan: null, cards: [] });
       }
     },
+    /** The device key stops working (a new one, if given, works instead): open sockets drop, and new ones with the old key are refused (401) while the server stays up. */
+    revokeKey(replacement?: string) { keys.clear(); if (replacement) keys.add(replacement); for (const c of conns) c.ws.terminate(); },
     async close() { await stopListening(); wss.close(); },
   };
 }
