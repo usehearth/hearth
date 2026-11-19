@@ -44,6 +44,14 @@ Made-up data on the desktop dev build, against a throwaway server (19 Nov):
 - `settings.json`, credentials and a project folder's hooks are never read.
 - Claude Code conversations are sent as they are (the old rule): sealed at rest, keys scrubbed on display and in the knowledge hub.
 
+## Choices that stick, and what is never passed over
+
+- **Each home at a glance:** besides who and what, its date range, the folder most of it is in, and the commonest projects, so a home of old test runs is obvious ("13 conversations, 7 to 10 Oct 2026 · 12 in pm-hq · most in acme-api (5)").
+- **Remembered:** what is left out (a home, a folder, a group of skills, a single one) and what is brought anyway is kept on the server (`core.cc_decisions`, `import:*`). The next run starts from the same choices and the receipt says since when ("you left this out on 18 Nov").
+- **Skills one folder down** (`skills/development/<name>`) and loose files in `skills/` are found and listed as not loadable where they are (Claude Code doesn't load them there either), with a tick box to bring them.
+- **Held back, with the reason in full:** a skill held for a secret shows the matching line here, mostly hidden, so a false alarm can be brought anyway. The line never leaves the computer; the receipt names only the line number, and that the owner chose to bring it.
+- **Changed or not, by content:** the fingerprint is names, sizes and the main transcript's content hash (read in the same pass as its facts), never file dates. On the server, a stored conversation whose files, sizes and content hash match is already here even under an older fingerprint, and is not sent again. (212 of the first real import's transcripts had only their dates changed by a copy on 12 Nov.)
+
 ## The receipt
 
 For every source (each Claude Code home, project folders, each claude.ai account): **found, kept, already here, not kept**, per kind (conversations, chats, memories, skills, ...) and, for a home shared by desktop profiles, per profile. Every thing not kept is named with its reason:
