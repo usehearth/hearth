@@ -195,7 +195,8 @@ Use Tailwind's 4 px scale. Use the steps below and avoid halves except where sho
 ### Buttons (`ui/button`)
 - `size="sm"` in settings and lists, and `default` in dialogs and full-page forms.
 - **Main action:** `default` (ember). One per view.
-- **Secondary:** `outline` (Cancel in a form or dialog, "Add a server" when it is not the page's main action).
+- **Secondary:** `outline` (Cancel in a form or dialog).
+- **Add.** A page's Add button sits in its header (`SectionHead` action), says what it adds ("Add a server", "Add a connector"), has a `Plus` icon and is the page's one `default` button. It is disabled while its form is open. The new item's form opens at the top of the list. A Refresh goes left of it as an icon button (`RefreshButton`, ServerSettings). Schedules is the model.
 - **Quiet or row actions:** `ghost`. Icon-only row actions use `size="icon-sm" variant="ghost"`.
 - **Destroy:** a `ghost` trash icon (hover `text-destructive`) opens an inline confirm: "Delete this job? **[Delete]** (destructive, `xs`) [Keep] (ghost, `xs`)". Use a dialog (`ui/dialog`, destructive button) only when the thing is big or the action reaches far, such as deleting a thread or a rewind.
 - Use **no `window.confirm`**. The inline confirm is `ConfirmLine` (`components/hearth/ConfirmLine.tsx`). For a warning rather than a delete (saving a hook), pass `destructive={false}` and a plain "Not yet" for the no.
