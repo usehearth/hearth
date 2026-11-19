@@ -1,6 +1,7 @@
 // How Hearth shows what the agent did, from the ACP tool call itself (kept on the part as providerMetadata.acp):
 // edits as a real diff (old and new text, line numbers, unified or side by side), shell commands as a terminal
-// (the command, its output with colours stripped, the exit code). Anything else keeps the plain fallback.
+// (the command, its output with colours stripped, the exit code), pictures a tool returned (screenshots, image files
+// the agent opened) as images. Anything else keeps the plain fallback.
 import { useMemo, useState } from 'react';
 import { diffLines } from 'diff';
 import { Columns2, Rows3, SquareTerminal } from 'lucide-react';
@@ -39,6 +40,46 @@ export function outputOf(m?: AcpToolMeta): string {
     for (const b of blocks) if (b?.type === 'text' && typeof b.text === 'string') out.push(b.text);
   }
   return out.join('\n');
+}
+
+/**
+ * Pictures a tool returned (ACP image blocks in its content), as data URLs: a screenshot from a browser tool, or an
+ * image file the agent opened. Shown under the call so the owner sees what the agent saw.
+ */
+export function imagesOf(m?: AcpToolMeta): string[] {
+  const out: string[] = [];
+  for (const c of m?.content ?? []) {
+    if (c.type !== 'content') continue;
+    const raw = (c as { content: unknown }).content;
+    for (const b of (Array.isArray(raw) ? raw : [raw]) as { type?: string; data?: unknown; mimeType?: unknown }[]) {
+      if (b?.type === 'image' && typeof b.data === 'string' && b.data && typeof b.mimeType === 'string' && /^image\/(png|jpeg|gif|webp)$/.test(b.mimeType)) {
+        out.push(`data:${b.mimeType};base64,${b.data}`);
+      }
+    }
+  }
+  return out;
+}
+
+/** What the result box shows: with pictures, only the call's text (never the pictures' base64 as JSON). */
+export function shownResult(m: AcpToolMeta | undefined, result: unknown): unknown {
+  if (!imagesOf(m).length) return result;
+  return outputOf(m) || undefined;
+}
+
+export function ToolImages({ images }: { images: string[] }) {
+  const [big, setBig] = useState<number | null>(null);
+  if (!images.length) return null;
+  return (
+    <div className="flex flex-wrap gap-2 px-3 pb-2" data-slot="hearth-tool-images">
+      {images.map((src, i) => (
+        <button key={i} type="button" onClick={() => setBig(big === i ? null : i)} aria-expanded={big === i}
+          title={big === i ? 'Smaller' : 'Larger'} aria-label={`Picture ${i + 1} from this tool${big === i ? ', shown large' : ''}`}
+          className={cn('overflow-hidden rounded-md border bg-white', big === i ? 'basis-full' : '')}>
+          <img src={src} alt={`Picture ${i + 1} from this tool`} className={cn('block h-auto', big === i ? 'w-full' : 'max-h-48 w-auto max-w-full')} />
+        </button>
+      ))}
+    </div>
+  );
 }
 
 // eslint-disable-next-line no-control-regex

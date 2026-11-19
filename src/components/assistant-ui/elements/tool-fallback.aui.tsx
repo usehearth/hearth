@@ -34,7 +34,7 @@ import {
   type ToolCallMessagePartComponent,
 } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
-import { acpMetaOf, commandOf, DiffView, diffsOf, exitCodeOf, isShell, outputOf, TerminalView } from "@/components/hearth/ToolViews";
+import { acpMetaOf, commandOf, DiffView, diffsOf, exitCodeOf, imagesOf, isShell, outputOf, shownResult, TerminalView, ToolImages } from "@/components/hearth/ToolViews";
 import {
   CollapsibleRoot as Collapsible,
   CollapsibleContent,
@@ -1231,6 +1231,9 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   const children = myId ? parts.filter((p) => p.type === "tool-call" && acpMetaOf(p)?.parent === myId && !waits(p)) : [];
   const diffs = diffsOf(meta);
   const shell = !diffs.length && isShell(meta, toolName);
+  // Hearth: pictures the tool returned (a browser screenshot, an image the agent opened) show under the call, open or
+  // not, so the owner sees what the agent saw; the result box then holds only the call's text.
+  const images = imagesOf(meta);
   const label = meta?.title?.replace(/`/g, "") || toolName;
   const isCancelled =
     status?.type === "incomplete" && status.reason === "cancelled";
@@ -1331,8 +1334,9 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
             </InsideTaskContext.Provider>
           </div>
         )}
-        {!diffs.length && !shell && <ToolFallbackResult result={result} />}
+        {!diffs.length && !shell && <ToolFallbackResult result={shownResult(meta, result)} />}
       </ToolFallbackContent>
+      <ToolImages images={images} />
     </ToolFallbackRoot>
   );
 };
