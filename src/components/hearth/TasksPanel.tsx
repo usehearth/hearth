@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { useAuiState } from '@assistant-ui/react';
 import { Bot, CircleCheck, CircleX, Loader2, Wrench } from 'lucide-react';
 import { acpMetaOf } from '@/components/hearth/ToolViews';
+import { readableToolName } from '@/components/hearth/toolNames';
 import { cn } from '@/lib/utils';
 
 interface Row { id: string; label: string; detail?: string; subagent: boolean; state: 'running' | 'done' | 'failed' }
@@ -26,7 +27,7 @@ export function useThreadTasks(): Row[] {
         const args = (p.args ?? {}) as Record<string, unknown>;
         rows.push({
           id: p.toolCallId,
-          label: sub ? String(args.description ?? meta?.title ?? 'Subagent') : String(meta?.title ?? name).replace(/`/g, ''),
+          label: sub ? String(args.description ?? meta?.title ?? 'Subagent') : readableToolName(String(meta?.title ?? name).replace(/`/g, '')),
           detail: sub ? String(args.subagent_type ?? args.agent ?? '') || undefined : undefined,
           subagent: sub,
           state: running ? 'running' : meta?.status === 'failed' || p.isError ? 'failed' : 'done',
