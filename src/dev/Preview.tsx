@@ -38,8 +38,11 @@ const runs = { schedules: [
 
 // Extensions and Claude Code's own config as the work runner reports it (one item held back: it names a client).
 const extensions = [
-  { id: 'e1', kind: 'command', name: 'standup', scope: 'global', description: 'Three lines on yesterday, today and blockers', enabled: true, source: 'owner' },
-  { id: 'e2', kind: 'skill', name: 'release-notes', scope: 'todo-api', description: 'Write release notes from merged PRs', enabled: true, source: 'claude-code:skills' },
+  { id: 'e1', kind: 'command', name: 'standup', scope: 'global', description: 'Three lines on yesterday, today and blockers', enabled: true, source: null },
+  { id: 'e2', kind: 'agent', name: 'reviewer', scope: 'global', description: 'Reviews a diff', enabled: true, source: 'claude-code:user' },
+  { id: 'e3', kind: 'command', name: 'tars', scope: 'global', description: 'Personality dials', enabled: true, source: 'claude-code:user' },
+  ...Array.from({ length: 17 }, (_, i) => ({ id: `f${i}`, kind: 'skill', name: `figma-${i + 1}`, scope: 'cbg-uk-valsparpaint', description: 'A Figma skill', enabled: true, source: 'claude-code:plugin:figma' })),
+  ...Array.from({ length: 6 }, (_, i) => ({ id: `p${i}`, kind: 'skill', name: `ponytail-${i + 1}`, scope: 'global', description: 'Lazy senior dev mode', enabled: i !== 2, source: 'claude-code:plugin:ponytail' })),
 ];
 // Shaped like a real ~/.claude: your own items (source "user"), then plugins ("plugin:<name>"), some of them big.
 const ccItem = (source: string, kind: string, name: string, description: string | null, extra: object = {}) =>

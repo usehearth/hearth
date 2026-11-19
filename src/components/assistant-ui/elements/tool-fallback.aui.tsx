@@ -34,7 +34,7 @@ import {
   type ToolCallMessagePartComponent,
 } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
-import { acpMetaOf, commandOf, DiffView, diffsOf, exitCodeOf, isShell, outputOf, TerminalView } from "@/components/hearth/ToolViews";
+import { acpMetaOf, commandOf, DiffView, diffsOf, exitCodeOf, imagesOf, isShell, outputOf, shownResult, TerminalView, ToolImages } from "@/components/hearth/ToolViews";
 import {
   CollapsibleRoot as Collapsible,
   CollapsibleContent,
@@ -42,6 +42,7 @@ import {
 } from "./collapsible-root";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { readableToolName } from "@/components/hearth/toolNames";
 
 const ANIMATION_DURATION = 200;
 
@@ -1231,6 +1232,9 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   const children = myId ? parts.filter((p) => p.type === "tool-call" && acpMetaOf(p)?.parent === myId && !waits(p)) : [];
   const diffs = diffsOf(meta);
   const shell = !diffs.length && isShell(meta, toolName);
+  // Hearth: pictures the tool returned (a browser screenshot, an image the agent opened) show under the call, open or
+  // not, so the owner sees what the agent saw; the result box then holds only the call's text.
+  const images = imagesOf(meta);
   const label = meta?.title?.replace(/`/g, "") || toolName;
   const isCancelled =
     status?.type === "incomplete" && status.reason === "cancelled";
@@ -1276,7 +1280,7 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   return (
     <ToolFallbackRoot open={open} onOpenChange={setOpen} data-tool-call-id={(part as { toolCallId?: string }).toolCallId}>
       <ToolFallbackTrigger
-        toolName={label}
+        toolName={readableToolName(label)}
         status={status}
         isError={isError}
         responseDeliveryStatus={responseDeliveryStatus}
@@ -1331,8 +1335,9 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
             </InsideTaskContext.Provider>
           </div>
         )}
-        {!diffs.length && !shell && <ToolFallbackResult result={result} />}
+        {!diffs.length && !shell && <ToolFallbackResult result={shownResult(meta, result)} />}
       </ToolFallbackContent>
+      <ToolImages images={images} />
     </ToolFallbackRoot>
   );
 };

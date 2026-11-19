@@ -75,7 +75,16 @@ export function UsagePage({ request }: { request: Request }) {
   );
 }
 
-interface Extension { id: string; kind: string; name: string; scope: string; description: string | null; content: string; enabled: boolean; updated_at: string }
+interface Extension { id: string; kind: string; name: string; scope: string; source?: string | null; description: string | null; content: string; enabled: boolean; updated_at: string }
+
+/** A heading for where an extension came from (the server's source: claude-code:user, claude-code:plugin:x, plugin:x). */
+function sourceLabel(source: string | null | undefined): string {
+  if (!source) return 'Added here';
+  if (source === 'claude-code:user') return 'Your own (from Claude Code)';
+  if (source.startsWith('claude-code:plugin:')) return `Plugin: ${source.slice('claude-code:plugin:'.length)}`;
+  if (source.startsWith('plugin:')) return `Plugin: ${source.slice('plugin:'.length)} (GitHub)`;
+  return source;
+}
 const KIND_LABEL: Record<string, string> = { skill: 'Skill', command: 'Slash command', agent: 'Subagent', hook: 'Hook', output_style: 'Output style' };
 const KIND_HINT: Record<string, string> = {
   skill: 'Instructions the agent loads when the task fits (like a SKILL.md).',
@@ -101,6 +110,19 @@ export function ExtensionsPage({ request, projects = [] }: { request: Request; p
   useEffect(load, [load]);
   const [askHook, setAskHook] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  // Installed extensions, grouped like the import: your own first, then each plugin, then ones added here. Folded.
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const groups = useMemo(() => {
+    const m = new Map<string, Extension[]>();
+    for (const x of items ?? []) { const k = sourceLabel(x.source); m.set(k, [...(m.get(k) ?? []), x]); }
+    const rank = (k: string) => (k.startsWith('Your own') ? 0 : k === 'Added here' ? 2 : 1);
+    return [...m.entries()].sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b));
+  }, [items]);
+  const where = (list: Extension[]) => {
+    const scopes = [...new Set(list.map((x) => x.scope))];
+    return scopes.length === 1 ? (scopes[0] === 'global' ? 'every project' : scopes[0]) : `${scopes.length} places`;
+  };
+  const fold = (k: string) => setOpen((cur) => { const n = new Set(cur); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   // A hook asks once more before it is saved (the server wants confirm: true for hooks).
   const save = async (confirm = false) => {
     if (!edit) return;
@@ -143,19 +165,36 @@ export function ExtensionsPage({ request, projects = [] }: { request: Request; p
       {!items && !error && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div>}
       {items && !items.length && !edit && <p className="text-sm text-muted-foreground">None yet. Add a slash command your agents should know, a skill, or a reviewer subagent.</p>}
       {items && items.length > 0 && (
-        <ul className="divide-y rounded-xl border bg-card text-sm">
-          {items.map((x) => (
-            <li key={x.id} className="flex flex-wrap items-center gap-2 px-3 py-2">
-              <span className="w-24 shrink-0 text-xs text-muted-foreground">{KIND_LABEL[x.kind] ?? x.kind}</span>
-              <span className="min-w-0 flex-1"><span className="font-mono font-medium">{x.kind === 'command' ? '/' : ''}{x.name}</span>
-                <span className="block truncate text-xs text-muted-foreground">{x.scope === 'global' ? 'Every project' : x.scope}{x.description ? ` · ${x.description}` : ''}{x.enabled ? '' : ' · off'}</span></span>
-              <Button size="sm" variant="ghost" onClick={() => setEdit(x)}>Edit</Button>
-              <Button size="sm" variant="ghost" onClick={() => setDeleting(x.id)}>Delete</Button>
-              {deleting === x.id && <ConfirmLine className="basis-full" question={`Delete ${x.name}?`} yes="Delete" onNo={() => setDeleting(null)}
-                onYes={() => { setDeleting(null); request('_hearth/extensions/delete', { id: x.id }).then(load, (e) => setError(errorText(e))); }} />}
-            </li>
-          ))}
-        </ul>
+        <div className="space-y-2">
+          {groups.map(([label, list]) => {
+            const isOpen = open.has(label);
+            const off = list.filter((x) => !x.enabled).length;
+            return (
+              <section key={label} className="rounded-xl border bg-card text-sm">
+                <button type="button" onClick={() => fold(label)} aria-expanded={isOpen} className="flex w-full items-center gap-1.5 px-3 py-2 text-left">
+                  <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', isOpen && 'rotate-90')} />
+                  <span className="truncate font-medium">{label}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{list.length}{off ? ` · ${off} off` : ''} · {where(list)}</span>
+                </button>
+                {isOpen && (
+                  <ul className="divide-y border-t">
+                    {list.map((x) => (
+                      <li key={x.id} className="flex flex-wrap items-center gap-2 px-3 py-2">
+                        <span className="w-24 shrink-0 text-xs text-muted-foreground">{KIND_LABEL[x.kind] ?? x.kind}</span>
+                        <span className="min-w-0 flex-1"><span className="font-mono font-medium">{x.kind === 'command' ? '/' : ''}{x.name}</span>
+                          <span className="block truncate text-xs text-muted-foreground">{x.scope === 'global' ? 'Every project' : x.scope}{x.description ? ` · ${x.description}` : ''}{x.enabled ? '' : ' · off'}</span></span>
+                        <Button size="sm" variant="ghost" onClick={() => setEdit(x)}>Edit</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setDeleting(x.id)}>Delete</Button>
+                        {deleting === x.id && <ConfirmLine className="basis-full" question={`Delete ${x.name}?`} yes="Delete" onNo={() => setDeleting(null)}
+                          onYes={() => { setDeleting(null); request('_hearth/extensions/delete', { id: x.id }).then(load, (e) => setError(errorText(e))); }} />}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            );
+          })}
+        </div>
       )}
     </div>
   );
