@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commandOf, diffRows, diffStats, exitCodeOf, outputOf, stripAnsi } from './ToolViews';
+import { commandOf, diffRows, diffStats, exitCodeOf, imagesOf, outputOf, shownResult, stripAnsi } from './ToolViews';
 import { matchCommands, slashQuery } from './SlashMenu';
 import { toolCallContentToText } from '@/vendor/acp/conversions';
 
@@ -69,5 +69,31 @@ describe('export', () => {
     expect(md).toContain('-one');
     expect(md).toContain('+two');
     expect(md).toContain('Done.');
+  });
+});
+
+describe('pictures from tools', () => {
+  // As the real run had them (19 Nov): Claude Code's Read of a PNG, and a browser screenshot (text plus image).
+  const png = 'iVBORw0KGgoAAAANSUhEUg';
+  const readPng = { content: [{ type: 'content', content: { type: 'image', data: png, mimeType: 'image/png' } }] };
+  const rawRead = [{ type: 'image', source: { data: png, type: 'base64', media_type: 'image/png' } }];
+  const screenshot = { content: [{ type: 'content', content: [{ type: 'text', text: '### Result\n- [Screenshot of viewport](page.png)' }, { type: 'image', data: png, mimeType: 'image/png' }] }] };
+
+  it('finds the image a tool returned, as a data URL', () => {
+    expect(imagesOf(readPng)).toEqual([`data:image/png;base64,${png}`]);
+    expect(imagesOf(screenshot)).toEqual([`data:image/png;base64,${png}`]);
+  });
+  it('ignores calls without pictures and types it should not draw', () => {
+    expect(imagesOf({ content: [{ type: 'content', content: { type: 'text', text: 'hi' } }] })).toEqual([]);
+    expect(imagesOf({ content: [{ type: 'content', content: { type: 'image', data: png, mimeType: 'image/svg+xml' } }] })).toEqual([]);
+    expect(imagesOf(undefined)).toEqual([]);
+  });
+  it('never shows the base64 of a picture as the result text', () => {
+    expect(shownResult(readPng, rawRead)).toBeUndefined();
+    expect(String(shownResult(screenshot, [{ text: 'x' }]))).toContain('Screenshot of viewport');
+    expect(String(shownResult(screenshot, [{ text: 'x' }]))).not.toContain(png);
+  });
+  it('leaves other results as they were', () => {
+    expect(shownResult({ content: [] }, 'plain output')).toBe('plain output');
   });
 });
