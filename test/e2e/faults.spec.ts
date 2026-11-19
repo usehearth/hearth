@@ -156,7 +156,6 @@ test.describe('what is typed survives', () => {
 });
 
 test('switching away from a thread that is still opening shows no error', async ({ page, fake }) => {
-  knownFailure('N2: the pane left behind disposes its client mid-open, and "AcpClient disposed" lands in the shared error banner');
   fake.setDelay(800); // every reply takes 0.8 s, so the main thread is still opening when the switch comes
   await connect(page, fake, { waitForThread: false });
   await expect.poll(() => fake.callsOf('session/load').length).toBeGreaterThan(0); // the main thread has started opening
