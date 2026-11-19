@@ -15,6 +15,7 @@ import { ProjectSettings } from '@/components/hearth/ProjectSettings';
 import { HistoryView, ImportedThread, type Continued, type HistoryScope, type ImportedSummary } from '@/components/hearth/History';
 import { ImportWizard } from '@/components/hearth/ImportWizard';
 import { NewProject, type Made } from '@/components/hearth/NewProject';
+import { clientNames } from '@/lib/choices';
 import { ArchivedList, SearchResults, SidebarSearch, ThreadMenu, type SearchHit } from '@/components/hearth/ThreadTools';
 import type { CardEntry } from '@/lib/hearth';
 import { useDirectory, type ClientLine, type ImportedGroup, type ProjectGroup, type ThreadItem } from '@/lib/directory';
@@ -315,7 +316,7 @@ export default function App() {
             </div>
           )}
           {error && (
-            <div className="mx-5 mt-3 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
+            <div data-testid="error-banner" className="mx-5 mt-3 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
               <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" /><span className="text-foreground/90">{error}</span>
             </div>
           )}
@@ -339,7 +340,7 @@ export default function App() {
               onDone={(p) => { dir.refresh(); if (p) openHistory({ project: p.slug, name: p.name }); else setView('thread'); }} /></div>
           )}
           {view === 'newproject' && dir.state === 'ready' && (
-            <div className="min-h-0 flex-1"><NewProject request={dir.request} onDone={made} /></div>
+            <div className="min-h-0 flex-1"><NewProject request={dir.request} clients={clientNames(dir.groups, dir.clients)} onDone={made} /></div>
           )}
           {view === 'needs' && dir.state === 'ready' && (
             <div className="min-h-0 flex-1"><NeedsYou cards={dir.cards} onAnswer={dir.answer} onOpen={openCard}
