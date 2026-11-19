@@ -173,6 +173,8 @@ test('settings: Connectors and Extensions list what the server has', async ({ pa
   await expect(page.getByRole('main')).toContainText('Linear');
   await expect(page.getByRole('main')).toContainText('Azure DevOps');
   await nav.getByRole('button', { name: 'Extensions' }).click();
+  // Installed extensions are grouped by where they came from, each group folded until opened.
+  await page.getByRole('button', { name: /^Added here 2/ }).click();
   await expect(page.getByRole('main')).toContainText('standup');
   await expect(page.getByRole('main')).toContainText('house-style');
   expect(fake.unknown).toEqual([]);
