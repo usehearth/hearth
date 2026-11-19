@@ -1,7 +1,7 @@
 // Settings sections that read the server's own records (each shown only when the server has the extension):
 // the audit log (`audit`, admin devices). Nothing here is chat content.
-import { useCallback, useEffect, useState } from 'react';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ChevronRight, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { errorText } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
