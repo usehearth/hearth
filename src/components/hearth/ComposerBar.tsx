@@ -62,6 +62,17 @@ function ModePicker({ client, onError }: { client: AcpClient; onError: (m: strin
 }
 
 interface Provider { name: string; kind: string; enabled: boolean; status?: string; models?: Record<string, unknown> }
+
+/**
+ * What the model pill says: a model picked by name (an OpenCode provider's), else the engine's current model
+ * ("Sonnet 5.5", or "Sonnet 5.5 · primary" when a provider is picked), else the provider picked, else "Auto". The model comes first, as in Claude's picker.
+ */
+export function modelLabel({ chosenModel, chosen, engineModel }: { chosenModel?: string | null; chosen?: string | null; engineModel?: { currentValue: unknown; options?: { value: string; name: string }[] } | null }): string {
+  if (chosenModel) return chosenModel;
+  // With a provider picked, say which, so a model name never hides a change of provider.
+  if (engineModel) { const m = engineModel.options?.find((v) => v.value === engineModel.currentValue)?.name ?? String(engineModel.currentValue); return chosen ? `${m} · ${chosen}` : m; }
+  return chosen ?? 'Auto';
+}
 type SelectOption = { id: string; name: string; category?: string | null; type: string; currentValue: unknown; options?: { value: string; name: string; description?: string | null }[] };
 
 /**
@@ -79,7 +90,7 @@ function ModelPicker({ client, onError }: { client: AcpClient; onError: (m: stri
     .filter((o) => o.type === 'select' && Array.isArray(o.options) && o.category !== 'mode' && !/^(mode|permission_?mode)$/i.test(o.id));
   const load = () => { if (!providers) client.extRequest<{ providers: Provider[] }>('_hearth/providers', {}).then((r) => setProviders(r.providers.filter((p) => p.enabled)), () => setProviders([])); };
   const engineModel = config.find((o) => o.category === 'model' || o.id === 'model');
-  const label = chosenModel ?? chosen ?? (engineModel ? engineModel.options?.find((v) => v.value === engineModel.currentValue)?.name ?? String(engineModel.currentValue) : 'Auto');
+  const label = modelLabel({ chosenModel, chosen, engineModel });
   // A model by name goes with an OpenCode provider (its engine offers one model only); Claude Code threads pick theirs
   // from the engine's own model list below.
   const pickProvider = (name: string | null, model: string | null = null) => {
@@ -98,6 +109,25 @@ function ModelPicker({ client, onError }: { client: AcpClient; onError: (m: stri
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content side="top" align="start" sideOffset={6} className={cn(menu, 'max-h-96 overflow-y-auto')}>
+          {!engineModel && (
+            <>
+              <DropdownMenu.Label className="px-2 pt-1 pb-0.5 text-[11px] font-medium tracking-wider text-muted-foreground uppercase">Model</DropdownMenu.Label>
+              <div className="px-2 pb-1.5 text-xs text-muted-foreground">{live ? 'The agent lists its models with its first reply in this window.' : 'The agent lists its models once the thread starts.'}</div>
+            </>
+          )}
+          {config.map((o, i) => (
+            <div key={o.id}>
+              {i > 0 && <DropdownMenu.Separator className="my-1 h-px bg-border" />}
+              <DropdownMenu.Label className="px-2 pt-1 pb-0.5 text-[11px] font-medium tracking-wider text-muted-foreground uppercase">{o.name}</DropdownMenu.Label>
+              {o.options!.map((v) => (
+                <DropdownMenu.Item key={v.value} className={item} onSelect={() => { if (v.value !== o.currentValue) client.setConfigOption(o.id, v.value).catch((e) => onError((e as Error).message)); }}>
+                  <span className="min-w-0 flex-1"><span>{v.name}</span>{v.description && <span className="block text-xs text-muted-foreground">{v.description}</span>}</span>
+                  {v.value === o.currentValue && <Check className="mt-0.5 size-3.5 text-primary" />}
+                </DropdownMenu.Item>
+              ))}
+            </div>
+          ))}
+          <DropdownMenu.Separator className="my-1 h-px bg-border" />
           <DropdownMenu.Label className="px-2 pt-1 pb-0.5 text-[11px] font-medium tracking-wider text-muted-foreground uppercase">Model provider</DropdownMenu.Label>
           <DropdownMenu.Item className={item} onSelect={() => pickProvider(null)}>
             <span className="min-w-0 flex-1"><span className="font-medium">Auto</span><span className="block text-xs text-muted-foreground">The project's order; moves on when one is down</span></span>
@@ -126,18 +156,6 @@ function ModelPicker({ client, onError }: { client: AcpClient; onError: (m: stri
                   aria-label={`Another model on ${p.name}`} className="h-7 min-w-0 flex-1 rounded-md border bg-background px-2 font-mono text-xs" />
                 <button type="submit" className="rounded-md border px-2 text-xs hover:bg-accent" disabled={!otherModel.trim()}>Use</button>
               </form>
-            </div>
-          ))}
-          {config.map((o) => (
-            <div key={o.id}>
-              <DropdownMenu.Separator className="my-1 h-px bg-border" />
-              <DropdownMenu.Label className="px-2 pt-1 pb-0.5 text-[11px] font-medium tracking-wider text-muted-foreground uppercase">{o.name}</DropdownMenu.Label>
-              {o.options!.map((v) => (
-                <DropdownMenu.Item key={v.value} className={item} onSelect={() => { if (v.value !== o.currentValue) client.setConfigOption(o.id, v.value).catch((e) => onError((e as Error).message)); }}>
-                  <span className="min-w-0 flex-1"><span>{v.name}</span>{v.description && <span className="block text-xs text-muted-foreground">{v.description}</span>}</span>
-                  {v.value === o.currentValue && <Check className="mt-0.5 size-3.5 text-primary" />}
-                </DropdownMenu.Item>
-              ))}
             </div>
           ))}
         </DropdownMenu.Content>
