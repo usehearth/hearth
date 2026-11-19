@@ -5,7 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarClock, Check, ChevronRight, Loader2, Play, Plus, RefreshCw, Trash2, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { SectionHead, type Request } from '@/components/hearth/ServerSettings';
+import { SectionHead, type ProjectChoice, type Request } from '@/components/hearth/ServerSettings';
+import { projectChoices } from '@/lib/choices';
 import { errorText } from '@/lib/hearth';
 import {
   describeCron, describeTrigger, displayTitle, GROUPS, groupOf, isOneOff, sameText, shortWhen, statusOf,
@@ -20,7 +21,7 @@ interface Data { schedules: Schedule[]; next?: { id: number; next: string | null
 const localTz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return ''; } })();
 const fullWhen = (s: string | null | undefined) => (s ? new Date(s).toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'short' }) : undefined);
 
-export function SchedulesPage({ request }: { request: Request }) {
+export function SchedulesPage({ request, projects = [] }: { request: Request; /** Projects to pick from when adding a job. */ projects?: ProjectChoice[] }) {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -52,7 +53,7 @@ export function SchedulesPage({ request }: { request: Request }) {
           <Button size="sm" onClick={() => setAdding(true)} disabled={adding}><Plus className="size-3.5" />Add a job</Button>
         </div>} />
       {error && <p role="alert" className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
-      {adding && <AddJob onCancel={() => setAdding(false)} onSave={(f) => call('/api/schedules', { ...f, kind: 'job', enabled: true }).then(() => setAdding(false))} />}
+      {adding && <AddJob projects={projects} onCancel={() => setAdding(false)} onSave={(f) => call('/api/schedules', { ...f, kind: 'job', enabled: true }).then(() => setAdding(false))} />}
       {!view && !error && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</p>}
       {view && (
         <div className="space-y-8">
@@ -211,7 +212,7 @@ function TriggerRow({ t, call }: { t: Trigger; call: (path: string, body?: unkno
   );
 }
 
-function AddJob({ onCancel, onSave }: { onCancel: () => void; onSave: (f: { project: string; title: string; cron: string; prompt: string }) => Promise<unknown> }) {
+function AddJob({ projects, onCancel, onSave }: { projects: ProjectChoice[]; onCancel: () => void; onSave: (f: { project: string; title: string; cron: string; prompt: string }) => Promise<unknown> }) {
   const [f, setF] = useState({ project: '', title: '', cron: '0 9 * * 1-5', prompt: '' });
   const [busy, setBusy] = useState(false);
   const words = describeCron(f.cron);
@@ -223,7 +224,14 @@ function AddJob({ onCancel, onSave }: { onCancel: () => void; onSave: (f: { proj
         <label className="block space-y-1"><span className="text-xs font-medium">Name</span>
           <input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Weekly spend check" className={field} /></label>
         <label className="block space-y-1"><span className="text-xs font-medium">Project</span>
-          <input value={f.project} onChange={(e) => setF({ ...f, project: e.target.value })} placeholder="home" className={cn(field, 'font-mono')} /></label>
+          {projects.length ? (
+            <select value={f.project} onChange={(e) => setF({ ...f, project: e.target.value })} className={field}>
+              <option value="" disabled>Pick a project</option>
+              {projectChoices(projects).map((p) => <option key={p.slug} value={p.slug}>{p.client ? `${p.name} (${p.client})` : p.name}</option>)}
+            </select>
+          ) : (
+            <input value={f.project} onChange={(e) => setF({ ...f, project: e.target.value })} placeholder="home" className={cn(field, 'font-mono')} />
+          )}</label>
       </div>
       <label className="block space-y-1"><span className="text-xs font-medium">When</span>
         <input value={f.cron} onChange={(e) => setF({ ...f, cron: e.target.value })} className={cn(field, 'font-mono')} aria-describedby="sch-when-help" />
