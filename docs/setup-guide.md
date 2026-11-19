@@ -19,7 +19,8 @@ Where it differs from the design below:
 - **Its own small chat view**, not assistant-ui's runtime. It uses the app's Markdown component, so it still looks like Hearth. Tool calls show as one-line notes ("Checked the server address").
 - **The key and its address are stored together** in the keychain entry `guide-provider`. The web view can only ask for a call to the one messages path. It can't read the key or send it to another address.
 - **Server and address are one step.** The Server step ends with a working address (the `/healthz` check), so "I have an address already" just skips the install notes.
-- **Import is not a checklist step.** "Open Hearth" hands over to the app, which offers the import wizard as it does after Add server (when the device is an admin device and the server can import).
+- **Import is a checklist step (19 Nov).** After "Model on the server", the checklist hands over to the app's own import view ([docs/import.md](import.md)) with a "Setting up Hearth, step 5 of 6" strip, the guide beside it, and Skip for now. Continue setup brings back the checklist for Done, which says what the import kept.
+- **The guide works with a server too (19 Nov).** The import view shows the guide beside the import whenever this desktop keeps a guide key (Done's "keep the key" box, or "Add a model key" in the import view's guide panel). Without a key the import works the same.
 - **The guide's model** defaults to Claude Haiku 5.5 (effort `low`) for Claude keys. For OpenAI-style endpoints it picks the first small chat model the endpoint lists. It can be changed in the guide's header, which starts the chat again.
 - **Checked (17 Nov):**
   - The Rust calls run against a fake HTTP provider in both formats: paths, auth headers (`x-api-key` or bearer, none for a local model), the 401, credit, 429, non-JSON and empty-list errors, and `/healthz`.
@@ -103,7 +104,7 @@ The server needs its own provider. The guide checks `_hearth/providers` (any dev
 
 ### 5. Import history
 
-This hands off to the existing [ImportWizard](../src/components/hearth/ImportWizard.tsx) when the server offers `import`. If it doesn't, the step is skipped.
+The app's import view, "Bring everything from Claude" ([docs/import.md](import.md)), with the guide beside it. The checklist stays out of the way while it runs (App renders the import view while the step is `import`), with a strip to skip it or, once the receipt is in, to continue. The receipt's top line goes into setup's notes for Done.
 
 ### 6. Done
 
@@ -149,6 +150,8 @@ The guide checks things itself and *proposes* actions. Anything that changes som
 | `server_providers()` | `_hearth/providers` with health | no |
 | `check_docker()` | Is Docker installed and running here (desktop only) | no |
 | `open_link(url)` | Opens a provider console or docs page in the browser (an allow-list of hosts) | no |
+| `import_sources()` | What the import found: each Claude Code home in words (account, profiles, what it holds), each claude.ai export, what is held back, the plan. Counts and names, no content | no |
+| `import_receipt()` | The latest receipt the server counted. Client names and Claude Code conversation titles are left out | no |
 | `suggest(step, choice)` | Shows buttons in the chat that set a checklist choice | the person picks |
 | `install_local()` | Phase 2: the local install (see below) | yes, a confirm card |
 
