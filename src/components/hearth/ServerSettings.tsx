@@ -1,14 +1,23 @@
 // Settings sections that read the server's own records (each shown only when the server has the extension):
 // the audit log (`audit`, admin devices). Nothing here is chat content.
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronRight, Loader2, RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronRight, Loader2, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { errorText } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
 import { field, fieldArea } from '@/components/ui/field';
 import { ConfirmLine } from '@/components/hearth/ConfirmLine';
+import { Switch } from '@/components/ui/switch';
+import { connectorState, type ConnectorTone, type TestResult } from '@/lib/connectors';
+import { auditDetail, auditLine, type AuditEntry } from '@/lib/audit';
+import { fullWhen, shortWhen } from '@/lib/dates';
 
 export type Request = <T = unknown>(method: string, params?: unknown) => Promise<T>;
+
+/** The header's Refresh: an icon button, as in Schedules (the page's Add button sits beside it). */
+export function RefreshButton({ onClick, busy }: { onClick: () => void; busy?: boolean }) {
+  return <Button size="icon-sm" variant="ghost" aria-label="Refresh" title="Refresh" disabled={busy} onClick={onClick}><RefreshCw className={cn('size-3.5', busy && 'animate-spin')} /></Button>;
+}
 
 export function SectionHead({ title, sub, action }: { title: string; sub?: string; action?: React.ReactNode }) {
   return (
@@ -45,7 +54,7 @@ export function UsagePage({ request }: { request: Request }) {
   return (
     <div>
       <SectionHead title="Usage" sub="What the agents cost, from the engines' own reports. Projects can have a monthly budget (project settings)."
-        action={<Button size="sm" variant="outline" onClick={load}><RefreshCw className="size-3.5" />Refresh</Button>} />
+        action={<RefreshButton onClick={load} />} />
       <div className="grid grid-cols-2 gap-3">
         <div className="rounded-xl border bg-card p-3"><div className="text-xs text-muted-foreground">This month</div><div className="text-xl font-semibold tabular-nums">{usd(month)}</div></div>
         <div className="rounded-xl border bg-card p-3"><div className="text-xs text-muted-foreground">Last {r.days} days</div><div className="text-xl font-semibold tabular-nums">{usd(total)}</div></div>
@@ -135,7 +144,7 @@ export function ExtensionsPage({ request, onImport }: { request: Request; projec
   return (
     <div>
       <SectionHead title="Extensions" sub="Your own skills, slash commands, subagents, hooks and output styles. They reach every project's agents (or one project's). A repo's own .claude folder is never used."
-        action={<Button size="sm" onClick={() => setEdit({ kind: 'command', scope: 'global', enabled: true, name: '', content: '' })}>Add</Button>} />
+        action={<Button size="sm" disabled={!!edit} onClick={() => setEdit({ kind: 'command', scope: 'global', enabled: true, name: '', content: '' })}><Plus className="size-3.5" />Add an extension</Button>} />
       {error && <p role="alert" className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
       {onImport && <ClaudeImport onImport={onImport} />}
       <PluginImport request={request} onDone={load} onError={setError} />
@@ -231,28 +240,41 @@ export function ConnectorsPage({ request, clients = [] }: { request: Request; /*
   const [items, setItems] = useState<McpServer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<McpForm | null>(null);
-  const [tests, setTests] = useState<Record<string, string>>({});
+  // Each web connector's last check (`_hearth/mcp/test`), shown as a dot and a line in words (lib/connectors.ts).
+  const [tests, setTests] = useState<Record<string, TestResult | 'checking'>>({});
+  const [notes, setNotes] = useState<Record<string, string>>({});
   const [removing, setRemoving] = useState<string | null>(null);
   const load = useCallback(() => { request<{ servers: McpServer[] }>('_hearth/mcp', {}).then((r) => { setItems(r.servers); setError(null); }, (e) => setError(errorText(e))); }, [request]);
   useEffect(load, [load]);
-  const test = async (name: string) => {
-    setTests((t) => ({ ...t, [name]: 'Testing…' }));
-    try {
-      const r = await request<{ ok: boolean; tools?: string[]; error?: string; ms: number }>('_hearth/mcp/test', { name });
-      setTests((t) => ({ ...t, [name]: r.ok ? `${r.tools!.length} tool${r.tools!.length === 1 ? '' : 's'} (${r.ms} ms)` : r.error ?? 'failed' }));
-    } catch (e) { setTests((t) => ({ ...t, [name]: errorText(e) })); }
+  const test = useCallback(async (name: string) => {
+    setNotes((n) => { const rest = { ...n }; delete rest[name]; return rest; });
+    setTests((t) => ({ ...t, [name]: 'checking' }));
+    try { const r = await request<TestResult>('_hearth/mcp/test', { name }); setTests((t) => ({ ...t, [name]: r })); }
+    catch (e) { setTests((t) => ({ ...t, [name]: { ok: false, error: errorText(e) } })); }
+  }, [request]);
+  // Check every web connector that is on once the list arrives, so each row says how it is doing (as Claude's app does).
+  const checked = useRef(false);
+  useEffect(() => {
+    if (!items || checked.current) return;
+    checked.current = true;
+    for (const s of items) if (s.enabled !== false && s.transport !== 'stdio') void test(s.name);
+  }, [items, test]);
+  const setEnabled = async (s: McpServer, on: boolean) => {
+    setItems((list) => list?.map((x) => (x.name === s.name ? { ...x, enabled: on } : x)) ?? list);
+    try { await request('_hearth/mcp/save', { name: s.name, enabled: on }); if (on && s.transport !== 'stdio') void test(s.name); }
+    catch (e) { setError(errorText(e)); load(); }
   };
   const signIn = async (name: string) => {
     try {
       const r = await request<{ connected?: boolean; authorizationUrl?: string }>('_hearth/mcp/oauth/start', { name });
-      if (r.authorizationUrl) { await openExternal(r.authorizationUrl); setTests((t) => ({ ...t, [name]: 'Finish signing in in the browser, then Test.' })); }
-      else { setTests((t) => ({ ...t, [name]: 'Signed in.' })); load(); }
+      if (r.authorizationUrl) { await openExternal(r.authorizationUrl); setNotes((n) => ({ ...n, [name]: 'Finish signing in in the browser, then check again.' })); }
+      else { load(); void test(name); }
     } catch (e) { setError(errorText(e)); }
   };
   return (
     <div>
       <SectionHead title="Connectors" sub="MCP servers your agents can use: a web address, or a command the agent starts on its runner (like Claude Code's stdio servers). Give a project the ones it needs in its settings. Tokens and environment values are stored encrypted and never shown."
-        action={<Button size="sm" onClick={() => setForm({ ...EMPTY_FORM })}>Add</Button>} />
+        action={<Button size="sm" disabled={!!form} onClick={() => setForm({ ...EMPTY_FORM })}><Plus className="size-3.5" />Add a connector</Button>} />
       {error && <p role="alert" className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
       {form && (
         <div className="mb-4 space-y-2 rounded-xl border bg-card p-3 text-sm">
@@ -286,35 +308,57 @@ export function ConnectorsPage({ request, clients = [] }: { request: Request; /*
               const target = form.kind === 'http'
                 ? { url: form.url, ...(form.token ? { token: form.token } : {}) }
                 : { command: form.command.trim(), args: form.args.split('\n').map((a) => a.trim()).filter(Boolean), env };
-              try { await request('_hearth/mcp/save', { name: form.name, title: form.title, ...target, ...(form.client ? { client: form.client } : {}) }); setForm(null); load(); }
+              try { await request('_hearth/mcp/save', { name: form.name, title: form.title, ...target, ...(form.client ? { client: form.client } : {}) }); setForm(null); load(); if (form.kind === 'http') void test(form.name); }
               catch (e) { setError(errorText(e)); }
             }}>Save</Button>
           </div>
         </div>
       )}
       {!items && !error && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div>}
-      {items && !items.length && !form && <p className="text-sm text-muted-foreground">No connectors yet.</p>}
+      {items && !items.length && !form && <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-muted-foreground">No connectors yet. Add one to give a project's agents a tool, like a docs search or a calendar.</p>}
       {items && items.length > 0 && (
-        <ul className="divide-y rounded-xl border bg-card text-sm">
-          {items.map((s) => (
-            <li key={s.name} className="px-3 py-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="min-w-0 flex-1"><span className="font-mono font-medium">{s.name}</span>{s.title && <span className="text-muted-foreground"> · {s.title}</span>}
-                  <span className="block truncate text-xs text-muted-foreground">{s.transport === 'stdio'
-                    ? <>command: <span className="font-mono">{[s.command, ...(s.args ?? [])].join(' ')}</span>{s.client ? ` · client ${s.client}` : ''}{s.env_names?.length ? ` · env ${s.env_names.join(', ')}` : ''}</>
-                    : <>{s.url}{s.client ? ` · client ${s.client}` : ''} · {s.oauth ? 'signed in (OAuth)' : s.has_token ? 'token set' : 'no token'}</>}</span></span>
-                {s.transport !== 'stdio' && <Button size="sm" variant="ghost" onClick={() => void test(s.name)}>Test</Button>}
-                {s.transport !== 'stdio' && <Button size="sm" variant="ghost" onClick={() => void signIn(s.name)}>{s.oauth ? 'Sign in again' : 'Sign in'}</Button>}
-                <Button size="sm" variant="ghost" onClick={() => setRemoving(s.name)}>Remove</Button>
-              </div>
-              {removing === s.name && <ConfirmLine className="mt-2" question={`Remove ${s.name}? Projects that use it lose it.`} yes="Remove" onNo={() => setRemoving(null)}
-                onYes={() => { setRemoving(null); request('_hearth/mcp/delete', { name: s.name }).then(load, (e) => setError(errorText(e))); }} />}
-              {tests[s.name] && <p className="mt-1 text-xs text-muted-foreground">{tests[s.name]}</p>}
-            </li>
-          ))}
+        <ul className="divide-y rounded-xl border bg-card">
+          {items.map((s) => {
+            const label = s.title?.trim() || s.name;
+            const st = connectorState(s, tests[s.name]);
+            const on = s.enabled !== false;
+            return (
+              <li key={s.name} className={cn('px-3 py-2.5', !on && 'text-muted-foreground')}>
+                <div className="flex items-start gap-3">
+                  <span className="mt-1.5 grid size-3.5 shrink-0 place-items-center"><StateDot tone={st.tone} label={st.text} /></span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium">{label}{s.title?.trim() && <span className="ml-1.5 font-mono text-xs font-normal text-muted-foreground">{s.name}</span>}</div>
+                    <div className="mt-0.5 truncate text-xs text-muted-foreground">{s.transport === 'stdio'
+                      ? <>Command: <span className="font-mono">{[s.command, ...(s.args ?? [])].join(' ')}</span>{s.env_names?.length ? ` · env ${s.env_names.join(', ')}` : ''}</>
+                      : <>{s.url}{s.oauth ? ' · signed in' : s.has_token ? ' · token set' : ''}</>}{s.client ? ` · only for client ${s.client}` : ''}</div>
+                    <div className={cn('mt-0.5 text-xs', st.tone === 'bad' ? 'text-destructive' : st.tone === 'signin' ? 'text-warning-text' : 'text-muted-foreground')}>{notes[s.name] ?? st.text}</div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {st.tone === 'signin' && <Button size="sm" variant="outline" onClick={() => void signIn(s.name)}>{s.oauth ? 'Sign in again' : 'Sign in'}</Button>}
+                    {on && s.transport !== 'stdio' && (
+                      <Button size="icon-sm" variant="ghost" aria-label={`Check ${label} again`} title="Check again" disabled={tests[s.name] === 'checking'} onClick={() => void test(s.name)}><RefreshCw className="size-3.5" /></Button>
+                    )}
+                    <Button size="icon-sm" variant="ghost" aria-label={`Remove ${label}`} title="Remove" className="hover:text-destructive" onClick={() => setRemoving(s.name)}><Trash2 className="size-3.5" /></Button>
+                    <Switch className="ml-1" checked={on} aria-label={`${label}: ${on ? 'on' : 'off'}`} onCheckedChange={(v) => void setEnabled(s, v)} />
+                  </div>
+                </div>
+                {removing === s.name && <ConfirmLine className="mt-2" question={`Remove ${label}? Projects that use it lose it.`} yes="Remove" onNo={() => setRemoving(null)}
+                  onYes={() => { setRemoving(null); request('_hearth/mcp/delete', { name: s.name }).then(load, (e) => setError(errorText(e))); }} />}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
+  );
+}
+
+/** A connector's status dot (the guide's 8 px dots: on, checking, failed, needs a look, off). */
+function StateDot({ tone, label }: { tone: ConnectorTone; label: string }) {
+  return (
+    <span role="img" aria-label={label} title={label} className={cn('size-2 shrink-0 rounded-full',
+      tone === 'ok' && 'bg-success', tone === 'checking' && 'animate-pulse bg-primary', tone === 'bad' && 'bg-destructive', tone === 'signin' && 'bg-warning',
+      (tone === 'off' || tone === 'idle') && 'border border-muted-foreground/60')} />
   );
 }
 
@@ -384,12 +428,10 @@ function PluginImport({ request, onDone, onError }: { request: Request; onDone: 
   );
 }
 
-interface AuditEntry { id: string; at: string; actor: string; action: string; target: string | null; detail: Record<string, unknown> | null }
-
-const when = (s: string) => new Date(s).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
 /** The audit log: every change on the server and who made it, newest first. */
-export function AuditLog({ request }: { request: Request }) {
+export function AuditLog({ request, projects = [] }: { request: Request; /** To show project names instead of slugs. */ projects?: ProjectChoice[] }) {
+  const names = useMemo(() => Object.fromEntries(projects.map((p) => [p.slug, p.name])), [projects]);
   const [entries, setEntries] = useState<AuditEntry[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -409,8 +451,8 @@ export function AuditLog({ request }: { request: Request }) {
   return (
     <div>
       <SectionHead title="Audit log" sub="Every change on the server, with who made it. Newest first."
-        action={<Button size="sm" variant="outline" onClick={() => void load()} disabled={busy}><RefreshCw className="size-3.5" />Refresh</Button>} />
-      <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter: an action (chat.) or who (device:…)" aria-label="Filter the audit log"
+        action={<RefreshButton onClick={() => void load()} busy={busy} />} />
+      <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter: who (zed-laptop) or a kind of change (chat., provider.)" aria-label="Filter the audit log"
         className={cn(field, 'mb-3')} />
       {error && <p role="alert" className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
       {!entries && !error && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div>}
@@ -418,12 +460,16 @@ export function AuditLog({ request }: { request: Request }) {
       {entries && entries.length > 0 && (
         <ul className="divide-y rounded-xl border bg-card text-sm">
           {entries.map((e) => (
-            <li key={e.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 px-3 py-2">
-              <span className="truncate font-mono text-xs">{e.action}</span>
-              <time className="text-xs whitespace-nowrap text-muted-foreground" dateTime={e.at}>{when(e.at)}</time>
-              <span className="col-span-2 truncate text-xs text-muted-foreground">
-                {e.actor}{e.target ? ` · ${e.target}` : ''}{e.detail && Object.keys(e.detail).length ? ` · ${Object.entries(e.detail).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join(', ')}` : ''}
-              </span>
+            <li key={e.id}>
+              {/* The row opens to the raw entry (action code, target, details). */}
+              <details className="group px-3 py-2">
+                <summary className="flex cursor-pointer list-none items-baseline gap-2 [&::-webkit-details-marker]:hidden" title="Show the raw entry">
+                  <ChevronRight className="size-3 shrink-0 self-center text-muted-foreground transition-transform group-open:rotate-90" />
+                  <span className="min-w-0 flex-1">{auditLine(e, names)}</span>
+                  <time className="shrink-0 text-xs whitespace-nowrap text-muted-foreground tabular-nums" dateTime={e.at} title={fullWhen(e.at)}>{shortWhen(e.at)}</time>
+                </summary>
+                <p className="mt-1 pl-5 font-mono text-xs break-all text-muted-foreground">{auditDetail(e)}</p>
+              </details>
             </li>
           ))}
         </ul>

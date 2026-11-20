@@ -19,7 +19,7 @@ import { ConfirmLine } from '@/components/hearth/ConfirmLine';
 interface Data { schedules: Schedule[]; next?: { id: number; next: string | null }[]; triggers: Trigger[]; runs: { schedules: Run[]; triggers: Run[] } }
 
 const localTz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return ''; } })();
-const fullWhen = (s: string | null | undefined) => (s ? new Date(s).toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'short' }) : undefined);
+import { fullWhen } from '@/lib/dates';
 
 export function SchedulesPage({ request, projects = [] }: { request: Request; /** Projects to pick from when adding a job. */ projects?: ProjectChoice[] }) {
   const [data, setData] = useState<Data | null>(null);

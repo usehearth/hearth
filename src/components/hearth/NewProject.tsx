@@ -65,9 +65,9 @@ export function NewProject({ request, onDone, clients = [] }: { request: Request
             {clientBlocked && <p className="mt-1 text-xs text-destructive">{poolInfo?.title} doesn't take client work: pick another machine.</p>}
           </Field>
         )}
-        <div className="flex items-center gap-3 border-t pt-4">
+        {err && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{err}</p>}
+        <div className="flex justify-end gap-2 border-t pt-4">
           <Button type="submit" disabled={busy || !name.trim() || !!clientBlocked}>{busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}Add project</Button>
-          {err && <span role="alert" className="text-sm text-destructive">{err}</span>}
         </div>
       </form>
     </div>

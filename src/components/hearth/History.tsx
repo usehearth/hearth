@@ -1,4 +1,5 @@
 // Imported Claude conversations (Claude Code and claude.ai, from the import wizard) (`_hearth/history*`): a project's (or an unfiled group's) History list, a search
+import { dayDate } from '@/lib/dates';
 // across all imported history, and a read-only view of one conversation (tool calls collapsed like a live thread,
 // subagent threads, paged). "Continue in Hearth" starts a new live thread in that project, its composer filled with a
 // short summary. Servers from before the import wizard read client conversations live from a work laptop; the
@@ -23,7 +24,7 @@ export interface Continued { sessionId: string; cwd: string; title: string; proj
 export type HistoryScope = { project: string; name: string } | { group: string; name: string; client?: boolean } | Record<string, never>;
 
 const OFFLINE = 'This client conversation is kept on the work laptop, which is off right now.';
-const day = (iso: string | null) => { if (!iso) return ''; const d = new Date(iso); return Number.isNaN(+d) ? '' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }); };
+const day = (iso: string | null) => dayDate(iso, undefined, true) ?? '';
 const isOffline = (e: any) => e?.data?.code === 'laptop_offline' || /laptop, which is off/.test(String(e?.message));
 const errOf = (e: unknown) => ({ text: isOffline(e) ? OFFLINE : errorText(e), offline: isOffline(e) });
 const PAGE = 100;

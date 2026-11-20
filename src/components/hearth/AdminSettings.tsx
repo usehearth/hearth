@@ -2,6 +2,7 @@
 // says this device is an admin device (the "admin device" tick on the server's page). Keys are write-only: a provider
 // key is sent once and never shown again; a new device key is shown here once, to copy into the other device.
 import { useCallback, useEffect, useState } from 'react';
+import { fullWhen, shortWhen } from '@/lib/dates';
 import { Check, Copy, KeyRound, Loader2, Plus, Smartphone, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { errorText } from '@/lib/hearth';
@@ -70,9 +71,9 @@ export function ProviderForm({ initial, request, onSaved, onCancel }: {
         <label className="flex items-center gap-2"><input type="checkbox" checked={f.sensitive_ok} onChange={(e) => set('sensitive_ok', e.target.checked)} className="size-4 accent-primary" />Allowed for client work</label>
       </div>
       {err && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{err}</p>}
-      <div className="flex gap-2">
+      <div className="flex justify-end gap-2">
+        <Button type="button" size="sm" variant="outline" onClick={onCancel}>Cancel</Button>
         <Button type="submit" size="sm" disabled={busy}>{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}Save</Button>
-        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
       </div>
     </form>
   );
@@ -130,7 +131,7 @@ export function DeviceKeys({ request }: { request: Request }) {
               <Smartphone className="size-4 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1">
                 <span className="font-medium">{d.name}</span>{d.current && <span className="ml-1.5 text-xs text-primary">this device</span>}
-                <span className="block text-xs text-muted-foreground">{d.last_used_at ? `Last used ${new Date(d.last_used_at).toLocaleString()}` : 'Not used yet'}{d.created_by ? ` · made by ${d.created_by}` : ''}</span>
+                <span className="block text-xs text-muted-foreground">{d.last_used_at ? <span title={fullWhen(d.last_used_at)}>Last used {shortWhen(d.last_used_at)}</span> : 'Not used yet'}{d.created_by ? ` · made by ${d.created_by}` : ''}</span>
               </span>
               {!d.current && (confirm === d.id ? (
                 <span className="flex items-center gap-1.5">
