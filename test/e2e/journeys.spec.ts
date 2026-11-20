@@ -165,6 +165,20 @@ test('delete: an open thread is deleted, closed and gone from the list', async (
   expect(fake.threads.get('t-waiting')?.deleted).toBe(true);
 });
 
+test('search: one box finds threads and imported history, with project, date and the words that matched', async ({ page, fake }) => {
+  await connect(page, fake);
+  const side = sidebar(page);
+  await side.getByRole('textbox', { name: 'Search threads and history' }).fill('deploy');
+  const threads = side.getByRole('region', { name: 'Threads' });
+  const past = side.getByRole('region', { name: 'Imported history' });
+  await expect(threads.getByRole('button', { name: /^Deploy notes/ })).toBeVisible();
+  await expect(past.getByRole('button', { name: /Deploy checklist from Claude Code/ })).toContainText(/Todo API · 2 Sep( 2026)? ·/); // the year shows only in another year (the guide's dates)
+  await expect(past).toContainText('…run the migration before you deploy…');
+  await threads.getByRole('button', { name: /^Deploy notes/ }).click();
+  await expect(header(page)).toContainText('Deploy notes');
+  expect(fake.callsOf('_hearth/history/search').map((c) => c.params.query)).toContain('deploy');
+});
+
 test('settings: Connectors and Extensions list what the server has', async ({ page, fake }) => {
   await connect(page, fake);
   await sidebar(page).getByRole('button', { name: 'Settings', exact: true }).click();

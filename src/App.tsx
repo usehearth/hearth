@@ -216,7 +216,7 @@ export default function App() {
               {dir.cards.length === 0 && dir.clients.some((c) => c.needsYou > 0) && <span className="ml-auto text-[11px] text-muted-foreground">client work waits</span>}
             </button>
           )}
-          {threadsExt && <SidebarSearch query={query} onQuery={(q) => { setQuery(q); if (q) setShowArchived(false); }} />}
+          {threadsExt && <SidebarSearch query={query} history={dir.state === 'ready' && dir.extensions.includes('history')} onQuery={(q) => { setQuery(q); if (q) setShowArchived(false); }} />}
           {dir.state === 'ready' && dir.extensions.includes('history') && (
             <button onClick={() => openHistory({})} aria-current={view === 'history' && !histKey ? 'page' : undefined}
               className={cn('mx-3 mb-1 flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] hover:bg-sidebar-accent', view === 'history' && !histKey && 'bg-sidebar-accent font-medium')}>
@@ -245,7 +245,8 @@ export default function App() {
                 )}
               </div>
             )}
-            {dir.state === 'ready' && threadsExt && query && <SearchResults query={query} request={dir.request} onOpen={openHit} />}
+            {dir.state === 'ready' && threadsExt && query && <SearchResults query={query} request={dir.request} onOpen={openHit} history={dir.extensions.includes('history')}
+              projectName={(slug) => groupOf(slug)?.name ?? slug} onOpenImported={openImported} />}
             {dir.state === 'ready' && threadsExt && !query && showArchived && (
               <>
                 <div className="flex items-center justify-between px-2 pt-2 pb-1">
