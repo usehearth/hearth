@@ -87,9 +87,9 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
   const [reconnecting, setReconnecting] = useState<false | { note?: string; stopped?: boolean }>(false);
   const known = useRef<string | undefined>(target.kind === 'open' ? target.sessionId : undefined);
   const fails = useRef(0);
-  // Where this thread's draft is kept (lib/drafts.ts): its session id, or, for a new thread, this pane until the
-  // server gives it one.
-  const newDraft = useRef(`new:${Math.random().toString(36).slice(2)}`);
+  // Where this thread's draft is kept (lib/drafts.ts): its session id, or, for a new thread, its project until the
+  // server gives it one (so leaving a new thread before sending and coming back to the project's + keeps the draft).
+  const newDraft = useRef(`new:${(target.kind === 'new' ? ((target.meta as { hearth?: { project?: string } }).hearth?.project ?? target.cwd) : '') || Math.random().toString(36).slice(2)}`);
   const draftKey = useCallback(() => known.current ?? newDraft.current, []);
   // Read live by the signing hook: the admin key's state arrives after the thread opens.
   const adminRef = useRef(admin);

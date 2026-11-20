@@ -213,6 +213,15 @@ test.describe('what is typed survives', () => {
     await expect(composer(page)).toHaveValue('Next: fix the open() filter');
   });
 
+  test("a new thread's draft survives leaving it before the first message", async ({ page, fake }) => {
+    await connect(page, fake);
+    await newThread(page, 'Todo API');
+    await composer(page).fill('An idea for later');
+    await openThread(page, 'Run the tests');
+    await newThread(page, 'Todo API');
+    await expect(composer(page)).toHaveValue('An idea for later');
+  });
+
   test('a sent message does not come back as a draft', async ({ page, fake }) => {
     await connect(page, fake);
     await openThread(page, 'Run the tests');
@@ -235,7 +244,6 @@ test('switching away from a thread that is still opening shows no error', async 
 });
 
 test('a permission answered on another device stops asking here', async ({ page, fake }) => {
-  knownFailure('AcpClient.ts: the server withdraws its request with $/cancel_request, which the client ignores, so the buttons stay live');
   await connect(page, fake);
   await newThread(page, 'Todo API');
   // Another device answers 1.5 s after the prompt shows; the command then runs for 8 s before it reports.
@@ -244,6 +252,9 @@ test('a permission answered on another device stops asking here', async ({ page,
   await expect(yes).toBeVisible();
   await expect.poll(() => fake.threads.get(promptedSession(fake))?.cards.at(-1)?.decidedBy).toBe('another device');
   await expect(yes).toBeHidden({ timeout: 4000 });
+  await page.getByRole('button', { name: /^\d+ tool calls?$/ }).click();
+  await page.getByRole('button', { name: /tool: npm test/ }).click();
+  await expect(page.getByText('Answered on another device')).toBeVisible();
 });
 
 test('a reply that never comes is reported', async ({ page, fake }) => {
@@ -270,7 +281,6 @@ test('a connection that went silent (half-open) is noticed and replaced', async 
 });
 
 test('a failed "Needs you" refresh keeps the cards it had', async ({ page, fake }) => {
-  knownFailure('directory.ts: any _hearth/cards error but "method not found" is turned into an empty list');
   await connect(page, fake);
   const needsYou = sidebar(page).getByRole('button', { name: /^Needs you/ });
   await expect(needsYou).toHaveText(/2$/);
@@ -283,6 +293,7 @@ test('a failed "Needs you" refresh keeps the cards it had', async ({ page, fake 
   expect(fake.errors.some((e) => e.method === '_hearth/cards')).toBe(true);
   await page.waitForTimeout(500);
   await expect(needsYou).toHaveText(/2$/);
+  await expect(needsYou).toContainText('may be out of date');
 });
 
 test.describe('choices made before the first message', () => {
@@ -298,36 +309,36 @@ test.describe('choices made before the first message', () => {
   });
 
   test('a mode the server refuses is reported, not silently dropped', async ({ page, fake }) => {
-    knownFailure('AcpClient.ts: set_mode after session/new swallows errors (.catch(() => undefined)); the first turn runs in Ask');
     await connect(page, fake);
     await newThread(page, 'Todo API');
     await page.getByRole('button', { name: 'Mode: Ask' }).click();
     await page.getByRole('menuitem', { name: /^Plan/ }).click();
     fake.failNext('session/set_mode', { message: 'Plan mode is off for this project' });
     await send(page, 'Plan the next feature');
-    await expect(assistantMessages(page).last()).toContainText('Hello from the fake server');
-    await expect(page.getByText(/plan mode|mode/i).and(page.locator('[data-testid="error-banner"], [role="alert"]'))).toBeVisible();
+    // Said plainly, and the first message waits rather than running in a mode not picked.
+    await expect(errorBanner(page)).toContainText(/Plan mode/);
+    expect(fake.callsOf('session/prompt')).toHaveLength(0);
   });
 
   test('a provider the server refuses is reported, not silently dropped', async ({ page, fake }) => {
-    knownFailure('AcpClient.ts: _hearth/thread/provider after session/new swallows errors; the first turn runs on the default provider');
     await connect(page, fake);
     await newThread(page, 'Todo API');
     await page.getByRole('button', { name: 'Model: Auto' }).click();
     await page.getByRole('menuitem', { name: /^gemini/ }).first().click();
     fake.failNext('_hearth/thread/provider', { message: 'gemini is not allowed for this project' });
     await send(page, 'Which model are you?');
-    await expect(assistantMessages(page).last()).toContainText('Hello from the fake server');
-    await expect(page.getByText(/gemini|provider/i).and(page.locator('[data-testid="error-banner"], [role="alert"]'))).toBeVisible();
+    await expect(errorBanner(page)).toContainText(/model provider gemini/);
+    expect(fake.callsOf('session/prompt')).toHaveLength(0);
   });
 });
 
 test.describe('a long thread list', () => {
   test.use({ fakeOptions: { pageSize: 10 } });
   test('threads past the fifth page are not silently hidden', async ({ page, fake }) => {
-    knownFailure('directory.ts MAX_PAGES = 5: the sidebar stops after five pages and says nothing');
     fake.addThreads('scratch', 60); // 67 threads, 7 pages of 10
     await connect(page, fake);
+    await sidebar(page).getByRole('button', { name: 'Load older threads' }).click(); // offered, not hidden
+    await expect(sidebar(page).getByRole('button', { name: 'Load older threads' })).toBeHidden(); // all listed now
     await sidebar(page).getByRole('button', { name: /^Show \d+ more$/ }).last().click();
     await expect(threadRow(page, 'Old thread 43')).toBeVisible(); // the last one on page five
     await expect(threadRow(page, 'Old thread 60')).toBeVisible();

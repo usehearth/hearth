@@ -63,6 +63,11 @@ export type DirectoryState =
       tryNow?: () => void;
       /** Every open card this device may see (`_hearth/cards`); empty on servers without it. */
       cards: CardEntry[];
+      /** The last refresh of the cards failed: these are the ones from before, and may be out of date. */
+      cardsStale?: boolean;
+      /** Older threads exist past the pages listed: loadMore lists more of them. */
+      more?: boolean;
+      loadMore?: () => void;
       answer: (e: CardEntry, a: CardAnswer) => Promise<unknown>;
       /** The `_hearth` extensions the server says it has (from initialize). */
       extensions: string[];
@@ -127,7 +132,10 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
   const [attempt, setAttempt] = useState(0);
   const fails = useRef(0);
   const wasReady = useRef(false);
-  useEffect(() => { wasReady.current = false; fails.current = 0; }, [server?.id, server?.url, keyVersion, nonce]);
+  // Pages of the thread list asked for (Load older threads adds MAX_PAGES), and the last Needs-you cards that loaded.
+  const pagesWanted = useRef(MAX_PAGES);
+  const lastCards = useRef<CardEntry[]>([]);
+  useEffect(() => { wasReady.current = false; fails.current = 0; pagesWanted.current = MAX_PAGES; lastCards.current = []; }, [server?.id, server?.url, keyVersion, nonce]);
 
   useEffect(() => {
     if (!server) return;
@@ -165,17 +173,20 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
     }
     const conn = app.connect(createWebSocketStream(url, { protocols: ['acp', `bearer.${key}`], WebSocket: Watched as never }));
     let hasCards = true;
-    // Every page (servers that page send nextCursor), up to MAX_PAGES so a huge server can't stall the sidebar.
+    let cardsStale = false;
+    const loadMore = () => { pagesWanted.current += MAX_PAGES; refresh(); };
+    // Every page (servers that page send nextCursor), MAX_PAGES at a time so a huge server can't stall the sidebar;
+    // "Load older threads" asks for more (pagesWanted), so nothing past them is out of reach.
     const listAll = async () => {
       const sessions: any[] = [];
       let cursor: string | undefined;
-      for (let n = 0; n < MAX_PAGES; n++) {
+      for (let n = 0; n < pagesWanted.current; n++) {
         const r: any = await conn.agent.request('session/list', cursor ? { cursor } : {});
         sessions.push(...(r?.sessions ?? []));
         cursor = typeof r?.nextCursor === 'string' ? r.nextCursor : undefined;
         if (!cursor) break;
       }
-      return { sessions };
+      return { sessions, more: !!cursor };
     };
     let hasClients = false;
     let hasHistory = false;
@@ -183,16 +194,22 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
     const list = async () => {
       const [res, cards] = await Promise.all([
         listAll(),
-        hasCards ? (conn.agent.request('_hearth/cards' as any, {}) as Promise<any>).then((r) => (r?.cards ?? []) as CardEntry[], (e: any) => {
-          if (e?.code === -32601) hasCards = false; // a plain ACP server: no cards
-          return [] as CardEntry[];
+        hasCards ? (conn.agent.request('_hearth/cards' as any, {}) as Promise<any>).then((r) => {
+          lastCards.current = (r?.cards ?? []) as CardEntry[];
+          cardsStale = false;
+          return lastCards.current;
+        }, (e: any) => {
+          if (e?.code === -32601) { hasCards = false; return [] as CardEntry[]; } // a plain ACP server: no cards
+          // A refresh that failed (the server busy, a hiccup): keep what Needs you showed, and say it may be stale.
+          cardsStale = true;
+          return lastCards.current;
         }) : Promise.resolve([] as CardEntry[]),
       ]);
       const [cl, hc] = await Promise.all([
         hasClients ? (conn.agent.request('_hearth/clients' as any, {}) as Promise<any>).catch(() => null) : null,
         hasHistory ? (conn.agent.request('_hearth/history/counts' as any, {}) as Promise<any>).catch(() => null) : null,
       ]);
-      return { groups: withHistory(group((res.sessions ?? []).map(toItem)), (hc?.projects ?? []) as HistoryCount[]), cards, clients: (cl?.clients ?? []) as ClientLine[], workDevice: !!cl?.workDevice, admin, importedGroups: (hc?.groups ?? []) as ImportedGroup[] };
+      return { groups: withHistory(group((res.sessions ?? []).map(toItem)), (hc?.projects ?? []) as HistoryCount[]), cards, cardsStale, more: res.more, loadMore, clients: (cl?.clients ?? []) as ClientLine[], workDevice: !!cl?.workDevice, admin, importedGroups: (hc?.groups ?? []) as ImportedGroup[] };
     };
     const answer = async (e: CardEntry, a: CardAnswer) => {
       // An admin card counts only with this install's signature (the runner checks it).

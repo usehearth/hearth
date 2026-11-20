@@ -419,7 +419,10 @@ const approvalReceipt = (
       outcome: "closed",
       label:
         approval.resolution === "cancelled"
-          ? "Cancelled before a decision"
+          ? // Hearth: the server withdrew it because another device answered it.
+            (approval as { withdrawn?: boolean }).withdrawn
+            ? "Answered on another device"
+            : "Cancelled before a decision"
           : "Expired before a decision",
     };
 

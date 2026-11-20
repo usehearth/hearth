@@ -212,9 +212,10 @@ export default function App() {
           </button>
           {dir.state === 'ready' && (
             <button onClick={() => go('needs')} aria-current={view === 'needs' ? 'page' : undefined}
+              title={dir.cardsStale ? "Couldn't refresh just now: this may be out of date." : undefined}
               className={cn('mx-3 mb-1 flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] hover:bg-sidebar-accent', view === 'needs' && 'bg-sidebar-accent font-medium')}>
               <BellDot className={cn('size-4', dir.cards.length ? 'text-primary' : 'text-muted-foreground')} />
-              <span>Needs you</span>
+              <span>Needs you{dir.cardsStale && <span className="ml-1 text-[11px] text-muted-foreground">(may be out of date)</span>}</span>
               {dir.cards.length > 0 && <span className="ml-auto rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">{dir.cards.length}</span>}
               {dir.cards.length === 0 && dir.clients.some((c) => c.needsYou > 0) && <span className="ml-auto text-[11px] text-muted-foreground">client work waits</span>}
             </button>
@@ -296,6 +297,12 @@ export default function App() {
                   )} />
                 <ImportedSection groups={dir.importedGroups} active={(view === 'history' || view === 'imported') ? histKey : ''} onOpen={(g) => openHistory({ group: g.group, name: g.group, client: g.client })} />
                 </>}
+                {/* The list stops after a few pages so a big server opens fast; older threads are a click away, not hidden. */}
+                {dir.more && dir.loadMore && (
+                  <button onClick={dir.loadMore} className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground">
+                    <HistoryIcon className="size-3.5" />Load older threads
+                  </button>
+                )}
                 {threadsExt && (
                   <button onClick={() => setShowArchived(true)} className="mt-3 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground">
                     <Archive className="size-3.5" />Archived threads
