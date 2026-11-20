@@ -187,8 +187,19 @@ export class AcpThreadController {
 
   async cancel(): Promise<void> {
     this.endGeneration();
-    if (!(await this.stopRun())) return;
-    invokeUserCallback("acp", "onCancel", this.onCancel);
+    if (await this.stopRun()) {
+      invokeUserCallback("acp", "onCancel", this.onCancel);
+      return;
+    }
+    // Hearth: Stop on a turn this window didn't start (it was running when the thread reopened, or another window
+    // started it): the server stops it and then says the thread is idle.
+    if (this.state.remoteRunning) {
+      try {
+        this.client.cancelRemote();
+      } catch {
+        // an unsendable cancel must not reject the stop
+      }
+    }
   }
 
   async respondToApproval(
@@ -254,6 +265,7 @@ export class AcpThreadController {
       agentCapabilities: this.client.agentCapabilities,
       sessionModes: this.client.modes,
       sessionConfigOptions: this.client.configOptions,
+      sessionStatus: (this.client.sessionMeta as { status?: string | null } | undefined)?.status,
     };
   }
 

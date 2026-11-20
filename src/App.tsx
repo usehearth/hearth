@@ -23,6 +23,8 @@ import { isDesktop, keyFor, keysReady, useServers } from '@/lib/servers';
 import { noteSetup, startSetup, updateSetup, useSetup } from '@/lib/setup';
 import { useTheme } from '@/lib/theme';
 import { cn } from '@/lib/utils';
+import { recentGroups, setSidebarView, sidebarView } from '@/lib/recent';
+import { fullWhen, shortWhen } from '@/lib/dates';
 
 export default function App() {
   const servers = useServers();
@@ -55,6 +57,7 @@ export default function App() {
   // Thread management (server extension `threads`): search, the archived list, a menu on each thread.
   const [query, setQuery] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+  const [listView, setListView] = useState(sidebarView);
   const threadsExt = dir.state === 'ready' && dir.extensions.includes('threads');
   const menu = threadsExt && dir.state === 'ready' ? (t: ThreadItem) => <ThreadMenu t={t} request={dir.request} onError={setError}
     onChanged={(sessionId, change) => {
@@ -222,8 +225,9 @@ export default function App() {
               {dir.cards.length === 0 && dir.clients.some((c) => c.needsYou > 0) && <span className="ml-auto text-[11px] text-muted-foreground">client work waits</span>}
             </button>
           )}
-          {threadsExt && <SidebarSearch query={query} onQuery={(q) => { setQuery(q); if (q) setShowArchived(false); }} />}
-          {dir.state === 'ready' && dir.extensions.includes('history') && (
+          {threadsExt && <SidebarSearch query={query} history={dir.state === 'ready' && dir.extensions.includes('history')} onQuery={(q) => { setQuery(q); if (q) setShowArchived(false); }} />}
+          {/* The search box covers imported history too; this row is only for a server without thread search. */}
+          {dir.state === 'ready' && !threadsExt && dir.extensions.includes('history') && (
             <button onClick={() => openHistory({})} aria-current={view === 'history' && !histKey ? 'page' : undefined}
               className={cn('mx-3 mb-1 flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] hover:bg-sidebar-accent', view === 'history' && !histKey && 'bg-sidebar-accent font-medium')}>
               <HistoryIcon className="size-4 text-muted-foreground" /><span>Search history</span>
@@ -251,7 +255,8 @@ export default function App() {
                 )}
               </div>
             )}
-            {dir.state === 'ready' && threadsExt && query && <SearchResults query={query} request={dir.request} onOpen={openHit} />}
+            {dir.state === 'ready' && threadsExt && query && <SearchResults query={query} request={dir.request} onOpen={openHit} history={dir.extensions.includes('history')}
+              projectName={(slug) => groupOf(slug)?.name ?? slug} onOpenImported={openImported} />}
             {dir.state === 'ready' && threadsExt && !query && showArchived && (
               <>
                 <div className="flex items-center justify-between px-2 pt-2 pb-1">
@@ -264,13 +269,26 @@ export default function App() {
             {dir.state === 'ready' && !(threadsExt && (query || showArchived)) && (
               <>
                 <div className="flex items-center justify-between px-2 pt-2 pb-1">
-                  <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Projects</span>
+                  <div role="tablist" aria-label="List threads by" className="flex items-center gap-0.5 rounded-md bg-sidebar-accent/50 p-0.5">
+                    {(['projects', 'recent'] as const).map((v) => (
+                      <button key={v} role="tab" aria-selected={listView === v} onClick={() => { setListView(v); setSidebarView(v); }}
+                        className={cn('rounded px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wider', listView === v ? 'bg-sidebar text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground')}>
+                        {v === 'projects' ? 'Projects' : 'Recent'}
+                      </button>
+                    ))}
+                  </div>
                   <span className="flex items-center gap-0.5">
                     {dir.admin && dir.extensions.includes('new_project') && <IconBtn label="New project" onClick={() => go('newproject')} className={view === 'newproject' ? 'bg-sidebar-accent text-foreground' : undefined}><FolderPlus className="size-3.5" /></IconBtn>}
                     <IconBtn label="Refresh" onClick={dir.refresh}><RefreshCw className="size-3.5" /></IconBtn>
                   </span>
                 </div>
                 {dir.groups.length === 0 && <p className="px-2 py-3 text-sm text-muted-foreground">No threads on this server yet.</p>}
+                {listView === 'recent' ? (
+                  <>
+                    <RecentList groups={dir.groups} admin={canOpenAdmin} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} menu={menu} />
+                    {!dir.workDevice && <ClientsSection groups={[]} lines={dir.clients} workDevice={false} render={() => null} />}
+                  </>
+                ) : <>
                 <AdminSection group={dir.groups.find(isAdminGroup)} canOpen={canOpenAdmin} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => void openAdmin()} menu={menu} />
                 {dir.groups.filter((g) => !g.client && !isAdminGroup(g)).map((g) => (
                   <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)} menu={menu}
@@ -284,6 +302,7 @@ export default function App() {
                       settingsOpen={view === 'project' && projectView?.slug === g.project} onHistory={() => openHistory({ project: g.project, name: g.name })} historyOpen={(view === 'history' || view === 'imported') && histKey === `p:${g.project}`} />
                   )} />
                 <ImportedSection groups={dir.importedGroups} active={(view === 'history' || view === 'imported') ? histKey : ''} onOpen={(g) => openHistory({ group: g.group, name: g.group, client: g.client })} />
+                </>}
                 {threadsExt && (
                   <button onClick={() => setShowArchived(true)} className="mt-3 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground">
                     <Archive className="size-3.5" />Archived threads
@@ -430,6 +449,31 @@ function ProjectSection({ g, activeId, onOpen, onNew, onSettings, settingsOpen, 
   );
 }
 
+/** Recent: every thread, newest first, in time groups (lib/recent.ts), with its project beside it. */
+function RecentList({ groups, admin, activeId, onOpen, menu }: { groups: ProjectGroup[]; /** This device may open admin threads. */ admin: boolean; activeId?: string; onOpen: (t: ThreadItem) => void; menu?: (t: ThreadItem) => React.ReactNode }) {
+  const [all, setAll] = useState(false);
+  const sections = useMemo(() => recentGroups(groups, new Date(), { admin }), [groups, admin]);
+  let left = all ? Infinity : 40;
+  return (
+    <div className="mt-1">
+      {sections.map((g) => {
+        if (left <= 0) return null;
+        const shown = g.items.slice(0, left);
+        left -= shown.length;
+        return (
+          <div key={g.label} className="mt-2 first:mt-0" aria-label={g.label}>
+            <div className="px-2 pb-0.5 text-[11px] font-medium text-muted-foreground">{g.label}</div>
+            <ul>{shown.map((t) => <ThreadRow key={t.sessionId} t={t} active={activeId === t.sessionId} onOpen={onOpen} menu={t.kind === 'main' ? undefined : menu} main={t.kind === 'main'} project />)}</ul>
+          </div>
+        );
+      })}
+      {!all && sections.reduce((n, g) => n + g.items.length, 0) > 40 && (
+        <button onClick={() => setAll(true)} className="mt-1 w-full rounded-lg px-2 py-1 text-left text-[12px] text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground">Show all</button>
+      )}
+    </div>
+  );
+}
+
 const isAdminGroup = (g: ProjectGroup) => [g.main, ...g.threads].some((t) => t?.admin);
 
 /**
@@ -504,21 +548,25 @@ function ClientsSection({ groups, lines, workDevice, render }: { groups: Project
   );
 }
 
-const SHOW = 12;
+const SHOW = 6;
 const needsYou = (t: ThreadItem) => t.status === 'needs_permission' || t.openCards > 0;
 
-function ThreadRow({ t, active, onOpen, main, menu }: { t: ThreadItem; active: boolean; onOpen: (t: ThreadItem) => void; main?: boolean; menu?: (t: ThreadItem) => React.ReactNode }) {
+function ThreadRow({ t, active, onOpen, main, menu, project }: { t: ThreadItem; active: boolean; onOpen: (t: ThreadItem) => void; main?: boolean; menu?: (t: ThreadItem) => React.ReactNode; /** Recent view: the project's name beside the title. */ project?: boolean }) {
   const running = t.status === 'running' || t.status === 'starting';
   const needs = needsYou(t);
+  const name = main || t.kind === 'main' ? 'Main thread' : t.title;
+  const when = shortWhen(t.updatedAt);
+  const tip = [name, project ? t.projectName : null, project && t.client ? `client ${t.client}` : null, when ? `last active ${when}` : null, needs ? 'needs you' : null].filter(Boolean).join(' · ');
   return (
     <li className="group/row relative">
-      <button onClick={() => onOpen(t)} className={cn('flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors',
+      <button onClick={() => onOpen(t)} title={tip} aria-label={tip} className={cn('flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors',
         menu && !main && 'pr-8',
         active ? 'bg-sidebar-accent font-medium text-foreground' : 'text-sidebar-foreground/85 hover:bg-sidebar-accent/60')}>
-        {main ? <Flame className="size-3.5 shrink-0 text-ember" /> : t.pinned ? <Pin className="size-3.5 shrink-0 p-px text-muted-foreground" aria-label="Pinned" /> : <span className="size-3.5 shrink-0" />}
-        <span className="truncate">{main ? 'Main thread' : t.title}</span>
-        {needs && <span className="ml-auto rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">needs you</span>}
-        {running && !needs && <Loader2 className="ml-auto size-3 shrink-0 animate-spin text-muted-foreground" />}
+        {project && t.client ? <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label={`Client: ${t.client}`} /> : main ? <Flame className="size-3.5 shrink-0 text-ember" /> : t.pinned ? <Pin className="size-3.5 shrink-0 p-px text-muted-foreground" aria-label="Pinned" /> : <span className="size-3.5 shrink-0" />}
+        <span className="min-w-0 truncate">{name}</span>
+        {project && <span className="ml-auto max-w-[40%] shrink-0 truncate text-[11px] text-muted-foreground" title={fullWhen(t.updatedAt)}>{t.projectName}</span>}
+        {needs && <span className={cn('size-2 shrink-0 rounded-full bg-primary', !project && 'ml-auto')} />}
+        {running && !needs && <Loader2 className={cn('size-3 shrink-0 animate-spin text-muted-foreground', !project && 'ml-auto')} />}
       </button>
       {menu && !main && <div className="absolute top-1/2 right-1 -translate-y-1/2">{menu(t)}</div>}
     </li>

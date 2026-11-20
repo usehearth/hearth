@@ -40,6 +40,7 @@ import { Markdown } from '@/components/hearth/Markdown';
 import { FilesList, FileView, type FileContent, type FileItem } from '@/components/hearth/FilesPanel';
 import { openSocket } from '@/lib/servers';
 import { HEARTBEAT_MS, HEARTBEAT_TIMEOUT_MS, noteServer, noteUp, onUp, reconnectDelay, refusalOf, refusalText, waitAllowed } from '@/lib/reach';
+import { draftOf, keepDraft, moveDraft } from '@/lib/drafts';
 import { HearthAttachments } from '@/lib/attachments';
 import { type Card, type CardAnswer, type CardEntry, type Plan, cardOf, mergeCard, planPref, setPlanPref } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
@@ -86,6 +87,12 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
   const [reconnecting, setReconnecting] = useState<false | { note?: string; stopped?: boolean }>(false);
   const known = useRef<string | undefined>(target.kind === 'open' ? target.sessionId : undefined);
   const fails = useRef(0);
+  // Where this thread's draft is kept (lib/drafts.ts): its session id, or, for a new thread, this pane until the
+  // server gives it one.
+  const newDraft = useRef(`new:${Math.random().toString(36).slice(2)}`);
+  const draftKey = useCallback(() => known.current ?? newDraft.current, []);
+  // Messages typed while the agent works (see Runtime): kept here, so a reconnect does not lose them.
+  const [queue, setQueue] = useState<string[]>([]);
   // Read live by the signing hook: the admin key's state arrives after the thread opens.
   const adminRef = useRef(admin);
   adminRef.current = admin;
@@ -123,6 +130,7 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
     const retryIn = (wait: number) => { timer = setTimeout(() => { timer = null; if (live) setGen((g) => g + 1); }, wait); };
     const off = client.subscribeConnectionChange((s) => {
       if (!live) return;
+      if (client.sessionId && !known.current) moveDraft(newDraft.current, client.sessionId);
       if (client.sessionId) known.current = client.sessionId;
       if (s === 'connected' && client.sessionId) { wasUp = true; fails.current = 0; noteServer(url, client.initializeMeta); noteUp(url); setReconnecting(false); }
       if (s === 'disconnected' && known.current && !waiting && (wasUp || fails.current > 0)) {
@@ -160,11 +168,14 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
             : <><Loader2 className="size-3 animate-spin" />Reconnecting…</>}
         </div>
       )}
-      <Runtime newProject={target.kind === 'new' ? (target.meta as { hearth?: { project?: string } } | undefined)?.hearth?.project : undefined} key={gen} client={client} events={events} actionsEl={actionsEl} first={gen === 0 ? first : undefined} insert={insert} admin={admin} onOpenAdmin={onOpenAdmin} />
+      <Runtime newProject={target.kind === 'new' ? (target.meta as { hearth?: { project?: string } } | undefined)?.hearth?.project : undefined} key={gen} client={client} draftKey={draftKey} queue={queue} setQueue={setQueue} events={events} actionsEl={actionsEl} first={gen === 0 ? first : undefined} insert={insert} admin={admin} onOpenAdmin={onOpenAdmin} />
     </div>
   );
 }
 
+
+/** A running turn with nothing at all from the server for this long is called out (Runtime). */
+const STALL_MS = 5 * 60_000;
 
 /** How long an answered card stays on screen (greyed, with who answered) before it goes. */
 const ANSWERED_LINGER_MS = 6000;
@@ -271,7 +282,7 @@ function ComposerExtra() {
   return <ComposerBar client={x.client} onError={x.onError} />;
 }
 
-function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin, newProject }: { client: AcpClient; newProject?: string; events: ThreadEvents; actionsEl?: HTMLElement | null; first?: FirstMessage; insert?: { text: string; n: number } | null; admin?: AdminThread; onOpenAdmin?: (blocked?: Blocked) => void }) {
+function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin, newProject, draftKey, queue, setQueue }: { client: AcpClient; newProject?: string; draftKey: () => string; queue: string[]; setQueue: React.Dispatch<React.SetStateAction<string[]>>; events: ThreadEvents; actionsEl?: HTMLElement | null; first?: FirstMessage; insert?: { text: string; n: number } | null; admin?: AdminThread; onOpenAdmin?: (blocked?: Blocked) => void }) {
   const ev = useRef(events);
   ev.current = events;
   // Images and text files, as this server takes them (its promptCapabilities); a refused file says why.
@@ -347,12 +358,14 @@ function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin,
     if (!Array.isArray(ext) || !ext.includes('mentions')) return null;
     return async (query: string) => (client.sessionId ? (await client.extRequest<{ files: string[] }>('_hearth/files/find', { sessionId: client.sessionId, query })).files : []);
   }, [client, client.initializeMeta]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Messages typed while the agent works, sent in order when it finishes.
-  const [queue, setQueue] = useState<string[]>([]);
-  const queueApi = useMemo(() => ({ items: queue, add: (t: string) => setQueue((q) => [...q, t]), remove: (i: number) => setQueue((q) => q.filter((_, j) => j !== i)) }), [queue]);
+  // Messages typed while the agent works, sent in order when it finishes. The list belongs to the pane, not to this
+  // runtime, so a reconnect (which makes a new runtime) keeps it.
+  const queueApi = useMemo(() => ({ items: queue, add: (t: string) => setQueue((q) => [...q, t]), remove: (i: number) => setQueue((q) => q.filter((_, j) => j !== i)) }), [queue, setQueue]);
   const runtime = useAcpRuntime({ client, permissions: 'ask', onError: (e) => ev.current.onError(e.message), adapters: { attachments, ...speech }, onEdit, onReload });
   runtimeRef.current = runtime;
   // When the agent finishes, the next queued message goes (once: a send in flight waits until the run has started).
+  // Never into a running turn: not while the connection is down (a drop ends this window's run, but not the server's
+  // turn), and not while the thread is still opening; after a reconnect the thread shows the server's turn as running.
   const queueRef = useRef(queue);
   queueRef.current = queue;
   const sending = useRef(false);
@@ -360,6 +373,7 @@ function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin,
     const tick = () => {
       const st = runtime.thread.getState();
       if (st.isRunning) { sending.current = false; return; }
+      if (client.connectionState !== 'connected' || !client.sessionId) return;
       if (st.isLoading || sending.current || !queueRef.current.length) return;
       const [next, ...rest] = queueRef.current;
       queueRef.current = rest;
@@ -369,10 +383,32 @@ function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin,
       setTimeout(() => { sending.current = false; }, 3000); // a send that never started a run does not block the queue
     };
     tick();
-    return runtime.thread.subscribe(tick);
-  }, [runtime, queue.length]);
+    const offConn = client.subscribeConnectionChange(tick);
+    const offRun = runtime.thread.subscribe(tick);
+    return () => { offConn(); offRun(); };
+  }, [runtime, client, queue.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A reply that never comes: while a turn runs, nothing at all about this thread for STALL_MS. Say so plainly and
+  // offer Stop. (Not stopped by itself: a long command can be silent that long and still be fine.)
+  const [stalled, setStalled] = useState(false);
+  const stallTouch = useRef(() => {});
+  useEffect(() => {
+    let last = Date.now();
+    let wasRunning = runtime.thread.getState().isRunning;
+    const touch = () => { last = Date.now(); setStalled(false); };
+    stallTouch.current = touch;
+    const offUpdates = client.subscribeSessionUpdate(touch);
+    const offRun = runtime.thread.subscribe(() => { const now = runtime.thread.getState().isRunning; if (now !== wasRunning) { wasRunning = now; touch(); } });
+    const check = setInterval(() => { if (runtime.thread.getState().isRunning && Date.now() - last > STALL_MS) setStalled(true); }, 15_000);
+    return () => { offUpdates(); offRun(); clearInterval(check); };
+  }, [client, runtime]);
   // A fork opens with its first message: sent (Edit, Regenerate) or ready in the composer (Rewind).
   // Text from the editor goes at the end of whatever is being typed.
+  // What is being typed survives a reconnect (a new runtime) and a switch to another thread and back.
+  useEffect(() => {
+    const saved = draftOf(draftKey());
+    if (saved && !runtime.thread.composer.getState().text) runtime.thread.composer.setText(saved);
+    return runtime.thread.composer.subscribe(() => keepDraft(draftKey(), runtime.thread.composer.getState().text));
+  }, [runtime, draftKey]);
   useEffect(() => {
     if (!insert) return;
     const cur = runtime.thread.composer.getState().text;
@@ -422,6 +458,13 @@ function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin,
         <QueueContext.Provider value={queueApi}>
         <div className="flex h-full">
           <div className="relative flex min-w-0 flex-1 flex-col">
+            {stalled && (
+              <div role="status" className="absolute top-12 left-1/2 z-20 flex max-w-[90%] -translate-x-1/2 items-center gap-2 rounded-full border bg-background/95 px-3 py-1 text-xs text-muted-foreground shadow-sm">
+                <span>No answer from the agent for {Math.round(STALL_MS / 60_000)} minutes: it may be stuck, or busy with a long command.</span>
+                <button onClick={() => void runtime.thread.cancelRun()} className="shrink-0 font-medium text-foreground underline-offset-2 hover:underline">Stop</button>
+                <button onClick={() => stallTouch.current()} className="shrink-0 font-medium text-foreground underline-offset-2 hover:underline">Keep waiting</button>
+              </div>
+            )}
             {admin && <AdminStrip canSign={admin.canSign} commands={nCommands} origin={admin.origin} onFinish={admin.canSign && extras.sessionId ? () => setFinishing(true) : undefined} />}
             {admin && finishing && adminReq && extras.sessionId && (
               <FinishAdmin title={admin.title} origin={admin.origin} request={adminReq} sessionId={extras.sessionId} onCancel={() => setFinishing(false)} onDone={() => { setFinishing(false); admin.onFinished(); }} />
