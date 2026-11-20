@@ -48,6 +48,8 @@ export interface FakeServerOptions {
   world?: { projects: Project[]; threads: Partial<Thread>[] };
   /** Queue a session/prompt sent during a turn, as core does since hearth-server #25 (default); false refuses it. */
   queue?: boolean;
+  /** The server's client mode as `_hearth/device` reports it; left out, the device reply has none (a server from before). */
+  clientMode?: 'simple' | 'strict';
   /** `_hearth` extensions announced in `initialize`. */
   extensions?: string[];
   title?: string;
@@ -191,11 +193,13 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
   const listItem = (t: Thread) => ({
     sessionId: t.id, title: t.title, cwd: t.cwd, updatedAt: t.updatedAt,
     _meta: { hearth: { project: t.project, projectName: t.projectName, kind: t.kind, status: t.status, runnerOnline: true, pinned: t.pinned,
+      ...(projects.get(t.project)?.client ? { client: projects.get(t.project)!.client } : {}),
       openCards: t.cards.filter((c) => c.status === 'open').length, ...(t.archived ? { archived: true } : {}) } },
   });
   const cardEntry = (t: Thread, card: Card) => ({ sessionId: t.id, title: t.title, project: t.project, projectName: t.projectName, kind: t.kind, cwd: t.cwd, card });
   const live = () => [...threads.values()].filter((t) => !t.deleted);
-  const sessionResult = (t: Thread) => ({ modes: { ...MODES, currentModeId: t.modeId }, configOptions: null, _meta: { hearth: { project: t.project, kind: t.kind, title: t.title, status: t.status, provider: t.provider, model: null } } });
+  const sessionResult = (t: Thread) => ({ modes: { ...MODES, currentModeId: t.modeId }, configOptions: null, _meta: { hearth: { project: t.project, kind: t.kind, title: t.title, status: t.status, provider: t.provider, model: null,
+    ...(projects.get(t.project)?.client ? { client: projects.get(t.project)!.client } : {}) } } });
   const thread = (params: any) => {
     const t = threads.get(String(params?.sessionId));
     if (!t || t.deleted) throw { code: -32002, message: 'Resource not found' };
@@ -396,7 +400,7 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     },
     'session/set_config_option': () => ({ configOptions: [] }),
     '_hearth/thread/provider': (params) => { const t = thread(params); t.provider = params.provider ?? null; return { provider: t.provider }; },
-    '_hearth/device': () => ({ name: 'Test device', admin: true, workDevice: true }),
+    '_hearth/device': () => ({ name: 'Test device', admin: true, workDevice: true, ...(opts.clientMode ? { clientMode: opts.clientMode } : {}) }),
     '_hearth/devices': () => ({ devices: [{ id: 'd1', name: 'Test device', created_by: 'owner', created_at: iso(600), last_used_at: iso(0), revoked_at: null, current: true }] }),
     '_hearth/clients': () => ({ clients: [], workDevice: true }),
     '_hearth/history/counts': () => ({ projects: [], groups: [] }),

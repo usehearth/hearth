@@ -79,11 +79,11 @@ export function Settings({ servers, server, dir, onAdd, onUse, onKeyChanged, onI
 // ---------- servers and keys ----------
 
 function Servers({ servers, server, dir, onAdd, onUse, onKeyChanged }: { servers: Server[]; server?: Server; dir: DirectoryState; onAdd: () => void; onUse: (id: string) => void; onKeyChanged: () => void }) {
-  const [device, setDevice] = useState<{ name: string; workDevice: boolean; admin?: boolean } | null>(null);
+  const [device, setDevice] = useState<{ name: string; workDevice: boolean; admin?: boolean; clientMode?: string } | null>(null);
   const ready = dir.state === 'ready' ? dir : null;
   useEffect(() => {
     setDevice(null);
-    if (ready?.extensions.includes('device')) void ready.request<{ name: string; workDevice: boolean; admin?: boolean }>('_hearth/device').then(setDevice, () => {});
+    if (ready?.extensions.includes('device')) void ready.request<{ name: string; workDevice: boolean; admin?: boolean; clientMode?: string }>('_hearth/device').then(setDevice, () => {});
   }, [ready?.request]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
@@ -100,7 +100,7 @@ function Servers({ servers, server, dir, onAdd, onUse, onKeyChanged }: { servers
   );
 }
 
-function ServerRow({ s, current, dir, device, onUse, onKeyChanged }: { s: Server; current: boolean; dir?: DirectoryState; device: { name: string; workDevice: boolean; admin?: boolean } | null; onUse: () => void; onKeyChanged: () => void }) {
+function ServerRow({ s, current, dir, device, onUse, onKeyChanged }: { s: Server; current: boolean; dir?: DirectoryState; device: { name: string; clientMode?: string; workDevice: boolean; admin?: boolean } | null; onUse: () => void; onKeyChanged: () => void }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(s.name);
   const [keyOpen, setKeyOpen] = useState(false);
@@ -130,7 +130,7 @@ function ServerRow({ s, current, dir, device, onUse, onKeyChanged }: { s: Server
             {state && <><dt className="text-muted-foreground">Status</dt><dd>{state}</dd></>}
             <dt className="text-muted-foreground">Device key</dt>
             <dd className="flex items-center gap-1.5">{hasKey ? <><KeyRound className="size-3.5 text-muted-foreground" />{isDesktop ? 'In the system keychain' : 'In memory for this window'}</> : <span className="text-muted-foreground">Not set</span>}</dd>
-            {device && <><dt className="text-muted-foreground">This device</dt><dd className="flex items-center gap-1.5"><Laptop className="size-3.5 text-muted-foreground" />{device.name}{device.workDevice && <span className="text-xs text-muted-foreground">· work device</span>}{device.admin && <span className="text-xs text-muted-foreground">· admin device</span>}</dd></>}
+            {device && <><dt className="text-muted-foreground">This device</dt><dd className="flex items-center gap-1.5"><Laptop className="size-3.5 text-muted-foreground" />{device.name}{device.workDevice && device.clientMode !== 'simple' && <span className="text-xs text-muted-foreground">· work device</span>}{device.admin && <span className="text-xs text-muted-foreground">· admin device</span>}</dd></>}
           </dl>
           {keyOpen && <div className="-mx-1"><KeyPrompt server={s} onSaved={() => { setKeyOpen(false); onKeyChanged(); }} /></div>}
           <div className="mt-3 flex flex-wrap gap-2">
