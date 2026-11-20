@@ -8,7 +8,7 @@ import { AssistantRuntimeProvider, useAuiState, WebSpeechDictationAdapter, WebSp
 import { Bot, ChevronDown, Circle, FolderOpen, CircleCheck, CircleDot, ListChecks, Loader2, NotebookPen, PanelRightClose, PanelRightOpen, RefreshCw, ShieldAlert } from 'lucide-react';
 import { AdminAudit, AdminStrip, FinishAdmin, useAdminTimeline } from '@/components/hearth/Admin';
 import { adminAnswerSig, adminPromptMeta } from '@/lib/admin';
-import { AcpClient, useAcpPlan, useAcpQueue, useAcpRuntime, useAcpSessionTitle, type AcpPlanEntry } from '@/vendor/acp';
+import { AcpClient, useAcpConnectionState, useAcpPlan, useAcpQueue, useAcpRuntime, useAcpSessionTitle, type AcpPlanEntry } from '@/vendor/acp';
 import type { AcpWebSocketLike } from '@/vendor/acp/AcpClient';
 import { Thread, type ThreadComponents } from '@/components/assistant-ui/elements/thread.aui';
 import { CardView } from '@/components/hearth/CardView';
@@ -57,6 +57,8 @@ export interface ThreadEvents {
   onTitle: (title: string) => void;
   /** A turn finished: the sidebar may have changed. */
   onTurnEnd: () => void;
+  /** The thread is connected (again): an error about the connection can go. */
+  onRecovered?: () => void;
   /** The thread was forked (Edit, Regenerate, Rewind): open the fork, then send or prefill its first message. */
   onFork?: (sessionId: string, title: string, first: FirstMessage) => void;
 }
@@ -87,6 +89,8 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
   const [reconnecting, setReconnecting] = useState<false | { note?: string; stopped?: boolean }>(false);
   const known = useRef<string | undefined>(target.kind === 'open' ? target.sessionId : undefined);
   const fails = useRef(0);
+  const eventsRef = useRef(events);
+  eventsRef.current = events;
   // Where this thread's draft is kept (lib/drafts.ts): its session id, or, for a new thread, its project until the
   // server gives it one (so leaving a new thread before sending and coming back to the project's + keeps the draft).
   const newDraft = useRef(`new:${(target.kind === 'new' ? ((target.meta as { hearth?: { project?: string } }).hearth?.project ?? target.cwd) : '') || Math.random().toString(36).slice(2)}`);
@@ -130,7 +134,7 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
       if (!live) return;
       if (client.sessionId && !known.current) moveDraft(newDraft.current, client.sessionId);
       if (client.sessionId) known.current = client.sessionId;
-      if (s === 'connected' && client.sessionId) { wasUp = true; fails.current = 0; noteServer(url, client.initializeMeta); noteUp(url); setReconnecting(false); }
+      if (s === 'connected' && client.sessionId) { wasUp = true; fails.current = 0; noteServer(url, client.initializeMeta); noteUp(url); setReconnecting(false); eventsRef.current.onRecovered?.(); }
       if (s === 'disconnected' && known.current && !waiting && (wasUp || fails.current > 0)) {
         waiting = true;
         if (wasUp) { setReconnecting({}); retryIn(Math.max(reconnectDelay(fails.current++), waitAllowed(url))); return; }
@@ -629,6 +633,13 @@ function Watch({ events }: { events: React.RefObject<ThreadEvents> }) {
   const running = useAuiState((s) => s.thread.isRunning);
   const was = useRef(running);
   useEffect(() => { if (title) events.current.onTitle(title); }, [title, events]);
+  const connection = useAcpConnectionState();
+  // How the last answer ended: finished, stopped (nothing to announce) or failed (said so, not "Done").
+  const ended = useAuiState((s) => {
+    const m = s.thread.messages.at(-1);
+    if (!m || m.role !== 'assistant') return '';
+    return m.status.type === 'incomplete' ? (m.status.reason === 'cancelled' ? 'stopped' : 'failed') : 'done';
+  });
   const lastText = useAuiState((s) => {
     const m = s.thread.messages.at(-1);
     if (!m || m.role !== 'assistant') return '';
@@ -637,7 +648,10 @@ function Watch({ events }: { events: React.RefObject<ThreadEvents> }) {
   useEffect(() => {
     if (was.current && !running) {
       events.current.onTurnEnd();
-      void notify(title ? `Done · ${title}` : 'Hearth: turn finished', lastText || 'The answer is ready.');
+      // A drop also ends this window's run with an error, but the turn did not fail (it may still run on the server).
+      if (ended === 'failed' && connection !== 'connected') { /* the reconnect shows what happened */ }
+      else if (ended === 'failed') void notify(title ? `Failed · ${title}` : 'Hearth: a turn failed', 'Open the thread to see what happened.');
+      else if (ended !== 'stopped') void notify(title ? `Done · ${title}` : 'Hearth: turn finished', lastText || 'The answer is ready.');
     }
     was.current = running;
   }, [running, events]); // eslint-disable-line react-hooks/exhaustive-deps
