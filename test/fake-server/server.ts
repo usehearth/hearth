@@ -423,8 +423,11 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
       const t = thread(params);
       return { items: (queues.get(t.id) ?? []).map((q) => ({ id: q.id, text: q.text, by: q.by, createdAt: q.createdAt })) };
     },
+    // As core (hearth-server #44): the list leaves out a message being sent; a withdraw needs an id, says whether it
+    // took one back, ends the queuing window's request as cancelled, and every window hears _hearth/queue_changed.
     '_hearth/queue/withdraw': (params) => {
       const t = thread(params);
+      if (!params?.id) throw { code: -32602, message: 'id is required.' };
       const list = queues.get(t.id) ?? [];
       const i = list.findIndex((q) => q.id === params?.id);
       if (i === -1) return { withdrawn: false }; // already sent, or taken back elsewhere
