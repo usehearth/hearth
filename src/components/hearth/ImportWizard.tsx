@@ -76,6 +76,11 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
   const [created, setCreated] = useState<string[]>([]);
   /** An older server answers with no receipt: what it said instead. */
   const [plain, setPlain] = useState<string | null>(null);
+  /** The server restarted mid-import (the run lived in its memory): how many conversations arrived before it did. */
+  const [lost, setLost] = useState<{ committed: number } | null>(null);
+  /** "Run it again": look again (a new plan), then bring everything across as soon as the plan is ready. */
+  const [rerun, setRerun] = useState(0);
+  const [againPending, setAgainPending] = useState(false);
   const [drag, setDrag] = useState(false);
   const stopped = useRef(false);
   const zipIn = useRef<HTMLInputElement>(null);
@@ -130,7 +135,8 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
       setPhase((ph) => (ph === 'finding' ? 'ready' : ph));
     }, (e) => live && setErr(errorText(e))).finally(() => live && setPlanning(false));
     return () => { live = false; };
-  }, [ready, sources, scan, config, exports, leftOutSources, leftOutGroups, leftOutItems, bring, info?.clientTerms]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ready, sources, scan, config, exports, leftOutSources, leftOutGroups, leftOutItems, bring, info?.clientTerms, rerun]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (againPending && phase === 'ready' && preview && !planning) { setAgainPending(false); void go(); } }, [againPending, phase, preview, planning]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (part === 'skills' && phase === 'ready') skillsRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, [part, phase]);
 
@@ -151,7 +157,8 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
       const remember = rememberOf({ decisions: info?.decisions, leftOut: { sources: leftOutSources, configGroups: leftOutGroups, items: leftOutItems, bring },
         sourceIds: [...(sources ?? []).map((x) => x.path), ...exports.map((x) => `claude-ai:${x.account}`)], choices, configKeys: config.map((c) => c.key), groups: [...new Set(config.map(configGroup))] });
       const r = await bringAcross({ request, preview: p, choices, pool, gathered, scopes, onProgress: setProgress, stop: () => stopped.current, receipts: info?.receipts === true, remember });
-      setReceipt(r.receipt); setCreated(r.begun.created);
+      setReceipt(r.receipt); setCreated(r.begun.created); setLost(r.runGone ?? null);
+      if (r.runGone) { setPhase('done'); return; }
       if (!r.receipt) setPlain(`Imported ${n(r.report?.uploaded ?? 0)} conversations${r.begun.unchanged ? `; ${n(r.begun.unchanged)} were already here` : ''}. This server is older: it can't count a receipt, and skills and the like need it updated. Update Hearth Server, then run this again: nothing will be sent twice.`);
       setPhase('done');
     } catch (e) { setErr(errorText(e)); setPhase('ready'); }
@@ -259,7 +266,17 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
 
         {phase === 'importing' && <Running p={progress} onStop={() => { stopped.current = true; }} />}
 
-        {phase === 'done' && (receipt || plain) && (
+        {phase === 'done' && lost && (
+          <div className="mt-5 space-y-3">
+            <div role="status" className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm">
+              <p className="font-medium">Your server restarted during the import, so this run stopped before it could count a receipt.</p>
+              <p className="mt-1">Nothing already stored was lost: {count(lost.committed, 'conversation')} arrived and {lost.committed === 1 ? 'is' : 'are'} kept. Run the import again: it skips what is already there, brings the rest, and gives you the receipt.</p>
+            </div>
+            <Button onClick={() => { setLost(null); setReceipt(null); setPlain(null); setErr(null); setPreview(null); setPhase('finding'); setAgainPending(true); setRerun((x) => x + 1); }}>Run it again</Button>
+          </div>
+        )}
+
+        {phase === 'done' && !lost && (receipt || plain) && (
           <div className="mt-5 space-y-4">
             {receipt ? <ImportReceipt receipt={receipt} serverName={serverName} /> : <p role="status" className="rounded-xl border bg-card px-4 py-3 text-sm">{plain}</p>}
             <p className="text-sm text-muted-foreground">Each project's history is in the sidebar, under the project. Search history finds anything you said or were told. Run this again any time: only what is new or changed will move.</p>

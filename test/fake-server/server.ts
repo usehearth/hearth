@@ -120,7 +120,7 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
   const faults = {
     delayMs: 0,
     blackhole: new Set<string>(),
-    fail: new Map<string, { times: number; code: number; message: string; match: (params: any) => boolean }>(),
+    fail: new Map<string, { times: number; code: number; message: string; data?: unknown; match: (params: any) => boolean }>(),
   };
   /** Error replies sent (method and message), faults included. */
   const errors: { method: string; message: string }[] = [];
@@ -474,7 +474,7 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     const fail = faults.fail.get(method);
     if (fail && fail.match(msg.params)) {
       if (--fail.times <= 0) faults.fail.delete(method);
-      return reply({ error: { code: fail.code, message: fail.message } });
+      return reply({ error: { code: fail.code, message: fail.message, ...(fail.data !== undefined ? { data: fail.data } : {}) } });
     }
     if (!fn) {
       unknown.push(method);
@@ -557,8 +557,8 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     /** Never answer `method` (requests are received and logged). */
     blackhole(method: string) { faults.blackhole.add(method); },
     /** Answer `method` with an error, `times` times (only calls whose params `match`, if given). */
-    failNext(method: string, { times = 1, code = -32603, message = 'Internal error', match = () => true }: { times?: number; code?: number; message?: string; match?: (params: any) => boolean } = {}) {
-      faults.fail.set(method, { times, code, message, match });
+    failNext(method: string, { times = 1, code = -32603, message = 'Internal error', data, match = () => true }: { times?: number; code?: number; message?: string; data?: unknown; match?: (params: any) => boolean } = {}) {
+      faults.fail.set(method, { times, code, message, data, match });
     },
     clearFaults() { faults.delayMs = 0; faults.blackhole.clear(); faults.fail.clear(); },
     /** Every open socket stays open but goes quiet both ways (a half-open connection). New connections work. */

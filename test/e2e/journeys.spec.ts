@@ -232,6 +232,24 @@ test('import: the claude.ai export folder, added whole, comes across with a rece
   await expect(page.getByRole('heading', { name: '2 of 5 were not kept: see why below.' })).toBeVisible();
 });
 
+test('import: the server restarts mid-import; the app says so plainly and running it again gives the receipt', async ({ page, fake }, testInfo) => {
+  const dir = exportFolder(testInfo.outputPath('claude-export-personal'));
+  await connect(page, fake);
+  await sidebar(page).getByRole('button', { name: 'Bring everything from Claude' }).click();
+  await page.locator('input[webkitdirectory]').setInputFiles(dir);
+  // The first chat arrives; then the server has forgotten the run (a restart: runs live in its memory).
+  let calls = 0;
+  fake.failNext('_hearth/import/file', { times: 1000, code: -32602, message: 'that import is no longer running; start again', data: { code: 'run_gone' }, match: () => ++calls > 1 });
+  await page.getByRole('button', { name: 'Bring everything across' }).click();
+  await expect(page.getByRole('status')).toContainText('Your server restarted during the import');
+  await expect(page.getByRole('status')).toContainText('Nothing already stored was lost: 1 conversation arrived and is kept.');
+  expect(fake.callsOf('_hearth/import/finish')).toHaveLength(0);
+  fake.clearFaults();
+  await page.getByRole('button', { name: 'Run it again' }).click();
+  await expect(page.getByRole('heading', { name: '2 of 5 were not kept: see why below.' })).toBeVisible();
+  expect(fake.unknown).toEqual([]);
+});
+
 test.describe('import against an older server', () => {
   test.use({ fakeOptions: { importReceipts: false } });
   test('it still brings the chats and says plainly that it can\'t count a receipt', async ({ page, fake }, testInfo) => {

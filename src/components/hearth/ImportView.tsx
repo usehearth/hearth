@@ -10,7 +10,7 @@ import { ImportWizard } from '@/components/hearth/ImportWizard';
 import { importGreeting, importPrompt, pickModel, toolsFor, type ToolEnv } from '@/lib/guide';
 import { openLink, shell } from '@/lib/guideShell';
 import { importSnapshot } from '@/lib/importState';
-import { forGuide, type Receipt } from '@/lib/receipt';
+import { clientMasker, forGuide, maskDeep, type Receipt } from '@/lib/receipt';
 import { isDesktop } from '@/lib/servers';
 import { setupState, updateSetup, useSetup, type GuideModel } from '@/lib/setup';
 import { cn } from '@/lib/utils';
@@ -37,6 +37,8 @@ export function ImportView(props: { request: Request; serverName: string; admin:
     return () => { live = false; };
   }, [s?.guide?.model]);
 
+  /** The server's client names (the same ones the import holds skills back for). Unknown: hide nothing extra. */
+  const clientTerms = async () => { try { return (await props.request<{ clientTerms?: string[] }>('_hearth/import/info')).clientTerms ?? []; } catch { return []; } };
   const env: ToolEnv = {
     state: () => setupState() ?? { v: 1, active: false, step: 'done', guide: null },
     checkAddress: async () => ({ note: 'Not needed here: you are connected.' }),
@@ -44,9 +46,10 @@ export function ImportView(props: { request: Request; serverName: string; admin:
     probe: async () => ({ connected: true, server: props.serverName }),
     providers: async () => ({ note: 'See Settings, Model providers.' }),
     openLink,
-    importSources: async () => importSnapshot() ?? { phase: 'not open', note: 'The import screen is not open.' },
+    // Both go through the client-name mask: the guide's model may be a third-party service (docs/import.md, The guide).
+    importSources: async () => maskDeep(importSnapshot() ?? { phase: 'not open', note: 'The import screen is not open.' }, clientMasker(await clientTerms())),
     importReceipt: async () => {
-      try { const r = await props.request<{ receipt: Receipt }>('_hearth/import/receipt'); return forGuide(r.receipt); }
+      try { const r = await props.request<{ receipt: Receipt }>('_hearth/import/receipt'); return forGuide(r.receipt, await clientTerms()); }
       catch { return null; }
     },
   };

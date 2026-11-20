@@ -80,6 +80,10 @@ The setup guide walks the import (its checklist's step 5) and sits beside the im
 - `import_sources`: what the screen found, in words and numbers (src/lib/importState.ts). No content.
 - `import_receipt`: the latest receipt (src/lib/receipt.ts `forGuide`). Client names and Claude Code conversation titles are left out, because the guide's model may be a third-party service.
 
+Source labels and details can name a client (a home called `.claude-stormid`, an email at a client's domain), so what the guide reads passes through a client-name mask first (`clientMasker`, loose on purpose).
+
+If the server restarts mid-import, the run is gone (it lives in the server's memory). The import says so plainly: nothing already stored was lost, so many conversations arrived and are kept, and "Run it again" skips what is there, brings the rest and gives the receipt.
+
 Its prompt says: recommend the one button; never say something was kept unless `import_receipt` says so; answer "did my Work chats come across?" with that source's or profile's numbers.
 
 ## Where the code is

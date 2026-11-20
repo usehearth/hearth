@@ -1,6 +1,6 @@
 // The receipt in words (src/lib/receipt.ts): the top line, the sums, the saved file, and the guide's copy.
 import { describe, expect, it } from 'vitest';
-import { addsUp, forGuide, headline, oneLine, receiptCsv, receiptText, sinceLastLine, type Receipt } from './receipt';
+import { addsUp, clientMasker, forGuide, headline, maskDeep, oneLine, receiptCsv, receiptText, sinceLastLine, type Receipt } from './receipt';
 
 const receipt = (over: Partial<Receipt> = {}): Receipt => ({
   v: 1, runId: 4, at: '2026-11-19T10:00:00Z', by: 'owner', fresh: 2, changed: 1, check: { ok: true, problems: [] },
@@ -53,6 +53,16 @@ describe('import receipt', () => {
     expect(csv[0]).toBe('source,kind,title,outcome,reason,detail');
     expect(csv).toHaveLength(1 + 2 + 2);
     expect(csv.some((l) => l.includes('"deploy-keys"') && l.includes('"not kept"'))).toBe(true);
+  });
+
+  it('hides client names in source labels and details bound for the guide, however the folder or email spells them', () => {
+    const r = receipt();
+    r.sources[0].label = 'Claude Code: stormid (zed@enjoy-digital.co.uk)';
+    r.sources[0].detail = 'Kept in ~/.claude-stormid on this computer.';
+    const g = JSON.stringify(forGuide(r, ['Storm ID', 'EnjoyDigital', 'ab']));
+    expect(g).not.toMatch(/storm|enjoy/i);
+    expect(g).toContain('Claude Code: a client (zed@a client.co.uk)');
+    expect(maskDeep({ a: ['Storm ID work', 3] }, clientMasker([]))).toEqual({ a: ['Storm ID work', 3] });
   });
 
   it("gives the guide counts and reasons, never a client's name or a Claude Code conversation's title", () => {

@@ -110,7 +110,10 @@ export function receiptCsv(r: Receipt): string {
  * that may name a client goes to the guide's model (it may be a third-party service): a client item, an item held
  * back for naming a client, and any Claude Code conversation (its title may be client work) read as "a ...".
  */
-export function forGuide(r: Receipt) {
+export function forGuide(r: Receipt, clientTerms: string[] = []) {
+  return maskDeep(guideCopy(r), clientMasker(clientTerms));
+}
+function guideCopy(r: Receipt) {
   return {
     runId: r.runId, at: r.at, headline: headline(r), sinceLast: sinceLastLine(r), addsUp: addsUp(r), totals: r.totals,
     sources: r.sources.map((s) => ({
@@ -123,4 +126,26 @@ export function forGuide(r: Receipt) {
     })),
   };
 }
+/**
+ * Hides client names in text bound for the guide's model: source labels and details come from the person's own
+ * folders, emails and export names (a home called .claude-stormid, an email at enjoy-digital), so they can name a
+ * client. Loose on purpose: "Storm ID" also hides "stormid", "EnjoyDigital" also "enjoy-digital". Over-hiding is fine.
+ */
+export function clientMasker(terms: string[]): (s: string) => string {
+  const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pats = [...new Set(terms.map((t) => t.trim()).filter((t) => t.length >= 3))]
+    .map((t) => t.replace(/([a-z])([A-Z])/g, '$1 $2').split(/[^A-Za-z0-9]+/).filter(Boolean).map(esc).join('[\\W_]*'))
+    .filter(Boolean);
+  if (!pats.length) return (s) => s;
+  const rx = new RegExp(`(?:${pats.join('|')})`, 'gi');
+  return (s) => s.replace(rx, 'a client');
+}
+/** Every string in a value, through `f` (objects and lists rebuilt; numbers and the like as they are). */
+export function maskDeep<T>(v: T, f: (s: string) => string): T {
+  if (typeof v === 'string') return f(v) as T;
+  if (Array.isArray(v)) return v.map((x) => maskDeep(x, f)) as T;
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, maskDeep(x, f)])) as T;
+  return v;
+}
+
 const pick = (c: Counts): Counts => ({ found: c.found, kept: c.kept, here: c.here, notKept: c.notKept });

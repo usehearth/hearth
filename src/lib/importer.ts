@@ -338,6 +338,13 @@ export function defaultChoices(p: Preview): Record<string, Choice> {
 export interface Progress { done: number; total: number; bytesDone: number; bytesTotal: number; current: string; failed: { id: string; title: string; error: string }[] }
 
 /**
+ * The server no longer has this run (it restarted mid-import: a run lives in its memory). What arrived before is
+ * stored and stays; a new run skips it and counts the receipt. Code `run_gone` from servers that say so, else the words.
+ */
+export class RunGone extends Error { constructor(public committed: number) { super('the server restarted during the import'); } }
+export const isRunGone = (e: any) => e instanceof RunGone || e?.data?.code === 'run_gone' || /no longer running|that preview has expired/i.test(String(e?.message ?? ''));
+
+/**
  * Upload every conversation the server asked for, one at a time: each file in chunks (resuming where the server says
  * it has got to), then commit. A conversation that fails is reported and skipped; the next run tries it again.
  * `finish: false` leaves the run open for the rest of the import (skills, memories); `upload` then returns no report.
@@ -371,6 +378,8 @@ export async function upload(request: Request, begun: Begun, units: Map<string, 
       }
       await request('_hearth/import/commit', { runId: begun.runId, id: item.id });
     } catch (e: any) {
+      // The run is gone (the server restarted): stop here, nothing more can arrive in this run.
+      if (isRunGone(e)) throw new RunGone(p.done - p.failed.length);
       p.failed.push({ id: item.id, title: local.unit.title, error: String(e?.message ?? e).slice(0, 200) });
     }
     p.done++;
@@ -396,14 +405,16 @@ export async function bringAcross(o: {
   /** The server counts receipts (`_hearth/import/info` says `receipts: true`). An older one takes the conversations and
    * memories as before, no skills, and answers with no receipt. */
   receipts?: boolean;
-}): Promise<{ begun: Begun; receipt: Receipt | null; report: any }> {
+}): Promise<{ begun: Begun; receipt: Receipt | null; report: any; runGone?: { committed: number } }> {
   const receipts = o.receipts !== false;
   const { request, gathered: g } = o;
   const begun = await request<Begun>('_hearth/import/begin', { token: o.preview.token, choices: o.choices, ...(o.pool ? { pool: o.pool } : {}), ...(o.remember && receipts ? { remember: o.remember } : {}) });
   const rp: RunProgress = { phase: 'conversations', conversations: null, extensions: { done: 0, total: receipts ? g.config.length : 0 }, memories: { done: 0, total: g.memories.reduce((n, m) => n + m.files.length, 0) } };
   const tell = () => o.onProgress({ ...rp, extensions: { ...rp.extensions }, memories: { ...rp.memories } });
   let failed: Progress['failed'] = [];
-  await upload(request, begun, g.units, (p) => { rp.conversations = p; failed = p.failed; tell(); }, o.stop, false);
+  let committed = 0;
+  try {
+  await upload(request, begun, g.units, (p) => { rp.conversations = p; failed = p.failed; committed = p.done - p.failed.length; tell(); }, o.stop, false);
   if (!o.stop?.() && receipts) {
     rp.phase = 'extensions'; tell();
     // In batches that stay well under the connection's message size.
@@ -433,4 +444,9 @@ export async function bringAcross(o: {
   rp.phase = 'counting'; tell();
   const fin = await request<{ runId: number; report: any; receipt?: Receipt }>('_hearth/import/finish', { runId: begun.runId, failed: failed.map((f) => ({ id: f.id, error: f.error })), stopped: !!o.stop?.() });
   return { begun, receipt: fin.receipt ?? null, report: fin.report };
+  } catch (e) {
+    // The server lost the run part way: say so, with how many conversations arrived (they are stored and stay).
+    if (isRunGone(e)) return { begun, receipt: null, report: null, runGone: { committed: e instanceof RunGone ? e.committed : committed } };
+    throw e;
+  }
 }

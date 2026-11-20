@@ -1,6 +1,6 @@
 // The import's inventory (src/lib/importer.ts gather and homeWords) and what stays on this computer (secrets.ts).
 import { describe, expect, it } from 'vitest';
-import { applyPlaceDecisions, dateRange, gather, homeStats, homeWords, leftOutFrom, rememberOf, type ConfigItem, type LocalSource, type LocalUnit } from './importer';
+import { RunGone, applyPlaceDecisions, dateRange, gather, homeStats, homeWords, isRunGone, leftOutFrom, rememberOf, type ConfigItem, type LocalSource, type LocalUnit } from './importer';
 import { clientMatcher, holdBack, secretHits } from './secrets';
 import type { ChatExport } from './claudeai';
 
@@ -151,5 +151,14 @@ describe('what was offered and not taken', () => {
     const r = rememberOf({ decisions: d, leftOut: { sources: new Set(), items: new Set([`${H1}/user/command/tars`]), bring: new Set([`${H1}/user/skill/mfa`]) }, sourceIds: [H1, H2],
       choices: { 'c:/projects/other/ai-test': { action: 'skip' } }, configKeys: [`${H1}/user/command/tars`, `${H1}/user/skill/mfa`], groups: [] });
     expect(r).toEqual({ [`import:source:${H2}`]: null, [`import:ext:${H1}/user/command/tars`]: 'leave-out' });
+  });
+});
+
+describe('a run the server lost (it restarted mid-import)', () => {
+  it('is recognised by the server\'s code, or its words from an older server', () => {
+    expect(isRunGone({ data: { code: 'run_gone' }, message: 'x' })).toBe(true);
+    expect(isRunGone({ message: 'that import is no longer running; start again' })).toBe(true);
+    expect(isRunGone(new RunGone(3))).toBe(true);
+    expect(isRunGone({ message: 'a chunk too big' })).toBe(false);
   });
 });
