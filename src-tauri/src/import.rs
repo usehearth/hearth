@@ -187,7 +187,21 @@ fn md_count(d: &Path, deep: bool) -> usize {
     }
     n
 }
-fn skill_count(d: &Path) -> usize { fs::read_dir(d).into_iter().flatten().flatten().filter(|e| e.path().join("SKILL.md").is_file()).count() }
+/// Skills in a home: skills/<name>/SKILL.md, and (listed as not loadable where they are) one folder down and loose .md files.
+fn skill_count(d: &Path) -> usize {
+    let mut n = 0;
+    for e in fs::read_dir(d).into_iter().flatten().flatten() {
+        if e.file_name().to_string_lossy().starts_with('.') { continue; }
+        let p = e.path();
+        if p.join("SKILL.md").is_file() { n += 1; }
+        else if p.is_dir() {
+            n += fs::read_dir(&p).into_iter().flatten().flatten().filter(|c| { let cp = c.path(); !c.file_name().to_string_lossy().starts_with('.') && (cp.join("SKILL.md").is_file() || (cp.is_file() && cp.extension().map(|x| x == "md").unwrap_or(false))) }).count();
+        } else if p.extension().map(|x| x == "md").unwrap_or(false) { n += 1; }
+    }
+    n
+}
+/// A link (symlink or junction): never followed, so every read stays inside the home or the plugin's folder.
+fn is_link(e: &fs::DirEntry) -> bool { e.file_type().map(|t| t.is_symlink()).unwrap_or(true) || fs::symlink_metadata(e.path()).map(|m| m.file_type().is_symlink()).unwrap_or(true) }
 fn installed_plugins(home_dir: &Path) -> Vec<(String, PathBuf)> {
     let Ok(t) = fs::read_to_string(home_dir.join("plugins").join("installed_plugins.json")) else { return vec![] };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) else { return vec![] };
@@ -525,6 +539,7 @@ fn read_skill(dir: &Path) -> Option<(String, BTreeMap<String, String>, Vec<Strin
             let p = e.path();
             let rel = fwd(p.strip_prefix(base).unwrap_or(&p));
             let name = e.file_name().to_string_lossy().to_string();
+            if is_link(&e) { left.push(format!("{rel} (a link, not followed)")); continue; }
             if p.is_dir() { if depth < 4 && !name.starts_with('.') && name != "__pycache__" && name != "node_modules" { go(&p, base, depth + 1, files, left, total); } continue; }
             if !p.is_file() || rel == "SKILL.md" { continue; }
             if skip_file(&rel) { left.push(rel); continue; }
@@ -555,6 +570,7 @@ fn read_layout(root: &Path, source: &str, origin: &str, key_base: &str, repo: Op
         for e in es {
             let p = e.path();
             let n = e.file_name().to_string_lossy().to_string();
+            if is_link(&e) { continue; }
             if p.is_dir() && deep { md_files(&p, &format!("{prefix}{n}-"), true, out); }
             else if p.is_file() && n.ends_with(".md") { out.push((format!("{prefix}{}", &n[..n.len() - 3]), p)); }
         }
@@ -578,6 +594,11 @@ fn read_layout(root: &Path, source: &str, origin: &str, key_base: &str, repo: Op
         let n = s.file_name().to_string_lossy().to_string();
         if n.starts_with('.') { continue; }
         let p = s.path();
+        if is_link(&s) {
+            // A skill folder that is a link to somewhere else: named, not read (reads stay inside the home or plugin folder).
+            push!("skill", &n, None, None, vec![], 0, None, Some("it is a link to a folder elsewhere, so it wasn't read: copy the folder here to bring it".into()));
+            continue;
+        }
         if p.is_dir() && p.join("SKILL.md").exists() {
             match read_skill(&p) {
                 Some((c, f, l, total)) => push!("skill", &n, Some(c), if f.is_empty() { None } else { Some(f) }, l, total, None, None),
@@ -635,6 +656,13 @@ pub fn config(homes_in: &[String], repos: &[String], st: &Scanned) -> Result<Con
             let mut name = id.split('@').next().unwrap_or(&id).to_string();
             if let Some(n) = fs::read_to_string(p.join(".claude-plugin").join("plugin.json")).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).and_then(|v| v["name"].as_str().map(String::from)) { name = n; }
             let origin = format!("plugin:{}", ext_name(&name));
+            // installed_plugins.json is read as data: a folder outside this home's plugins folder is not read.
+            let inside = match (fs::canonicalize(&p), fs::canonicalize(root.join("plugins"))) { (Ok(a), Ok(b)) => a.starts_with(&b), _ => false };
+            if p.is_dir() && !inside {
+                items.push(ConfigItem { key: format!("{}/{origin}", s.home_path), source: s.path.clone(), origin: origin.clone(), repo: None, kind: "plugin", name: ext_name(&name), description: None, bytes: 0,
+                    content: None, files: None, left_out: vec![], problem: Some("its folder is outside this home's plugins folder, so it wasn't read".into()), nested: None, renamed: None, raw: name.clone() });
+                continue;
+            }
             if !p.is_dir() {
                 items.push(ConfigItem { key: format!("{}/{origin}", s.home_path), source: s.path.clone(), origin: origin.clone(), repo: None, kind: "plugin", name: ext_name(&name), description: None, bytes: 0,
                     content: None, files: None, left_out: vec![], problem: Some("the plugin is listed as installed, but its folder is not on this computer".into()), nested: None, renamed: None, raw: name.clone() });
@@ -801,7 +829,10 @@ mod tests {
         fs::create_dir_all(c1.join("commands").join("git")).unwrap();
         fs::write(c1.join("commands").join("git").join("ship.md"), "Ship it.").unwrap();
         fs::write(c1.join("settings.json"), "{\"env\":{\"TOKEN\":\"never-read\"}}").unwrap();
-        let plug = base.join("plugins").join("helper");
+        let plug = c1.join("plugins").join("cache").join("helper");
+        let outside = base.join("elsewhere").join("sneaky");
+        fs::create_dir_all(outside.join("skills").join("grab")).unwrap();
+        fs::write(outside.join("skills").join("grab").join("SKILL.md"), "Outside.").unwrap();
         fs::create_dir_all(plug.join("skills").join("helping")).unwrap();
         fs::create_dir_all(plug.join(".claude-plugin")).unwrap();
         fs::create_dir_all(plug.join("hooks")).unwrap();
@@ -809,8 +840,14 @@ mod tests {
         fs::write(plug.join("skills").join("helping").join("SKILL.md"), "Help.").unwrap();
         fs::write(plug.join("hooks").join("hooks.json"), "{\"hooks\":{\"Stop\":[]}}").unwrap();
         fs::create_dir_all(c1.join("plugins")).unwrap();
-        fs::write(c1.join("plugins").join("installed_plugins.json"), format!("{{\"plugins\":{{\"helper@market\":[{{\"installPath\":{}}}],\"gone@market\":[{{\"installPath\":\"{}\"}}]}}}}",
-            serde_json::to_string(&fwd(&plug)).unwrap(), fwd(&base.join("nowhere")))).unwrap();
+        fs::write(c1.join("plugins").join("installed_plugins.json"), format!("{{\"plugins\":{{\"helper@market\":[{{\"installPath\":{}}}],\"gone@market\":[{{\"installPath\":\"{}\"}}],\"sneaky@market\":[{{\"installPath\":{}}}]}}}}",
+            serde_json::to_string(&fwd(&plug)).unwrap(), fwd(&c1.join("plugins").join("cache").join("nowhere")), serde_json::to_string(&fwd(&outside)).unwrap())).unwrap();
+        // A home that holds only skills one folder down is still listed.
+        fs::create_dir_all(home.join(".claude-nested").join("skills").join("development").join("deep")).unwrap();
+        fs::write(home.join(".claude-nested").join("skills").join("development").join("deep").join("SKILL.md"), "Deep.").unwrap();
+        // A skill folder that is a link elsewhere (where links can be made): named, not read.
+        #[cfg(unix)] let linked = std::os::unix::fs::symlink(&outside.join("skills").join("grab"), c1.join("skills").join("linked")).is_ok();
+        #[cfg(windows)] let linked = std::os::windows::fs::symlink_dir(&outside.join("skills").join("grab"), c1.join("skills").join("linked")).is_ok();
         // A second home with the same conversation as the first (a copy) and one of its own.
         let c2 = home.join(".claude-work");
         let p2 = c2.join("projects").join("garden");
@@ -831,19 +868,21 @@ mod tests {
 
         let src = sources();
         let names: Vec<_> = src.iter().map(|s| s.home.clone()).collect();
-        assert_eq!(names, vec!["~/.claude", "~/.claude-tools", "~/.claude-work"], "every home that holds something, none that is empty");
+        assert_eq!(names, vec!["~/.claude", "~/.claude-nested", "~/.claude-tools", "~/.claude-work"], "every home that holds something (skills one folder down too), none that is empty");
         let h1 = &src[0];
         assert_eq!(h1.conversations, 5);
         assert_eq!(h1.profiles.iter().map(|p| (p.name.as_str(), p.sessions)).collect::<Vec<_>>(), vec![("Personal", 1), ("Work", 1)], "two profiles share this home");
         assert_eq!(h1.terminal, 3);
         assert_eq!((h1.email.as_deref(), h1.org.as_deref()), (Some("sam@example.com"), Some("Sam's org")));
-        assert_eq!((h1.skills, h1.agents, h1.commands, h1.plugins, h1.folders), (2, 3, 1, 2, 1));
+        assert_eq!((h1.agents, h1.commands, h1.plugins, h1.folders), (3, 1, 3, 1));
+        assert!(h1.skills >= 5, "tidy, 日本語, two one folder down and a loose file (and the link where made): {}", h1.skills);
         assert!(h1.last_used.is_some());
-        assert_eq!(src[1].conversations, 0);
-        assert_eq!(src[1].commands, 1);
-        assert_eq!(src[2].email.as_deref(), Some("sam@work.example"));
+        let at = |h: &str| src.iter().find(|s| s.home == h).unwrap();
+        assert_eq!((at("~/.claude-tools").conversations, at("~/.claude-tools").commands), (0, 1));
+        assert_eq!((at("~/.claude-nested").conversations, at("~/.claude-nested").skills), (0, 1));
+        assert_eq!(at("~/.claude-work").email.as_deref(), Some("sam@work.example"));
         // The copy of a Personal session in the second home still counts as Personal's; its own one as the terminal's.
-        assert_eq!((src[2].profiles.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), src[2].terminal), (vec!["Personal"], 1));
+        assert_eq!((at("~/.claude-work").profiles.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), at("~/.claude-work").terminal), (vec!["Personal"], 1));
 
         let st = Scanned::default();
         let out = scan(&|_, _| {}, &src.iter().map(|s| s.path.clone()).collect::<Vec<_>>(), &st).unwrap();
@@ -871,8 +910,15 @@ mod tests {
         assert_eq!(out.units.len(), 5);
 
         let cfg = config(&[src[0].home_path.clone()], &[real(&repo)], &st).unwrap();
-        let keys: Vec<String> = cfg.items.iter().filter(|i| i.renamed.is_none() && !i.name.starts_with("code-review")).map(|i| format!("{}:{}:{}", i.origin, i.kind, i.name)).collect();
+        let keys: Vec<String> = cfg.items.iter().filter(|i| i.renamed.is_none() && !i.name.starts_with("code-review") && i.origin != "plugin:sneaky" && i.name != "linked").map(|i| format!("{}:{}:{}", i.origin, i.kind, i.name)).collect();
         assert_eq!(keys, vec!["user:command:git-ship", "user:agent:reviewer", "user:skill:tidy", "user:skill:notes", "user:skill:upgrade", "user:skill:loose", "plugin:gone:plugin:gone", "plugin:helper:skill:helping", "plugin:helper:hook:helper-hooks", "repo:skill:watering"], "{keys:?}");
+        let sneaky = cfg.items.iter().find(|i| i.origin == "plugin:sneaky").expect("named");
+        assert!(sneaky.problem.as_deref().unwrap_or("").contains("outside this home"), "{:?}", sneaky.problem);
+        assert!(!cfg.items.iter().any(|i| i.content.as_deref() == Some("Outside.")), "nothing read from outside the home");
+        if linked {
+            let l = cfg.items.iter().find(|i| i.name == "linked").expect("a linked skill folder is named");
+            assert!(l.content.is_none() && l.problem.as_deref().unwrap_or("").contains("link"));
+        }
         let jp = cfg.items.iter().find(|i| i.renamed.as_deref() == Some("日本語")).expect("kept under a stand-in name");
         assert!(jp.name.starts_with("skill-") && jp.content.is_some());
         let reviews: Vec<_> = cfg.items.iter().filter(|i| i.kind == "agent" && i.name.starts_with("code-review")).map(|i| (i.name.clone(), i.renamed.clone())).collect();

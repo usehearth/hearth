@@ -183,6 +183,16 @@ test('settings: Connectors and Extensions list what the server has', async ({ pa
   expect(fake.unknown).toEqual([]);
 });
 
+test('composer: a file dropped on it becomes an attachment (the desktop window lets the page take drops)', async ({ page, fake }) => {
+  await connect(page, fake);
+  const shell = page.locator('[data-slot="aui_composer-shell"]');
+  const dt = await page.evaluateHandle(() => { const d = new DataTransfer(); d.items.add(new File(['hello'], 'notes.txt', { type: 'text/plain' })); return d; });
+  await shell.dispatchEvent('dragenter', { dataTransfer: dt });
+  await shell.dispatchEvent('dragover', { dataTransfer: dt });
+  await shell.dispatchEvent('drop', { dataTransfer: dt });
+  await expect(shell).toContainText('notes.txt');
+});
+
 /** The folder a claude.ai export unzips into today: one zip per part (conversations, memories, account, artifacts). */
 function exportFolder(dir: string) {
   const account = { uuid: 'acct-1' };
@@ -310,6 +320,29 @@ test('import: a connection that drops part way: a receipt for what arrived, or a
   await expect(page.getByText(/were not kept: see why below|The connection to your server dropped during the import/).first()).toBeVisible({ timeout: 30_000 });
   // Either way the person is never left on the Find page with only an error line.
   await expect(page.getByRole('button', { name: 'Bring everything across' })).toHaveCount(0);
+});
+
+test("import: when Claude Code on this computer can't be read, nothing can be brought across, and the screen says why", async ({ page, fake }) => {
+  // Stands in for the desktop app's shell: the key from the keychain, and a scan of this computer that fails.
+  await rememberServer(page, fake);
+  await page.addInitScript((key) => {
+    let cb = 0;
+    (window as any).__TAURI_INTERNALS__ = {
+      transformCallback: () => ++cb, unregisterCallback: () => {}, metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
+      invoke: async (cmd: string) => {
+        if (cmd === 'key_get') return key;
+        if (cmd === 'import_sources') throw 'Access is denied. (os error 5)';
+        return null;
+      },
+    };
+  }, fake.key);
+  await page.goto('/');
+  await expect(sidebar(page)).toContainText('Connected to Fake Hearth');
+  await sidebar(page).getByRole('button', { name: 'Bring everything from Claude' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'could not be read' })).toContainText('Claude Code on this computer could not be read, so nothing can be brought across yet.');
+  await expect(page.getByRole('alert').filter({ hasText: 'could not be read' })).toContainText('Access is denied');
+  await expect(page.getByRole('button', { name: 'Bring everything across' })).toBeDisabled();
+  expect(fake.callsOf('_hearth/import/begin')).toHaveLength(0);
 });
 
 test.describe('import against an older server', () => {

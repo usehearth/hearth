@@ -34,3 +34,8 @@ getrandom = "0.2"
 base64 = "0.22"
 # Setup guide (src/guide.rs): calls to the model provider the person chose, the server address check.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# The import hashes every main transcript as it reads it (src/import.rs): unoptimised, sha2 makes a debug scan of a
+# few GB several times slower. Optimised even in debug builds and tests.
+[profile.dev.package.sha2]
+opt-level = 3
