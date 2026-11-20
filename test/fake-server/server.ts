@@ -30,7 +30,7 @@ export interface Call { method: string; params: any; conn: number; at: number }
 interface Conn { id: number; ws: WebSocket; attached: Set<string>; silent: boolean; nextId: number; waiting: Map<number, (r: any) => void> }
 
 interface Turn {
-  sessionId: string; script: Script; cancelled: boolean; conn: Conn; reply: ((result: unknown, error?: { code: number; message: string }) => void) | null;
+  sessionId: string; script: Script; cancelled: boolean; conn: Conn; reqId?: number | string; reply: ((result: unknown, error?: { code: number; message: string }) => void) | null;
   /** A permission the turn waits on: answered by a window (first answer wins), a card answer, or "another device". */
   perm: { cardId: string; asked: Map<Conn, number>; resolve: (optionId: string | null, by: string) => void; askOne: (c: Conn) => void } | null;
 }
@@ -46,6 +46,8 @@ export interface FakeServerOptions {
   pageSize?: number;
   /** Replaces the default world. */
   world?: { projects: Project[]; threads: Partial<Thread>[] };
+  /** Queue a session/prompt sent during a turn, as core does since hearth-server #25 (default); false refuses it. */
+  queue?: boolean;
   /** `_hearth` extensions announced in `initialize`. */
   extensions?: string[];
   title?: string;
@@ -132,6 +134,9 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
 
   const conns = new Set<Conn>();
   const turns = new Map<string, Turn>();
+  /** Messages sent during a turn, waiting for it to end, per thread (core.chat_queue). */
+  const queues = new Map<string, { id: string; text: string; conn: Conn; reqId?: number | string; resolve: (r: unknown) => void; reject: (e: unknown) => void }[]>();
+  let queueIds = 0;
   const calls: Call[] = [];
   const unknown: string[] = [];
   const faults = {
@@ -192,8 +197,8 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
 
   // ---------- turns ----------
 
-  async function runTurn(t: Thread, script: Script, conn: Conn, reply: Turn['reply']) {
-    const turn: Turn = { sessionId: t.id, script, cancelled: false, conn, reply, perm: null };
+  async function runTurn(t: Thread, script: Script, conn: Conn, reply: Turn['reply'], reqId?: number | string) {
+    const turn: Turn = { sessionId: t.id, script, cancelled: false, conn, reqId, reply, perm: null };
     turns.set(t.id, turn);
     setStatus(t, 'running');
     let last = 0;
@@ -244,6 +249,16 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     if (failed) turn.reply?.(undefined, { code: -32603, message: failed });
     else turn.reply?.({ stopReason });
     turn.reply = null;
+    drain(t);
+  }
+
+  /** The oldest queued message goes once the thread is free (core.chat_queue). Its sender is not sent it back. */
+  function drain(t: Thread) {
+    if (turns.has(t.id)) return;
+    const next = queues.get(t.id)?.shift();
+    if (!next) return;
+    update(t, { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: next.text } }, { except: next.conn });
+    void runTurn(t, scriptFor(next.text), next.conn, (result, error) => (error ? next.reject(error) : next.resolve({ ...(result as object), _meta: { hearth: { queued: true } } })), next.reqId);
   }
 
   /** Asks every window that has the thread open; the first answer wins and the others' requests are withdrawn. */
@@ -326,16 +341,40 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
       if (perm) setTimeout(() => perm.askOne(c), 50 + faults.delayMs);
       return sessionResult(t);
     },
-    'session/prompt': (params, c) => {
+    'session/prompt': (params, c, id) => {
       const t = thread(params);
-      if (turns.has(t.id)) throw { code: -32600, message: 'A turn is already running in this thread. Wait for it or cancel it.' };
       const text = (params?.prompt ?? []).map((b: any) => (b?.type === 'text' ? b.text : '')).join('');
+      if (turns.has(t.id)) {
+        // A turn is running: as core does since hearth-server #25, the message waits in the thread's queue and its
+        // request ends with its own turn. `queue: false` refuses it, as older servers did.
+        if (opts.queue === false) throw { code: -32600, message: 'A turn is already running in this thread. Wait for it or cancel it.' };
+        return new Promise((resolve, reject) => {
+          const list = queues.get(t.id) ?? [];
+          list.push({ id: `q${++queueIds}`, text, conn: c, reqId: id, resolve, reject });
+          queues.set(t.id, list);
+          update(t, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `\nQueued: "${text}" goes to the agent when the current turn ends.\n` } });
+        });
+      }
       const u: Update = { sessionUpdate: 'user_message_chunk', content: { type: 'text', text } };
       update(t, u, { except: c }); // the sender already shows it
       if (t.title === 'New thread') { t.title = text.replace(/#\S+/g, '').trim().slice(0, 40) || 'New thread'; update(t, { sessionUpdate: 'session_info_update', title: t.title }, { record: false }); }
       return new Promise((resolve, reject) => {
-        void runTurn(t, scriptFor(text), c, (result, error) => (error ? reject(error) : resolve(result)));
+        void runTurn(t, scriptFor(text), c, (result, error) => (error ? reject(error) : resolve(result)), id);
       });
+    },
+    // A request the app gave up on: a queued message still waiting is taken back; one already running is stopped.
+    '$/cancel_request': (params, c) => {
+      for (const [tid, list] of queues) {
+        const i = list.findIndex((q) => q.conn === c && q.reqId === params?.requestId);
+        if (i === -1) continue;
+        const [q] = list.splice(i, 1);
+        q!.resolve({ stopReason: 'cancelled', _meta: { hearth: { queued: true } } });
+        const t = threads.get(tid);
+        if (t) update(t, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '\nA queued message was taken back before it was sent.\n' } });
+        return undefined;
+      }
+      for (const turn of turns.values()) if (turn.conn === c && turn.reqId === params?.requestId) turn.cancelled = true;
+      return undefined;
     },
     'session/cancel': (params) => { const turn = turns.get(String(params?.sessionId)); if (turn) turn.cancelled = true; return undefined; },
     'session/set_mode': (params) => {

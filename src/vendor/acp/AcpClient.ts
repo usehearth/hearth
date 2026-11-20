@@ -376,6 +376,33 @@ export class AcpClient {
     this.sendNotification("session/cancel", { sessionId: this._sessionId });
   }
 
+  /**
+   * Hearth: a message sent while a turn runs. The server keeps it in the thread's queue (it survives a restart) and
+   * sends it when the running turn ends; `result` settles when its own turn does. `withdraw` takes it back while it
+   * still waits (the server answers "cancelled"); once it is the running turn, withdrawing stops that turn.
+   */
+  promptQueued(content: readonly AcpContentBlock[]): { result: Promise<AcpStopReason>; withdraw: () => void } {
+    const sessionId = this._sessionId;
+    if (!sessionId) return { result: Promise.reject(new Error("No session yet: send a first message.")), withdraw: () => {} };
+    let requestId: JsonRpcId | undefined;
+    const result = this.request<{ stopReason?: AcpStopReason }>(
+      "session/prompt",
+      { sessionId, prompt: content },
+      null,
+      undefined,
+      (id) => { requestId = id; },
+    ).then((r) => r.stopReason ?? "end_turn");
+    const withdraw = () => {
+      if (requestId === undefined || !this.pending.has(requestId)) return;
+      try {
+        this.sendNotification("$/cancel_request", { requestId });
+      } catch {
+        // the socket is gone; the server still has the message and sends it when the turn ends
+      }
+    };
+    return { result, withdraw };
+  }
+
   async cancel(): Promise<void> {
     this.settlePermissions({ outcome: "cancelled" });
     if (!this._sessionId || this._connectionState !== "connected") return;
@@ -857,6 +884,7 @@ export class AcpClient {
     params: unknown,
     timeoutMs: number | null = this.lifecycleTimeoutMs(),
     watchDeadline?: DeadlineWatcher,
+    onId?: (id: JsonRpcId) => void,
   ): Promise<TResult> {
     if (this._connectionState !== "connected" && method !== "initialize") {
       return Promise.reject(
@@ -864,6 +892,7 @@ export class AcpClient {
       );
     }
     const id = this.nextId++;
+    onId?.(id);
     return new Promise<TResult>((resolve, reject) => {
       const arm = () => {
         if (timeoutMs === null) return undefined;
