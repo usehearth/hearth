@@ -7,9 +7,12 @@ import { Button } from '@/components/ui/button';
 import { errorText } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
 import { field, fieldArea } from '@/components/ui/field';
+import { ClientPicker } from '@/components/hearth/ClientPicker';
 
 export interface ProjectView {
   slug: string; name: string; kind: string; client: boolean; agent: string;
+  /** The client's name, and the server's client mode: in "simple" the client can be changed here (servers with client modes). */
+  clientName?: string | null; clientMode?: 'simple' | 'strict';
   roles: { role: string; label: string; model: string | null; default: string }[];
   modelChoices: string[];
   providers: string[] | null;
@@ -128,7 +131,7 @@ export function refill(d: Draft, v: ProjectView, g: GroupId): Draft {
   return next as unknown as Draft;
 }
 
-export function ProjectSettings({ project, request, extensions = [] }: { project: string; request: Request; extensions?: string[] }) {
+export function ProjectSettings({ project, request, extensions = [], clients = [] }: { project: string; request: Request; extensions?: string[]; /** Client names in use, for the Client picker. */ clients?: string[] }) {
   const [view, setView] = useState<ProjectView | null>(null);
   const [d, setD] = useState<Draft | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -167,6 +170,11 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
           {!view.canEdit && <p className="mt-2 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">Only an admin device can change these settings. Tick “admin device” for this device on the server's page.</p>}
         </div>
 
+        {view.clientMode === 'simple' && view.kind !== 'assistant' && (
+          <ClientLine view={view} clients={clients} canEdit={view.canEdit}
+            onSave={async (client) => { const v = await request<ProjectView>('_hearth/project/update', { project, client }); setView(v); }} />
+        )}
+
         <Group title="General" {...group('general')}>
           <Field label="Name"><input value={d.name} onChange={(e) => set('name', e.target.value)} className={field} aria-label="Project name" /></Field>
           <Field label="Instructions" help="What every agent in this project should know, like a project's custom instructions.">
@@ -196,7 +204,7 @@ export function ProjectSettings({ project, request, extensions = [] }: { project
               ))}
             </div>
           </Field>
-          <Field label="Model providers" help={view.client ? 'A client project only ever uses providers allowed for client work.' : 'Tried in this order; when one is down, the next takes over.'}>
+          <Field label="Model providers" help={view.client ? 'A client project only uses providers marked OK for client work.' : 'Tried in this order; when one is down, the next takes over.'}>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={d.allProviders} onChange={(e) => set('allProviders', e.target.checked)} className="size-4 accent-primary" />
               Any provider, in the server's order
@@ -401,6 +409,41 @@ function Group({ title, sub, children, dirty, busy, saved, err, canEdit, onSave,
 }
 
 /** A field in a group: its label above, help below (the guide's form field). */
+/** "Client: Acme. Uses only providers marked OK for client work. [Change]" (simple client mode; admin devices change it). */
+function ClientLine({ view, clients, canEdit, onSave }: { view: ProjectView; clients: string[]; canEdit: boolean; onSave: (client: string) => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(view.clientName ?? '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const save = async () => {
+    setBusy(true); setErr(null);
+    try { await onSave(value.trim()); setEditing(false); } catch (e) { setErr(errorText(e)); } finally { setBusy(false); }
+  };
+  return (
+    <section className="rounded-2xl border bg-card px-4 py-3" aria-label="Client">
+      {!editing ? (
+        <div className="flex items-center gap-3 text-sm">
+          <p className="min-w-0 flex-1">{view.clientName
+            ? <><span className="font-medium">Client: {view.clientName}.</span> <span className="text-muted-foreground">Uses only providers marked OK for client work.</span></>
+            : <span className="text-muted-foreground">No client: a personal project.</span>}</p>
+          {canEdit && <Button type="button" size="sm" variant="outline" onClick={() => { setValue(view.clientName ?? ''); setEditing(true); }}>{view.clientName ? 'Change' : 'Add a client'}</Button>}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <div className="text-xs font-medium">Client</div>
+          <ClientPicker value={value} onChange={setValue} clients={clients} />
+          <p className="text-xs text-muted-foreground">A client project only uses model providers marked OK for client work, from its next message.</p>
+          {err && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{err}</p>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={busy}>Cancel</Button>
+            <Button type="button" size="sm" onClick={() => void save()} disabled={busy || (value.trim() === (view.clientName ?? ''))}>{busy && <Loader2 className="size-3.5 animate-spin" />}Save</Button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Field({ label, help, children }: { label: string; help?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">

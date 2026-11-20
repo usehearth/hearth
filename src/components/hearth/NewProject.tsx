@@ -1,13 +1,16 @@
-// New project (admin devices only, `_hearth/project/create`): a name, the machine it runs on, its folder there, and
-// (on a work device) a client. The server wires its tools and opens its main thread.
+// New project (admin devices only, `_hearth/project/create`): a name, the machine it runs on, its folder there, and a
+// client if it is client work (strict client mode: on a work device only). The server wires its tools and opens its
+// main thread.
 import { useEffect, useState } from 'react';
 import { Check, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { errorText } from '@/lib/hearth';
 import { field } from '@/components/ui/field';
+import { ClientPicker } from '@/components/hearth/ClientPicker';
 
 type Request = <T = unknown>(method: string, params?: unknown) => Promise<T>;
-interface Options { pools: { name: string; title: string; clientOk: boolean }[]; defaultPool: string; clientAllowed: boolean }
+interface Options { pools: { name: string; title: string; clientOk: boolean }[]; defaultPool: string; clientAllowed: boolean;
+  /** Client names in use (servers with client modes) and the server's client mode. */ clients?: string[]; clientMode?: 'simple' | 'strict' }
 export interface Made { slug: string; name: string; client: boolean; sessionId: string; cwd: string; tools: { ok: boolean; error?: string } }
 
 const slugFrom = (name: string) => name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
@@ -58,10 +61,9 @@ export function NewProject({ request, onDone, clients = [] }: { request: Request
           <input value={path} onChange={(e) => setPath(e.target.value)} className={field} placeholder="C:\Projects\garden-planner" />
         </Field>
         {opts.clientAllowed && (
-          <Field label="Client" sub="Leave empty for a personal project. Client work stays on machines that allow it.">
-            <input value={client} onChange={(e) => setClient(e.target.value)} maxLength={60} className={field} list="new-project-clients" autoComplete="off"
-              placeholder={clients.length ? `For example ${clients[0]}` : undefined} />
-            <datalist id="new-project-clients">{clients.map((c) => <option key={c} value={c} />)}</datalist>
+          <Field label="Client" sub={opts.clientMode === 'simple' ? 'Only for client work: a client project only uses model providers marked OK for client work.'
+            : 'Leave empty for a personal project. Client work stays on machines that allow it.'}>
+            <ClientPicker value={client} onChange={setClient} clients={opts.clients ?? clients} />
             {clientBlocked && <p className="mt-1 text-xs text-destructive">{poolInfo?.title} doesn't take client work: pick another machine.</p>}
           </Field>
         )}
