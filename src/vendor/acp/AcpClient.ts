@@ -63,6 +63,13 @@ export type AcpClientOptions = {
    */
   requestTimeoutMs?: number;
   /**
+   * Hearth: when the socket has been quiet this long (ms), a ping (`_hearth/ping`) checks it is still there; any
+   * answer will do, an error included. Unset: no heartbeat.
+   */
+  heartbeatMs?: number;
+  /** Hearth: how long a heartbeat ping may go unanswered before the socket counts as dead and is dropped. */
+  heartbeatTimeoutMs?: number;
+  /**
    * Answers `session/request_permission`, ahead of any handler registered
    * through `registerPermissionHandler`. With neither, every request is
    * refused: an agent must never act on a decision nobody configured.
@@ -176,6 +183,14 @@ export class AcpClient {
   private lostSessionId: string | undefined;
   private readonly retiredSessionIds = new Set<string>();
   private restartLoadDeadline: (() => void) | undefined;
+  /** Hearth: how the last socket ended: whether it opened, and its close code and reason (4401, 4429...). */
+  private _lastClose: { opened: boolean; code?: number; reason?: string } | undefined;
+  get lastClose(): { opened: boolean; code?: number; reason?: string } | undefined {
+    return this._lastClose;
+  }
+  /** Hearth: when the socket last sent anything, and the heartbeat timer (heartbeatMs). */
+  private lastHeard = 0;
+  private heartbeat: ReturnType<typeof setInterval> | undefined;
   private sessionModes: AcpSessionModeState | undefined;
   private sessionConfigOptions: readonly AcpSessionConfigOption[] | undefined;
   private readonly sessionUpdateListeners = new Set<AcpSessionUpdateListener>();
@@ -362,6 +377,7 @@ export class AcpClient {
 
   dispose(): void {
     this.disposed = true;
+    this.stopHeartbeat();
     this.settlePermissions({ outcome: "cancelled" });
     this.failHandshake?.(new Error("AcpClient disposed"));
     const ws = this.ws;
@@ -456,9 +472,12 @@ export class AcpClient {
       }
       this.ws = ws;
       const isCurrent = () => this.ws === ws;
+      const ended: { opened: boolean; code?: number; reason?: string } = { opened: false };
+      this._lastClose = ended;
 
       ws.onopen = () => {
         if (!isCurrent()) return;
+        ended.opened = true;
         void (async () => {
           try {
             const result = await this.request<AcpInitializeResponse>(
@@ -484,6 +503,7 @@ export class AcpClient {
             settled = true;
             this.failHandshake = undefined;
             this.setConnectionState("connected");
+            this.startHeartbeat(ws);
             resolve(result);
           } catch (error) {
             if (!isCurrent()) return;
@@ -494,10 +514,13 @@ export class AcpClient {
       };
       ws.onmessage = (event) => {
         if (!isCurrent()) return;
+        this.lastHeard = Date.now();
         this.handleMessage(typeof event.data === "string" ? event.data : "");
       };
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         if (!isCurrent()) return;
+        ended.code = event?.code;
+        ended.reason = event?.reason;
         this.handleClose();
         fail(new Error("ACP WebSocket closed before handshake completed"));
       };
@@ -621,7 +644,45 @@ export class AcpClient {
     return { cwd: this.options.cwd, mcpServers };
   }
 
+  /**
+   * Hearth: a socket can stay open and say nothing (a half-open connection after sleep or a network change), and the
+   * browser never notices. When it has been quiet for `heartbeatMs`, a ping must get some answer within
+   * `heartbeatTimeoutMs`; if none comes, the socket is dropped as if it had closed, so the owner reconnects.
+   */
+  private startHeartbeat(ws: AcpWebSocketLike): void {
+    this.stopHeartbeat();
+    const every = this.options.heartbeatMs;
+    if (!every) return;
+    this.lastHeard = Date.now();
+    this.heartbeat = setInterval(() => {
+      if (this.ws !== ws || this._connectionState !== "connected") return;
+      if (Date.now() - this.lastHeard < every) return;
+      this.request("_hearth/ping", {}, this.options.heartbeatTimeoutMs ?? 10_000).catch((error: unknown) => {
+        // An error answer ("method not found") still proves the socket is alive; only silence counts.
+        if (this.ws !== ws || error instanceof AcpError) return;
+        if (!/timed out/.test(toError(error).message)) return;
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        try {
+          ws.close();
+        } catch {
+          // already gone
+        }
+        this.handleClose();
+      });
+    }, every);
+    (this.heartbeat as unknown as { unref?: () => void }).unref?.();
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeat !== undefined) clearInterval(this.heartbeat);
+    this.heartbeat = undefined;
+  }
+
   private handleClose(): void {
+    this.stopHeartbeat();
     this.failPending(new Error("ACP WebSocket connection closed"));
     this.settlePermissions({ outcome: "cancelled" });
     this.ws = undefined;

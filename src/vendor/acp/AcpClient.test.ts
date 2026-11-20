@@ -302,6 +302,86 @@ describe('permissions', () => {
   });
 });
 
+describe('a thread left while it opens (N2)', () => {
+  it('reports nothing once the controller is detached, "AcpClient disposed" included', async () => {
+    const t = setup({ sessionId: 'old' });
+    const errors: string[] = [];
+    const controller = new AcpThreadController({ client: t.client, onError: (e) => errors.push(e.message) });
+    controller.attach();
+    const loading = controller.load();
+    t.ws.onopen!();
+    await flush();
+    t.ws.reply('initialize', INIT);
+    await flush();
+    expect(t.ws.request('session/load')).toBeDefined(); // still opening
+    await controller.detach(); // the thread pane went away
+    t.client.dispose();
+    await loading;
+    expect(errors).toEqual([]);
+  });
+
+  it('a thread still on screen does report a failed open', async () => {
+    const t = setup({ sessionId: 'old' });
+    const errors: string[] = [];
+    const controller = new AcpThreadController({ client: t.client, onError: (e) => errors.push(e.message) });
+    controller.attach();
+    const loading = controller.load();
+    t.ws.onopen!();
+    await flush();
+    t.ws.reply('initialize', INIT);
+    await flush();
+    t.ws.replyError('session/load', 'Resource not found', -32002);
+    await loading;
+    expect(errors).toEqual(['Resource not found']);
+  });
+});
+
+describe('heartbeat', () => {
+  const quiet = () => setup({ heartbeatMs: 1000, heartbeatTimeoutMs: 500 });
+
+  it('a socket that answers nothing is dropped, so the owner can reconnect', async () => {
+    vi.useFakeTimers();
+    const t = quiet();
+    await openSession(t);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(t.ws.request('_hearth/ping')).toBeDefined();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(t.client.connectionState).toBe('disconnected');
+    expect(t.ws.closed).toBe(true);
+  });
+
+  it('any answer keeps it, "method not found" included', async () => {
+    vi.useFakeTimers();
+    const t = quiet();
+    await openSession(t);
+    await vi.advanceTimersByTimeAsync(1000);
+    t.ws.replyError('_hearth/ping', 'Method not found', -32601);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(t.client.connectionState).toBe('connected');
+  });
+
+  it('no ping while the socket is busy', async () => {
+    vi.useFakeTimers();
+    const t = quiet();
+    await openSession(t);
+    for (let i = 0; i < 5; i++) {
+      await vi.advanceTimersByTimeAsync(400);
+      t.ws.update('s1', { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '.' } });
+    }
+    expect(t.ws.request('_hearth/ping')).toBeUndefined();
+    expect(t.client.connectionState).toBe('connected');
+  });
+
+  it('stops with the client', async () => {
+    vi.useFakeTimers();
+    const t = quiet();
+    await openSession(t);
+    t.client.dispose();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(t.ws.request('_hearth/ping')).toBeUndefined();
+  });
+});
+
 describe('a dropped connection', () => {
   it('fails what was waiting, and the next open reloads the same session without repeating its history', async () => {
     const t = setup();

@@ -49,6 +49,15 @@ export interface FakeServerOptions {
   /** `_hearth` extensions announced in `initialize`. */
   extensions?: string[];
   title?: string;
+  /**
+   * How a socket is refused. 'http' (default): at the upgrade with 401 or 429, as core does today (a browser sees only
+   * a failed connection). 'close': the socket opens and closes with 4401 (key refused) or 4429 ("retry in <seconds>"), and
+   * initialize says so (`_meta.hearth.refusals: "close"`), as proposed for core.
+   */
+  refusals?: 'http' | 'close';
+  /** Wrong keys allowed in `lockoutMs` before every socket is refused for a while (core: 5 in 15 minutes). */
+  lockoutAfter?: number;
+  lockoutMs?: number;
 }
 
 export const DEFAULT_KEY = 'test-device-key';
@@ -96,6 +105,16 @@ export type FakeServer = Awaited<ReturnType<typeof startFakeServer>>;
 
 export async function startFakeServer(opts: FakeServerOptions = {}) {
   const key = opts.key ?? DEFAULT_KEY;
+  /** Device keys the server takes (revokeKey swaps them). */
+  const keys = new Set([key]);
+  /** WebSocket upgrades refused for a wrong or revoked key (the real server counts these toward a lockout). */
+  let refusedUpgrades = 0;
+  /** Sockets refused because of the lockout, and when the wrong keys that count toward it came. */
+  let lockedRefusals = 0;
+  const badKeys: number[] = [];
+  const refusals = opts.refusals ?? 'http';
+  const lockoutAfter = opts.lockoutAfter ?? 5;
+  const lockoutMs = opts.lockoutMs ?? 15 * 60_000;
   const speed = opts.speed ?? 0.1;
   const maxGap = opts.maxGap ?? 250;
   const pageSize = opts.pageSize ?? 50;
@@ -275,7 +294,7 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
       agentCapabilities: { loadSession: true, promptCapabilities: { image: true, audio: false, embeddedContext: true }, mcpCapabilities: { http: false, sse: false }, sessionCapabilities: { list: {}, resume: {}, close: {} } },
       agentInfo: { name: 'fake-hearth', title: opts.title ?? 'Fake Hearth', version: '0.0.0' },
       authMethods: [],
-      _meta: { hearth: { version: 1, extensions, uploadMaxBytes: 15 * 1024 * 1024 } },
+      _meta: { hearth: { version: 1, extensions, uploadMaxBytes: 15 * 1024 * 1024, ...(refusals === 'close' ? { refusals: 'close' } : {}) } },
     }),
     'session/list': (params) => {
       const archived = !!params?._meta?.hearth?.archived;
@@ -433,7 +452,8 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
       return reply({ error: { code: fail.code, message: fail.message } });
     }
     if (!fn) {
-      unknown.push(method);
+      // The app's heartbeat: core has no such method and answers "method not found", which proves the socket is alive.
+      if (method !== '_hearth/ping') unknown.push(method);
       return reply({ error: { code: -32601, message: `Method not found: ${method}` } });
     }
     try {
@@ -450,13 +470,30 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
   const sockets = new Set<Socket>();
   const server = http.createServer((_req, res) => { res.writeHead(404).end(); });
   server.on('connection', (s) => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
+  /** Refuses a socket as core does: at the upgrade with an HTTP status (today), or by opening it and closing it with
+   * a code a browser can read (refusals: 'close'). */
+  const refuse = (req: http.IncomingMessage, socket: Socket, head: Buffer, status: 401 | 429, retrySeconds?: number) => {
+    if (refusals === 'close') {
+      wss.handleUpgrade(req, socket, head, (ws) => ws.close(status === 401 ? 4401 : 4429, status === 401 ? 'key refused' : `retry in ${retrySeconds}`));
+      return;
+    }
+    socket.write(`HTTP/1.1 ${status === 401 ? '401 Unauthorized' : '429 Too Many Requests'}\r\nConnection: close\r\n\r\n`);
+    socket.destroy();
+  };
   server.on('upgrade', (req, socket, head) => {
     const protocols = String(req.headers['sec-websocket-protocol'] ?? '').split(',').map((s) => s.trim());
     const bearer = protocols.find((p) => p.startsWith('bearer.'))?.slice('bearer.'.length);
-    if (!req.url?.startsWith('/acp') || bearer !== key) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
-      socket.destroy();
-      return;
+    // The lockout: after `lockoutAfter` wrong keys in `lockoutMs`, every socket from here is refused (a good key too).
+    const now = Date.now();
+    while (badKeys.length && now - badKeys[0]! > lockoutMs) badKeys.shift();
+    if (badKeys.length >= lockoutAfter) {
+      lockedRefusals++;
+      return refuse(req, socket as Socket, head, 429, Math.ceil((badKeys[0]! + lockoutMs - now) / 1000));
+    }
+    if (!req.url?.startsWith('/acp') || !keys.has(String(bearer))) {
+      refusedUpgrades++;
+      badKeys.push(now);
+      return refuse(req, socket as Socket, head, 401);
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
       const c: Conn = { id: ++connIds, ws, attached: new Set(), silent: false, nextId: 1, waiting: new Map() };
@@ -500,6 +537,14 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     },
     /** Open sockets right now. */
     get connections() { return conns.size; },
+    /** Sockets refused for their key so far (the real server locks a key out after 5 in 15 minutes). */
+    get refusedUpgrades() { return refusedUpgrades; },
+    /** Sockets refused because this address was locked out. */
+    get lockedRefusals() { return lockedRefusals; },
+    /** Whether the lockout is on right now. */
+    get locked() { const now = Date.now(); return badKeys.filter((t) => now - t <= lockoutMs).length >= lockoutAfter; },
+    /** Locks this address out now, as if `lockoutAfter` wrong keys had just come. */
+    lockOut() { const now = Date.now(); badKeys.length = 0; for (let i = 0; i < lockoutAfter; i++) badKeys.push(now); for (const c of conns) c.ws.terminate(); },
     /** Whether a turn is running in this thread. */
     running: (sessionId: string) => turns.has(sessionId),
     notifyAll,
@@ -529,6 +574,8 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
           status: 'idle', pinned: false, archived: false, history: [], modeId: 'default', provider: null, plan: null, cards: [] });
       }
     },
+    /** The device key stops working (a new one, if given, works instead): open sockets drop, and new ones with the old key are refused (401) while the server stays up. */
+    revokeKey(replacement?: string) { keys.clear(); if (replacement) keys.add(replacement); for (const c of conns) c.ws.terminate(); },
     async close() { await stopListening(); wss.close(); },
   };
 }

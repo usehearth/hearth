@@ -33,7 +33,6 @@ async function captureNotifications(page: Page) {
 
 test.describe('server restart', () => {
   test('the sidebar comes back by itself after a 4 s restart', async ({ page, fake }) => {
-    knownFailure('directory.ts GIVE_UP_AFTER = 2: two failed retries (~3 s) turn the sidebar into "Not connected" and a key prompt that needs Retry');
     await connect(page, fake);
     await fake.restart(4000);
     await page.waitForTimeout(12_000); // the server has been back for 12 s
@@ -51,6 +50,76 @@ test.describe('server restart', () => {
     await expect(reconnectPill(page)).toBeHidden();
     await send(page, 'Still there?');
     await expect(assistantMessages(page).last()).toContainText('You said: Still there?');
+  });
+
+  test('a long outage on a server that does not say why it refuses spends few tries, then waits and offers Try now', async ({ page, fake }) => {
+    await connect(page, fake);
+    const back = fake.restart(25_000);
+    // At most 4 failed tries per 15 minutes from this page (the server locks an address out at 5 wrong keys, and
+    // today it can't tell the page whether a refusal was the key or the server being away).
+    await expect(sidebar(page)).toContainText('Next try at', { timeout: 20_000 });
+    await expect(threadRow(page, 'Run the tests')).toBeVisible(); // the list stays
+    await back;
+    await sidebar(page).getByRole('button', { name: 'Try now' }).click();
+    await expect(sidebar(page)).toContainText('Connected to Fake Hearth', { timeout: 15_000 });
+    await expect(reconnectPill(page)).toBeHidden({ timeout: 15_000 }); // the thread follows the sidebar back
+  });
+});
+
+test.describe('a server that says why it refuses (close codes 4401 and 4429)', () => {
+  test.use({ fakeOptions: { refusals: 'close', lockoutMs: 8000 } });
+
+  test('a long outage keeps the list on screen and keeps trying until the server is back', async ({ page, fake }) => {
+    await connect(page, fake);
+    const back = fake.restart(20_000);
+    await expect(sidebar(page)).toContainText('Reconnecting…');
+    await page.waitForTimeout(15_000);
+    await expect(threadRow(page, 'Run the tests')).toBeVisible();
+    await expect(sidebar(page).getByText('Not connected')).toBeHidden();
+    await back;
+    await expect(sidebar(page)).toContainText('Connected to Fake Hearth', { timeout: 40_000 });
+  });
+
+  test('a revoked key: asked for at once, one try per connection, and a new key reconnects', async ({ page, fake }) => {
+    await connect(page, fake);
+    fake.revokeKey('replacement-key');
+    await expect(sidebar(page)).toContainText("The server refused this device's key", { timeout: 15_000 });
+    await expect(page.getByRole('status').filter({ hasText: "The server refused this device's key" })).toBeVisible(); // the thread stops too
+    await page.waitForTimeout(5000);
+    expect(fake.refusedUpgrades).toBeLessThanOrEqual(2);
+    expect(fake.locked).toBe(false);
+    await sidebar(page).getByPlaceholder('Paste the key').fill('replacement-key');
+    await sidebar(page).getByRole('button', { name: 'Unlock' }).click();
+    await expect(sidebar(page)).toContainText('Connected to Fake Hearth');
+    await expect(reconnectPill(page)).toBeHidden({ timeout: 15_000 });
+  });
+
+  test('a lockout (429) is said plainly and waited out, with no tries before it lifts', async ({ page, fake }) => {
+    await connect(page, fake);
+    fake.lockOut(); // as if this address had sent 5 wrong keys just now; it lifts after 8 s
+    await expect(sidebar(page)).toContainText('refusing this address for a while, after too many wrong keys', { timeout: 10_000 });
+    await expect(threadRow(page, 'Run the tests')).toBeVisible();
+    const during = fake.lockedRefusals;
+    expect(during).toBeLessThanOrEqual(2); // the sidebar's and the thread's first tries, then nothing until it lifts
+    await expect(sidebar(page)).toContainText('Connected to Fake Hearth', { timeout: 20_000 });
+    expect(fake.lockedRefusals).toBe(during);
+  });
+});
+
+test.describe('a server that does not say why it refuses (today: 401 and 429 at the upgrade)', () => {
+  test.use({ fakeOptions: { lockoutMs: 30_000 } });
+
+  test('a revoked key never locks the address out, and the key can be replaced', async ({ page, fake }) => {
+    await connect(page, fake);
+    fake.revokeKey('replacement-key'); // a stale page with an old key, as the UI session saw
+    await expect(sidebar(page)).toContainText('may have turned this device\'s key away', { timeout: 20_000 });
+    await page.waitForTimeout(5000);
+    expect(fake.refusedUpgrades).toBeLessThanOrEqual(4);
+    expect(fake.locked).toBe(false);
+    await sidebar(page).getByRole('button', { name: 'New key' }).click();
+    await sidebar(page).getByPlaceholder('Paste the key').fill('replacement-key');
+    await sidebar(page).getByRole('button', { name: 'Unlock' }).click();
+    await expect(sidebar(page)).toContainText('Connected to Fake Hearth');
   });
 });
 
@@ -121,7 +190,6 @@ test.describe('what is typed survives', () => {
 });
 
 test('switching away from a thread that is still opening shows no error', async ({ page, fake }) => {
-  knownFailure('N2: the pane left behind disposes its client mid-open, and "AcpClient disposed" lands in the shared error banner');
   fake.setDelay(800); // every reply takes 0.8 s, so the main thread is still opening when the switch comes
   await connect(page, fake, { waitForThread: false });
   await expect.poll(() => fake.callsOf('session/load').length).toBeGreaterThan(0); // the main thread has started opening
@@ -154,13 +222,17 @@ test('a reply that never comes is reported', async ({ page, fake }) => {
   await expect(page.getByText(/no answer|not answering|lost|timed out/i)).toBeVisible({ timeout: 5000 });
 });
 
-test('a connection that went silent (half-open) is noticed', async ({ page, fake }) => {
-  knownFailure('no heartbeat on either connection: a socket that stays open but silent still shows as connected');
+test('a connection that went silent (half-open) is noticed and replaced', async ({ page, fake }) => {
   await page.clock.install();
   await connect(page, fake);
-  fake.goSilent();
-  await page.clock.fastForward('02:00');
-  await expect(sidebar(page)).not.toContainText('Connected to Fake Hearth', { timeout: 5000 });
+  fake.goSilent(); // every open socket stays open but says nothing; new connections work
+  fake.addThreads('scratch', 1, () => 'Arrived while silent');
+  // Two minutes of silence, in steps so that each heartbeat and then its deadline come due.
+  for (let i = 0; i < 4; i++) await page.clock.fastForward('00:30');
+  await expect(threadRow(page, 'Arrived while silent')).toBeVisible({ timeout: 15_000 }); // the sidebar listed again
+  await expect(reconnectPill(page)).toBeHidden({ timeout: 15_000 });
+  await send(page, 'Still there?');
+  await expect(assistantMessages(page).last()).toContainText('You said: Still there?');
 });
 
 test('a failed "Needs you" refresh keeps the cards it had', async ({ page, fake }) => {
