@@ -341,7 +341,11 @@ export interface Progress { done: number; total: number; bytesDone: number; byte
  * The server no longer has this run (it restarted mid-import: a run lives in its memory). What arrived before is
  * stored and stays; a new run skips it and counts the receipt. Code `run_gone` from servers that say so, else the words.
  */
-export class RunGone extends Error { constructor(public committed: number) { super('the server restarted during the import'); } }
+// (No TypeScript-only syntax here: the server's proofs run this file with Node's type stripping.)
+export class RunGone extends Error {
+  committed: number;
+  constructor(committed: number) { super('the server restarted during the import'); this.committed = committed; }
+}
 export const isRunGone = (e: any) => e instanceof RunGone || e?.data?.code === 'run_gone' || /no longer running|that preview has expired/i.test(String(e?.message ?? ''));
 
 /**
