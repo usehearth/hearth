@@ -250,6 +250,68 @@ test('import: the server restarts mid-import; the app says so plainly and runnin
   expect(fake.unknown).toEqual([]);
 });
 
+test('import: run again after a first run: everything already here, nothing sent twice', async ({ page, fake }, testInfo) => {
+  const dir = exportFolder(testInfo.outputPath('claude-export-personal'));
+  await connect(page, fake);
+  await sidebar(page).getByRole('button', { name: 'Bring everything from Claude' }).click();
+  await page.locator('input[webkitdirectory]').setInputFiles(dir);
+  await page.getByRole('button', { name: 'Bring everything across' }).click();
+  await expect(page.getByRole('heading', { name: '2 of 5 were not kept: see why below.' })).toBeVisible();
+  // Again, from the sidebar: a fresh look, the same export.
+  await sidebar(page).getByRole('button', { name: 'Bring everything from Claude' }).click();
+  await page.locator('input[webkitdirectory]').setInputFiles(dir);
+  await page.getByRole('button', { name: 'Bring everything across' }).click();
+  await expect(page.getByRole('heading', { name: '2 of 5 were not kept: see why below.' })).toBeVisible();
+  await expect(page.locator('div.rounded-xl', { hasText: 'claude.ai, sam@example.com' }).last()).toContainText('Found 5 · kept 0 · already here 3 · not kept 2');
+  await expect(page.getByText('Nothing new since your last import')).toBeVisible();
+  expect(fake.callsOf('_hearth/import/commit')).toHaveLength(2);
+});
+
+test('import: Stop part way still finishes the run and shows its receipt', async ({ page, fake }, testInfo) => {
+  const dir = exportFolder(testInfo.outputPath('claude-export-personal'));
+  await connect(page, fake);
+  await sidebar(page).getByRole('button', { name: 'Bring everything from Claude' }).click();
+  await page.locator('input[webkitdirectory]').setInputFiles(dir);
+  fake.setDelay(800);
+  await page.getByRole('button', { name: 'Bring everything across' }).click();
+  await page.getByRole('button', { name: 'Stop after this one' }).click();
+  fake.setDelay(0);
+  await expect(page.getByRole('heading', { name: /were not kept: see why below/ })).toBeVisible({ timeout: 20_000 });
+  const fin = fake.callsOf('_hearth/import/finish');
+  expect(fin).toHaveLength(1);
+  expect(fin[0].params.stopped).toBe(true);
+  expect(fake.callsOf('_hearth/import/commit').length).toBeLessThan(2);
+});
+
+test('import: a call refused part way still finishes the run: the receipt shows what arrived, and run again brings the rest', async ({ page, fake }, testInfo) => {
+  const dir = exportFolder(testInfo.outputPath('claude-export-personal'));
+  await connect(page, fake);
+  await sidebar(page).getByRole('button', { name: 'Bring everything from Claude' }).click();
+  await page.locator('input[webkitdirectory]').setInputFiles(dir);
+  fake.failNext('_hearth/import/memories', { code: -32603, message: 'the knowledge hub is busy' });
+  await page.getByRole('button', { name: 'Bring everything across' }).click();
+  await expect(page.getByRole('status')).toContainText('The import was interrupted part way');
+  await expect(page.getByRole('heading', { name: '3 of 5 were not kept: see why below.' })).toBeVisible();
+  expect(fake.callsOf('_hearth/import/finish')).toHaveLength(1);
+  await page.getByRole('status').getByRole('button', { name: 'Run it again' }).click();
+  await expect(page.getByRole('heading', { name: '2 of 5 were not kept: see why below.' })).toBeVisible();
+  expect(fake.callsOf('_hearth/import/commit')).toHaveLength(2);
+});
+
+test('import: a connection that drops part way: a receipt for what arrived, or a plain line and run again', async ({ page, fake }, testInfo) => {
+  const dir = exportFolder(testInfo.outputPath('claude-export-personal'));
+  await connect(page, fake);
+  await sidebar(page).getByRole('button', { name: 'Bring everything from Claude' }).click();
+  await page.locator('input[webkitdirectory]').setInputFiles(dir);
+  // Every socket drops once the first chat has been committed.
+  let dropped = false;
+  fake.failNext('_hearth/import/commit', { times: 1, match: () => { if (!dropped) { dropped = true; setTimeout(() => fake.dropAll(), 0); } return false; } });
+  await page.getByRole('button', { name: 'Bring everything across' }).click();
+  await expect(page.getByText(/were not kept: see why below|The connection to your server dropped during the import/).first()).toBeVisible({ timeout: 30_000 });
+  // Either way the person is never left on the Find page with only an error line.
+  await expect(page.getByRole('button', { name: 'Bring everything across' })).toHaveCount(0);
+});
+
 test.describe('import against an older server', () => {
   test.use({ fakeOptions: { importReceipts: false } });
   test('it still brings the chats and says plainly that it can\'t count a receipt', async ({ page, fake }, testInfo) => {

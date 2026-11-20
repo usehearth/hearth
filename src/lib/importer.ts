@@ -414,7 +414,7 @@ export async function bringAcross(o: {
   /** The server counts receipts (`_hearth/import/info` says `receipts: true`). An older one takes the conversations and
    * memories as before, no skills, and answers with no receipt. */
   receipts?: boolean;
-}): Promise<{ begun: Begun; receipt: Receipt | null; report: any; runGone?: { committed: number } }> {
+}): Promise<{ begun: Begun; receipt: Receipt | null; report: any; runGone?: { committed: number; dropped?: string }; interrupted?: string }> {
   const receipts = o.receipts !== false;
   const { request, gathered: g } = o;
   const begun = await request<Begun>('_hearth/import/begin', { token: o.preview.token, choices: o.choices, ...(o.pool ? { pool: o.pool } : {}), ...(o.remember && receipts ? { remember: o.remember } : {}) });
@@ -422,40 +422,63 @@ export async function bringAcross(o: {
   const tell = () => o.onProgress({ ...rp, extensions: { ...rp.extensions }, memories: { ...rp.memories } });
   let failed: Progress['failed'] = [];
   let committed = 0;
-  try {
-  await upload(request, begun, g.units, (p) => { rp.conversations = p; failed = p.failed; committed = p.done - p.failed.length; tell(); }, o.stop, false);
-  if (!o.stop?.() && receipts) {
-    rp.phase = 'extensions'; tell();
-    // In batches that stay well under the connection's message size.
-    let batch: Gathered["config"] = [], size = 0;
-    const send = async () => {
-      if (!batch.length) return;
-      await request('_hearth/import/extensions', { runId: begun.runId, items: batch.map((c) => ({ key: c.key, kind: c.kind, name: c.name, description: c.description, content: c.content, files: c.files, repo: c.repo, origin: c.origin, ...(c.overrule ? { overrule: true } : {}), ...(c.nested ? { nested: c.nested } : {}),
-        ...(o.scopes?.[configGroup(c)] ? { scope: o.scopes[configGroup(c)] } : {}) })) });
-      rp.extensions.done += batch.length; tell();
-      batch = []; size = 0;
-    };
-    for (const c of g.config) {
-      const b = (c.content?.length ?? 0) + Object.values(c.files ?? {}).reduce((n, t) => n + t.length, 0);
-      if (batch.length && (size + b > 6_000_000 || batch.length >= 200)) await send();
-      batch.push(c); size += b;
+  let interrupted: string | null = null;
+  // Each message stays well under the server's 32 MB websocket frame: counted as JSON, a few MB at a time.
+  const LIMIT = 4_000_000;
+  const work = async () => {
+    await upload(request, begun, g.units, (p) => { rp.conversations = p; failed = p.failed; committed = p.done - p.failed.length; tell(); }, o.stop, false);
+    if (!o.stop?.() && receipts) {
+      rp.phase = 'extensions'; tell();
+      let batch: unknown[] = [], size = 0;
+      const send = async () => {
+        if (!batch.length) return;
+        await request('_hearth/import/extensions', { runId: begun.runId, items: batch });
+        rp.extensions.done += batch.length; tell();
+        batch = []; size = 0;
+      };
+      for (const c of g.config) {
+        if (o.stop?.()) break;
+        const item = { key: c.key, kind: c.kind, name: c.name, description: c.description, content: c.content, files: c.files, repo: c.repo, origin: c.origin,
+          ...(c.overrule ? { overrule: true } : {}), ...(c.nested ? { nested: c.nested } : {}), ...(o.scopes?.[configGroup(c)] ? { scope: o.scopes[configGroup(c)] } : {}) };
+        const b = JSON.stringify(item).length;
+        if (batch.length && (size + b > LIMIT || batch.length >= 200)) await send();
+        batch.push(item); size += b;
+      }
+      await send();
     }
-    await send();
-  }
-  if (!o.stop?.()) {
-    rp.phase = 'memories'; tell();
-    for (const m of g.memories) for (let i = 0; i < m.files.length; i += 500) {
-      const part = m.files.slice(i, i + 500);
-      await request('_hearth/import/memories', { ...(receipts ? { runId: begun.runId } : {}), account: m.account, files: part });
-      rp.memories.done += part.length; tell();
+    if (!o.stop?.()) {
+      rp.phase = 'memories'; tell();
+      for (const m of g.memories) {
+        let part: typeof m.files = [], size = 0;
+        const send = async () => {
+          if (!part.length) return;
+          await request('_hearth/import/memories', { ...(receipts ? { runId: begun.runId } : {}), account: m.account, files: part });
+          rp.memories.done += part.length; tell();
+          part = []; size = 0;
+        };
+        for (const f of m.files) {
+          const b = JSON.stringify(f).length;
+          if (part.length && (size + b > LIMIT || part.length >= 500)) await send();
+          part.push(f); size += b;
+        }
+        await send();
+      }
     }
+  };
+  try { await work(); }
+  catch (e) {
+    // The server lost the run (it restarted): say so, with how many conversations arrived (they are stored and stay).
+    if (isRunGone(e)) return { begun, receipt: null, report: null, runGone: { committed: e instanceof RunGone ? e.committed : committed } };
+    // Anything else part way (a dropped connection, a refused call): the run is still finished below, so what arrived is counted.
+    interrupted = String((e as Error)?.message ?? e).slice(0, 300);
   }
   rp.phase = 'counting'; tell();
-  const fin = await request<{ runId: number; report: any; receipt?: Receipt }>('_hearth/import/finish', { runId: begun.runId, failed: failed.map((f) => ({ id: f.id, error: f.error })), stopped: !!o.stop?.() });
-  return { begun, receipt: fin.receipt ?? null, report: fin.report };
+  try {
+    const fin = await request<{ runId: number; report: any; receipt?: Receipt }>('_hearth/import/finish', { runId: begun.runId, failed: failed.map((f) => ({ id: f.id, error: f.error })), stopped: !!o.stop?.() });
+    return { begun, receipt: fin.receipt ?? null, report: fin.report, ...(interrupted ? { interrupted } : {}) };
   } catch (e) {
-    // The server lost the run part way: say so, with how many conversations arrived (they are stored and stay).
-    if (isRunGone(e)) return { begun, receipt: null, report: null, runGone: { committed: e instanceof RunGone ? e.committed : committed } };
-    throw e;
+    if (isRunGone(e)) return { begun, receipt: null, report: null, runGone: { committed } };
+    // Not even the count could be asked for (the connection is down): what arrived is stored; a new run counts it all.
+    return { begun, receipt: null, report: null, runGone: { committed, dropped: interrupted ?? String((e as Error)?.message ?? e).slice(0, 300) } };
   }
 }

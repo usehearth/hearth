@@ -144,7 +144,9 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
   /** Error replies sent (method and message), faults included. */
   const errors: { method: string; message: string }[] = [];
   // The guided import (src/lib/importer.ts): what the app found, what arrived, and the receipts counted from that.
+  // `stored`: what earlier runs kept (conversation id -> fingerprint, memory and extension keys), so a run again is "already here".
   const imports = { runs: 0, files: new Map<string, number>(), inventory: null as any, committed: new Set<string>(), ext: new Set<string>(), mem: new Set<string>(),
+    stored: new Map<string, string>(), storedMem: new Set<string>(), storedExt: new Set<string>(),
     receipts: [] as any[], decisions: {} as Record<string, { decision: string; at: string }> };
   const receiptsOn = opts.importReceipts !== false;
   let connIds = 0;
@@ -401,7 +403,7 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
       { id: 'x1', kind: 'command', name: 'standup', scope: 'global', description: 'Write a three-line standup', content: 'Write a standup: done, doing, blocked.', enabled: true, updated_at: iso(60) },
       { id: 'x2', kind: 'skill', name: 'house-style', scope: 'todo-api', description: 'How this project writes', content: 'Short sentences.', enabled: true, updated_at: iso(120) },
     ] }),
-    '_hearth/import/info': () => ({ available: true, conversations: imports.committed.size, sealed: imports.committed.size, legacy: 0, projects: 0, lastRun: null,
+    '_hearth/import/info': () => ({ available: true, conversations: imports.stored.size, sealed: imports.stored.size, legacy: 0, projects: 0, lastRun: null,
       ...(receiptsOn ? { receipts: true, hub: true, clientTerms: ['Globex'], decisions: imports.decisions, lastReceipt: imports.receipts.length ? summaryOf(imports.receipts[imports.receipts.length - 1]) : null } : {}) }),
     '_hearth/import/preview': (params) => {
       const units: any[] = params?.units ?? [];
@@ -417,8 +419,8 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
       imports.committed.clear(); imports.ext.clear(); imports.mem.clear();
       const created = Object.values(params?.choices ?? {}).filter((c: any) => c?.action === 'new').map((c: any) => c.slug);
       imports.runs++;
-      const pending = lastPreviewUnits;
-      return { runId: imports.runs, created, upload: pending.map((u) => ({ id: u.id, folder: u.folder, uuid: u.uuid, files: u.files })), refiled: 0, unchanged: 0, skipped: 0, chunkBytes: 1 << 20 };
+      const pending = lastPreviewUnits.filter((u) => imports.stored.get(u.id) !== u.fingerprint);
+      return { runId: imports.runs, created, upload: pending.map((u) => ({ id: u.id, folder: u.folder, uuid: u.uuid, files: u.files })), refiled: 0, unchanged: lastPreviewUnits.length - pending.length, skipped: 0, chunkBytes: 1 << 20 };
     },
     '_hearth/import/file': (params) => {
       const k = `${params.id}/${params.rel}`;
@@ -426,7 +428,12 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
       imports.files.set(k, next);
       return { next };
     },
-    '_hearth/import/commit': (params) => { imports.committed.add(String(params?.id)); return { ok: true }; },
+    '_hearth/import/commit': (params) => {
+      const id = String(params?.id);
+      imports.committed.add(id);
+      imports.stored.set(id, lastPreviewUnits.find((u) => u.id === id)?.fingerprint ?? 'x');
+      return { ok: true };
+    },
     '_hearth/import/extensions': (params) => {
       const results: Record<string, unknown> = {};
       for (const it of params?.items ?? []) { imports.ext.add(String(it.key)); results[it.key] = { outcome: 'kept', fresh: true }; }
@@ -455,11 +462,15 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     const totals = zero();
     for (const i of inv.items) {
       const s = sources.get(i.source);
-      const arrived = i.kind === 'conversation' || i.kind === 'chat' ? imports.committed.has(i.id) : i.kind === 'memory' ? imports.mem.has(i.id) : imports.ext.has(i.id);
-      const outcome = i.reason ? 'notKept' : i.dupOf ? 'here' : arrived ? 'kept' : 'notKept';
+      const conv = i.kind === 'conversation' || i.kind === 'chat';
+      const arrived = conv ? imports.committed.has(i.id) : i.kind === 'memory' ? imports.mem.has(i.id) && !imports.storedMem.has(i.id) : imports.ext.has(i.id) && !imports.storedExt.has(i.id);
+      const before = conv ? imports.stored.has(i.id) && !imports.committed.has(i.id) : i.kind === 'memory' ? imports.storedMem.has(i.id) : imports.storedExt.has(i.id);
+      const outcome = i.reason ? 'notKept' : i.dupOf || before ? 'here' : arrived ? 'kept' : 'notKept';
       for (const c of [s, s.byKind[i.kind] ??= zero(), totals]) { c.found++; c[outcome]++; }
       if (outcome === 'notKept') s.notKeptItems.push({ kind: i.kind, title: i.title, reason: i.reason ?? 'failed', detail: i.detail ?? (i.reason ? null : 'it did not arrive') });
     }
+    for (const k of imports.mem) imports.storedMem.add(k);
+    for (const k of imports.ext) imports.storedExt.add(k);
     const last = imports.receipts[imports.receipts.length - 1];
     return { v: 1, runId, at: new Date().toISOString(), by: 'Test device', totals, sources: [...sources.values()], fresh: totals.kept, changed: 0,
       sinceLast: last ? { runId: last.runId, at: last.at, new: totals.kept, changed: 0 } : null, check: { ok: true, problems: [] } };

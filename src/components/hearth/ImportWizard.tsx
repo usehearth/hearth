@@ -77,7 +77,9 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
   /** An older server answers with no receipt: what it said instead. */
   const [plain, setPlain] = useState<string | null>(null);
   /** The server restarted mid-import (the run lived in its memory): how many conversations arrived before it did. */
-  const [lost, setLost] = useState<{ committed: number } | null>(null);
+  const [lost, setLost] = useState<{ committed: number; dropped?: string } | null>(null);
+  /** The run was interrupted part way (a refused call), but finished: its receipt shows what arrived. */
+  const [interrupted, setInterrupted] = useState<string | null>(null);
   /** "Run it again": look again (a new plan), then bring everything across as soon as the plan is ready. */
   const [rerun, setRerun] = useState(0);
   const [againPending, setAgainPending] = useState(false);
@@ -162,12 +164,15 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
       const remember = rememberOf({ decisions: info?.decisions, leftOut: { sources: leftOutSources, configGroups: leftOutGroups, items: leftOutItems, bring },
         sourceIds: [...(sources ?? []).map((x) => x.path), ...exports.map((x) => `claude-ai:${x.account}`)], choices, configKeys: config.map((c) => c.key), groups: [...new Set(config.map(configGroup))] });
       const r = await bringAcross({ request, preview: p, choices, pool, gathered, scopes, onProgress: setProgress, stop: () => stopped.current, receipts: info?.receipts === true, remember });
-      setReceipt(r.receipt); setCreated(r.begun.created); setLost(r.runGone ?? null);
+      setReceipt(r.receipt); setCreated(r.begun.created); setLost(r.runGone ?? null); setInterrupted(r.interrupted ?? null);
       if (r.runGone) { setPhase('done'); return; }
       if (!r.receipt) setPlain(`Imported ${n(r.report?.uploaded ?? 0)} conversations${r.begun.unchanged ? `; ${n(r.begun.unchanged)} were already here` : ''}. This server is older: it can't count a receipt, and skills and the like need it updated. Update Hearth Server, then run this again: nothing will be sent twice.`);
       setPhase('done');
     } catch (e) { setErr(errorText(e)); setPhase('ready'); }
   };
+
+  /** Look again (a new plan: what is already there is skipped) and bring the rest across. */
+  const runAgain = () => { setLost(null); setInterrupted(null); setReceipt(null); setPlain(null); setErr(null); setPreview(null); setPhase('finding'); setAgainPending(true); setRerun((x) => x + 1); };
 
   // What the guide may read about all this (src/lib/importState.ts).
   const homes = sources ?? [];
@@ -280,15 +285,23 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
         {phase === 'done' && lost && (
           <div className="mt-5 space-y-3">
             <div role="status" className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm">
-              <p className="font-medium">Your server restarted during the import, so this run stopped before it could count a receipt.</p>
+              <p className="font-medium">{lost.dropped ? 'The connection to your server dropped during the import, so it could not count a receipt.' : 'Your server restarted during the import, so this run stopped before it could count a receipt.'}</p>
               <p className="mt-1">Nothing already stored was lost: {count(lost.committed, 'conversation')} arrived and {lost.committed === 1 ? 'is' : 'are'} kept. Run the import again: it skips what is already there, brings the rest, and gives you the receipt.</p>
             </div>
-            <Button onClick={() => { setLost(null); setReceipt(null); setPlain(null); setErr(null); setPreview(null); setPhase('finding'); setAgainPending(true); setRerun((x) => x + 1); }}>Run it again</Button>
+            {lost.dropped && <p className="text-xs text-muted-foreground">What happened: {lost.dropped}</p>}
+            <Button onClick={runAgain}>Run it again</Button>
           </div>
         )}
 
         {phase === 'done' && !lost && (receipt || plain) && (
           <div className="mt-5 space-y-4">
+            {interrupted && (
+              <div role="status" className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm">
+                <p className="font-medium">The import was interrupted part way, so not everything was sent.</p>
+                <p className="mt-1">The receipt below shows what arrived and is kept. Run it again to bring the rest: what is already there is skipped. <span className="text-muted-foreground">({interrupted})</span></p>
+                <Button size="sm" className="mt-2" onClick={runAgain}>Run it again</Button>
+              </div>
+            )}
             {receipt ? <ImportReceipt receipt={receipt} serverName={serverName} /> : <p role="status" className="rounded-xl border bg-card px-4 py-3 text-sm">{plain}</p>}
             <p className="text-sm text-muted-foreground">Each project's history is in the sidebar, under the project. Search history finds anything you said or were told. Run this again any time: only what is new or changed will move.</p>
             {!setup && <Button onClick={() => { const slug = created[0]; const c = Object.values(choices).find((x) => x.action === 'new' && x.slug === slug) as { name?: string } | undefined; onDone(slug ? { slug, name: c?.name || slug } : undefined); }}>Open Hearth</Button>}
