@@ -216,8 +216,7 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
         hasClients ? (conn.agent.request('_hearth/clients' as any, {}) as Promise<any>).catch(() => null) : null,
         hasHistory ? (conn.agent.request('_hearth/history/counts' as any, {}) as Promise<any>).catch(() => null) : null,
       ]);
-      return { groups: withHistory(group((res.sessions ?? []).map(toItem)), (hc?.projects ?? []) as HistoryCount[]), cards, cardsStale, more: res.more, loadMore, clients: (cl?.clients ?? []) as ClientLine[], workDevice: !!cl?.workDevice, admin, importedGroups: (hc?.groups ?? []) as ImportedGroup[] };
-      return { groups: withHistory(group((res.sessions ?? []).map(toItem)), (hc?.projects ?? []) as HistoryCount[]), cards, clients: (cl?.clients ?? []) as ClientLine[], workDevice: !!cl?.workDevice, admin, clientMode, importedGroups: (hc?.groups ?? []) as ImportedGroup[] };
+      return { groups: withHistory(group((res.sessions ?? []).map(toItem)), (hc?.projects ?? []) as HistoryCount[]), cards, cardsStale, more: res.more, loadMore, clients: (cl?.clients ?? []) as ClientLine[], workDevice: !!cl?.workDevice, admin, clientMode, importedGroups: (hc?.groups ?? []) as ImportedGroup[] };
     };
     const answer = async (e: CardEntry, a: CardAnswer) => {
       // An admin card counts only with this install's signature (the runner checks it).
