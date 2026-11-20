@@ -125,7 +125,6 @@ test.describe('a server that does not say why it refuses (today: 401 and 429 at 
 
 test.describe('socket drop in the middle of a turn', () => {
   test('the turn still running on the server shows as running after the reconnect', async ({ page, fake }) => {
-    knownFailure('acpThreadState.ts: a replayed turn is built as a finished "passive" message; nothing says the server still runs it, so no Stop and no running state');
     await connect(page, fake);
     await newThread(page, 'Scratch');
     await send(page, 'Count slowly #drop'); // 40 chunks, 200 ms apart; the socket drops after the fifth
@@ -137,7 +136,6 @@ test.describe('socket drop in the middle of a turn', () => {
   });
 
   test('the composer does not send over a turn still running on the server', async ({ page, fake }) => {
-    knownFailure('after the reconnect the app thinks the thread is idle, so Enter sends a new prompt and the server refuses it');
     await connect(page, fake);
     await newThread(page, 'Scratch');
     await send(page, 'Count slowly #drop');
@@ -163,7 +161,6 @@ test.describe('what is typed survives', () => {
   });
 
   test('a message queued during a turn survives a dropped connection', async ({ page, fake }) => {
-    knownFailure('ThreadPane.tsx: the queue lives in the remounted runtime and is dropped with it');
     await connect(page, fake);
     await newThread(page, 'Scratch');
     await send(page, 'Count a little #slow'); // 16 chunks, 4 s
@@ -220,7 +217,6 @@ test('a permission answered on another device stops asking here', async ({ page,
 });
 
 test('a reply that never comes is reported', async ({ page, fake }) => {
-  knownFailure('AcpClient.ts: session/prompt has no deadline and nothing watches for silence, so it spins for ever');
   await page.clock.install();
   await connect(page, fake);
   await newThread(page, 'Scratch');
@@ -261,7 +257,6 @@ test('a failed "Needs you" refresh keeps the cards it had', async ({ page, fake 
 
 test.describe('choices made before the first message', () => {
   test('a mode picked before the first message still shows after it', async ({ page, fake }) => {
-    knownFailure('new: AcpClient.ts emits the session opening after set_mode, and the reducer then resets the mode to the one session/new reported');
     await connect(page, fake);
     await newThread(page, 'Todo API');
     await page.getByRole('button', { name: 'Mode: Ask' }).click();
