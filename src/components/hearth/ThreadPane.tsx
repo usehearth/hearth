@@ -5,10 +5,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AssistantRuntimeProvider, useAuiState, WebSpeechDictationAdapter, WebSpeechSynthesisAdapter } from '@assistant-ui/react';
-import { Bot, ChevronDown, Circle, FolderOpen, CircleCheck, CircleDot, ListChecks, Loader2, PanelRightClose, PanelRightOpen, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Bot, ChevronDown, Circle, FolderOpen, CircleCheck, CircleDot, ListChecks, Loader2, NotebookPen, PanelRightClose, PanelRightOpen, RefreshCw, ShieldAlert } from 'lucide-react';
 import { AdminAudit, AdminStrip, FinishAdmin, useAdminTimeline } from '@/components/hearth/Admin';
 import { adminAnswerSig, adminPromptMeta } from '@/lib/admin';
-import { AcpClient, useAcpPlan, useAcpRuntime, useAcpSessionTitle } from '@/vendor/acp';
+import { AcpClient, useAcpPlan, useAcpRuntime, useAcpSessionTitle, type AcpPlanEntry } from '@/vendor/acp';
 import type { AcpWebSocketLike } from '@/vendor/acp/AcpClient';
 import { Thread, type ThreadComponents } from '@/components/assistant-ui/elements/thread.aui';
 import { CardView } from '@/components/hearth/CardView';
@@ -445,11 +445,11 @@ function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin,
                 {nFiles > 0 && <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium">{nFiles}</span>}
               </button>
             )}
-            <button onClick={() => show('plan')} aria-pressed={planOpen && tab === 'plan'} title={planOpen && tab === 'plan' ? 'Hide the plan' : 'Show the plan'}
+            <button onClick={() => show('plan')} aria-pressed={planOpen && tab === 'plan'} title={planOpen && tab === 'plan' ? 'Hide the notes' : "Show this thread's notes: its goal, decisions and next steps"}
               className={cn('flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground', planOpen && tab === 'plan' && 'bg-accent text-foreground')}>
               {planOpen && tab === 'plan' ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
-              <span className="max-sm:sr-only">Plan</span>
-              {hasPlan && !(planOpen && tab === 'plan') && <span className="size-1.5 rounded-full bg-primary" aria-label="has a plan" />}
+              <span className="max-sm:sr-only">Notes</span>
+              {hasPlan && !(planOpen && tab === 'plan') && <span className="size-1.5 rounded-full bg-primary" aria-label="has notes" />}
             </button>
           </>, actionsEl)}
       </ExtrasContext.Provider>
@@ -476,18 +476,18 @@ function SidePanel({ extras, tab, onTab, onClose, audit, onRefreshAudit }: { ext
   const current = open ? extras.files?.find((f) => f.path === open.path) ?? open : null;
   const wideFile = tab === 'files' && !!current;
   return (
-    <aside aria-label={tab === 'plan' ? 'Plan' : tab === 'tasks' ? 'Tasks' : tab === 'audit' ? 'Audit' : 'Files'} className={cn(wideFile && 'lg:w-[34rem]', "flex w-[22rem] shrink-0 flex-col border-l bg-sidebar/40 max-lg:w-80 max-md:fixed max-md:inset-0 max-md:z-30 max-md:w-full max-md:border-l-0 max-md:bg-background max-md:pt-safe max-md:pb-safe")}>
+    <aside aria-label={tab === 'plan' ? 'Notes' : tab === 'tasks' ? 'Tasks' : tab === 'audit' ? 'Audit' : 'Files'} className={cn(wideFile && 'lg:w-[34rem]', "flex w-[22rem] shrink-0 flex-col border-l bg-sidebar/40 max-lg:w-80 max-md:fixed max-md:inset-0 max-md:z-30 max-md:w-full max-md:border-l-0 max-md:bg-background max-md:pt-safe max-md:pb-safe")}>
       <div className="flex h-11 shrink-0 items-center gap-1 border-b px-2">
         <div role="tablist" className="flex items-center gap-0.5">
           {audit && <TabBtn on={tab === 'audit'} onClick={() => onTab('audit')}><ShieldAlert className="size-4" />Audit</TabBtn>}
-          <TabBtn on={tab === 'plan'} onClick={() => onTab('plan')}><ListChecks className="size-4" />Plan</TabBtn>
+          <TabBtn on={tab === 'plan'} onClick={() => onTab('plan')}><NotebookPen className="size-4" />Notes</TabBtn>
           {extras.filesSupported && <TabBtn on={tab === 'files'} onClick={() => onTab('files')}><FolderOpen className="size-4" />Files{extras.files?.length ? <span className="text-xs text-muted-foreground">{extras.files.length}</span> : null}</TabBtn>}
           <TabBtn on={tab === 'tasks'} onClick={() => onTab('tasks')}><Bot className="size-4" />Tasks</TabBtn>
         </div>
         {(tab === 'plan' ? planLoading : extras.filesLoading) && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
         <div className="ml-auto flex items-center gap-0.5">
           {tab === 'audit' && onRefreshAudit && <button onClick={onRefreshAudit} title="Read the audit again" aria-label="Read the audit again" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><RefreshCw className="size-3.5" /></button>}
-          {tab === 'plan' && <button onClick={refreshPlan} title="Read the plan again" aria-label="Read the plan again" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><RefreshCw className="size-3.5" /></button>}
+          {tab === 'plan' && <button onClick={refreshPlan} title="Read the notes again" aria-label="Read the notes again" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><RefreshCw className="size-3.5" /></button>}
           <button onClick={onClose} title="Hide the panel" aria-label="Hide the panel" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><PanelRightClose className="size-4" /></button>
         </div>
       </div>
@@ -499,7 +499,7 @@ function SidePanel({ extras, tab, onTab, onClose, audit, onRefreshAudit }: { ext
         <>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
             {plan?.text ? <Markdown text={plan.text} />
-              : <p className="text-sm text-muted-foreground">{plan?.note ?? (planLoading ? 'Reading the plan…' : 'No plan yet.')}</p>}
+              : <p className="text-sm text-muted-foreground">{plan?.note ?? (planLoading ? 'Reading the notes…' : 'No notes yet. The agent writes down this thread\'s goal, decisions and next steps here once there is something to keep.')}</p>}
           </div>
           {plan?.path && <div className="truncate border-t px-4 py-2 font-mono text-xs text-muted-foreground" title={plan.path}>{plan.path}</div>}
         </>
@@ -542,10 +542,17 @@ function AboveComposer() {
 
 /** The agent's steps for this turn (ACP `plan` updates). Open while it runs; folded to one line afterwards. */
 function TurnChecklist() {
-  const entries = useAcpPlan();
+  const all = useAcpPlan();
   const running = useAuiState((s) => s.thread.isRunning);
   const [open, setOpen] = useState<boolean | null>(null);
-  useEffect(() => { if (running) setOpen(null); }, [running]);
+  // The steps on screen when a turn starts belong to the turn before: hidden until this turn sends its own.
+  const [before, setBefore] = useState<readonly AcpPlanEntry[] | undefined>(undefined);
+  const wasRunning = useRef(running);
+  useEffect(() => {
+    if (running && !wasRunning.current) { setOpen(null); setBefore(all); }
+    wasRunning.current = running;
+  }, [running]); // eslint-disable-line react-hooks/exhaustive-deps
+  const entries = turnSteps(all, before);
   if (!entries?.length) return null;
   const done = entries.filter((e) => e.status === 'completed').length;
   const expanded = open ?? running;
@@ -571,6 +578,11 @@ function TurnChecklist() {
       )}
     </div>
   );
+}
+
+/** The steps to show: none while they are still the ones from before this turn started (same list, unchanged). */
+export function turnSteps<T>(entries: readonly T[] | undefined, fromBefore: readonly T[] | undefined): readonly T[] | undefined {
+  return entries && entries === fromBefore ? undefined : entries;
 }
 
 /** Reports title changes and turn ends from inside the runtime. */
