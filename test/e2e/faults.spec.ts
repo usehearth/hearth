@@ -2,6 +2,7 @@
 // code (19 Nov). Those that fail today are marked `test.fail()` with the reason, so CI stays green while they are
 // tracked; when one is fixed its test passes, Playwright reports that as a failure, and the mark comes off.
 import type { Page } from '@playwright/test';
+import { EXTENSIONS } from '../fake-server/server.ts';
 import { assistantMessages, composer, connect, errorBanner, expect, knownFailure, newThread, openThread, reconnectPill, send, sendButton, sidebar, stopButton, test, threadRow, userMessages, type FakeServer } from './support';
 
 /** The session the first prompt went to. */
@@ -51,19 +52,6 @@ test.describe('server restart', () => {
     await send(page, 'Still there?');
     await expect(assistantMessages(page).last()).toContainText('You said: Still there?');
   });
-
-  test('a long outage on a server that does not say why it refuses spends few tries, then waits and offers Try now', async ({ page, fake }) => {
-    await connect(page, fake);
-    const back = fake.restart(25_000);
-    // At most 4 failed tries per 15 minutes from this page (the server locks an address out at 5 wrong keys, and
-    // today it can't tell the page whether a refusal was the key or the server being away).
-    await expect(sidebar(page)).toContainText('Next try at', { timeout: 20_000 });
-    await expect(threadRow(page, 'Run the tests')).toBeVisible(); // the list stays
-    await back;
-    await sidebar(page).getByRole('button', { name: 'Try now' }).click();
-    await expect(sidebar(page)).toContainText('Connected to Fake Hearth', { timeout: 15_000 });
-    await expect(reconnectPill(page)).toBeHidden({ timeout: 15_000 }); // the thread follows the sidebar back
-  });
 });
 
 test.describe('a server that says why it refuses (close codes 4401 and 4429)', () => {
@@ -106,8 +94,22 @@ test.describe('a server that says why it refuses (close codes 4401 and 4429)', (
   });
 });
 
-test.describe('a server that does not say why it refuses (today: 401 and 429 at the upgrade)', () => {
-  test.use({ fakeOptions: { lockoutMs: 30_000 } });
+test.describe('an older server that does not say why it refuses (401 and 429 at the upgrade)', () => {
+  test.use({ fakeOptions: { refusals: 'http', lockoutMs: 30_000 } });
+
+  test('a long outage spends few tries, then waits and offers Try now', async ({ page, fake }) => {
+    await connect(page, fake);
+    const back = fake.restart(25_000);
+    // At most 4 failed tries per 15 minutes from this page (the server locks an address out at 5 wrong keys, and
+    // today it can't tell the page whether a refusal was the key or the server being away).
+    await expect(sidebar(page)).toContainText('Next try at', { timeout: 20_000 });
+    await expect(threadRow(page, 'Run the tests')).toBeVisible(); // the list stays
+    await back;
+    await sidebar(page).getByRole('button', { name: 'Try now' }).click();
+    await expect(sidebar(page)).toContainText('Connected to Fake Hearth', { timeout: 15_000 });
+    await expect(reconnectPill(page)).toBeHidden({ timeout: 15_000 }); // the thread follows the sidebar back
+  });
+
 
   test('a revoked key never locks the address out, and the key can be replaced', async ({ page, fake }) => {
     await connect(page, fake);
@@ -173,6 +175,41 @@ test.describe('messages sent during a turn wait in the server queue', () => {
     await page.getByRole('button', { name: 'Remove from the queue' }).click();
     await expect(page.getByRole('button', { name: 'Remove from the queue' })).toBeHidden();
     await expect(sendButton(page)).toBeVisible({ timeout: 15_000 }); // the turn ended
+    await page.waitForTimeout(1500);
+    await expect(page.getByText('You said: Never mind this')).toBeHidden();
+    expect(fake.callsOf('_hearth/queue/withdraw')).toHaveLength(1); // by its queue id (the server lists the queue)
+  });
+
+  test('one still waiting after a reconnect is listed again and can be taken back', async ({ page, fake }) => {
+    await connect(page, fake);
+    await newThread(page, 'Scratch');
+    await send(page, 'Count a little #slow');
+    await expect(assistantMessages(page).last()).toContainText('Step 2 of 16');
+    await send(page, 'Never mind this');
+    await expect(page.getByRole('button', { name: 'Remove from the queue' })).toBeVisible();
+    const loads = fake.callsOf('session/load').length;
+    fake.dropAll(); // its request dies with the socket; the server still has the message
+    await reloaded(fake, loads);
+    await expect(page.getByRole('button', { name: 'Remove from the queue' })).toBeVisible(); // listed by the server
+    await page.getByRole('button', { name: 'Remove from the queue' }).click();
+    await expect(page.getByRole('button', { name: 'Remove from the queue' })).toBeHidden();
+    await expect(sendButton(page)).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(1500);
+    await expect(page.getByText('You said: Never mind this')).toBeHidden();
+  });
+});
+
+test.describe('a server that does not list its queue (no `queue` extension)', () => {
+  test.use({ fakeOptions: { extensions: EXTENSIONS.filter((x) => x !== 'queue') } });
+  test("this window's queued message can still be taken back, by cancelling its request", async ({ page, fake }) => {
+    await connect(page, fake);
+    await newThread(page, 'Scratch');
+    await send(page, 'Count a little #slow');
+    await expect(assistantMessages(page).last()).toContainText('Step 2 of 16');
+    await send(page, 'Never mind this');
+    await page.getByRole('button', { name: 'Remove from the queue' }).click();
+    await expect(page.getByRole('button', { name: 'Remove from the queue' })).toBeHidden();
+    await expect(sendButton(page)).toBeVisible({ timeout: 15_000 });
     await page.waitForTimeout(1500);
     await expect(page.getByText('You said: Never mind this')).toBeHidden();
     expect(fake.callsOf('$/cancel_request')).toHaveLength(1);

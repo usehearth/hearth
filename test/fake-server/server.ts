@@ -56,9 +56,9 @@ export interface FakeServerOptions {
   /** The import counts a receipt and takes skills and memories in the run (default). false: an older server. */
   importReceipts?: boolean;
   /**
-   * How a socket is refused. 'http' (default): at the upgrade with 401 or 429, as core does today (a browser sees only
-   * a failed connection). 'close': the socket opens and closes with 4401 (key refused) or 4429 ("retry in <seconds>"), and
-   * initialize says so (`_meta.hearth.refusals: "close"`), as proposed for core.
+   * How a socket is refused. 'close' (default, core since hearth-server #26): the socket opens and closes with 4401
+   * (key refused) or 4429 ("retry in <seconds>"), and initialize says so (`_meta.hearth.refusals: "close"`). 'http': at
+   * the upgrade with 401 or 429, as older servers did (a browser sees only a failed connection).
    */
   refusals?: 'http' | 'close';
   /** Wrong keys allowed in `lockoutMs` before every socket is refused for a while (core: 5 in 15 minutes). */
@@ -67,7 +67,7 @@ export interface FakeServerOptions {
 }
 
 export const DEFAULT_KEY = 'test-device-key';
-export const EXTENSIONS = ['plan', 'cards', 'device', 'providers', 'files', 'clients', 'threads', 'modes', 'permissions', 'extensions', 'mcp', 'commands', 'new_project', 'history', 'import'];
+export const EXTENSIONS = ['plan', 'cards', 'device', 'providers', 'files', 'clients', 'threads', 'modes', 'permissions', 'extensions', 'mcp', 'commands', 'new_project', 'history', 'import', 'queue'];
 
 const COMMANDS = [
   { name: 'compact', description: 'Clear the conversation but keep a summary in context', input: { hint: '<optional instructions>' } },
@@ -118,7 +118,7 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
   /** Sockets refused because of the lockout, and when the wrong keys that count toward it came. */
   let lockedRefusals = 0;
   const badKeys: number[] = [];
-  const refusals = opts.refusals ?? 'http';
+  const refusals = opts.refusals ?? 'close';
   const lockoutAfter = opts.lockoutAfter ?? 5;
   const lockoutMs = opts.lockoutMs ?? 15 * 60_000;
   const speed = opts.speed ?? 0.1;
@@ -139,7 +139,7 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
   const conns = new Set<Conn>();
   const turns = new Map<string, Turn>();
   /** Messages sent during a turn, waiting for it to end, per thread (core.chat_queue). */
-  const queues = new Map<string, { id: string; text: string; conn: Conn; reqId?: number | string; resolve: (r: unknown) => void; reject: (e: unknown) => void }[]>();
+  const queues = new Map<string, { id: string; text: string; by: string; createdAt: string; conn: Conn; reqId?: number | string; resolve: (r: unknown) => void; reject: (e: unknown) => void }[]>();
   let queueIds = 0;
   const calls: Call[] = [];
   const unknown: string[] = [];
@@ -188,6 +188,9 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
       roles: [{ role: 'pm', label: 'Threads and planning', model: null, default: 'claude-opus-5-5' }], modelChoices: [], providers: null,
       availableProviders: [{ name: 'claude', kind: 'anthropic', priority: 10 }], planFirst: false, tools: [], instructions: '', canEdit: true };
   };
+  /** A line from the server, not the agent: its own paragraph, marked `_meta.hearth.notice` (core: noticeUpdate). */
+  const notice = (text: string): Update => ({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `\n\n${text.trim()}\n\n` }, _meta: { hearth: { notice: true } } });
+  const snippet = (text: string) => text.replace(/\s+/g, ' ').trim().slice(0, 80);
   const listChanged = (ids: string[]) => notifyAll('_hearth/sessions_changed', { sessionIds: ids });
   const setStatus = (t: Thread, status: Thread['status']) => {
     t.status = status;
@@ -269,7 +272,11 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     }
     if (turns.get(t.id) === turn) turns.delete(t.id);
     setStatus(t, 'idle');
-    if (failed) turn.reply?.(undefined, { code: -32603, message: failed });
+    if (failed) {
+      const line = `This message didn't get an answer: ${failed}${/[.!?]$/.test(failed) ? '' : '.'} Send it again to retry.`;
+      update(t, notice(line));
+      turn.reply?.(undefined, { code: -32603, message: line });
+    }
     else turn.reply?.({ stopReason });
     turn.reply = null;
     drain(t);
@@ -280,6 +287,7 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     if (turns.has(t.id)) return;
     const next = queues.get(t.id)?.shift();
     if (!next) return;
+    notifyAll('_hearth/queue_changed', { sessionId: t.id });
     update(t, { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: next.text } }, { except: next.conn });
     void runTurn(t, scriptFor(next.text), next.conn, (result, error) => (error ? next.reject(error) : next.resolve({ ...(result as object), _meta: { hearth: { queued: true } } })), next.reqId);
   }
@@ -358,6 +366,7 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     'session/load': (params, c) => {
       const t = thread(params);
       for (const u of t.history) notify(c, 'session/update', { sessionId: t.id, update: u });
+      for (const w of queues.get(t.id) ?? []) notify(c, 'session/update', { sessionId: t.id, update: notice(`Waiting to go to the agent when the current turn ends: "${snippet(w.text)}"`) });
       c.attached.add(t.id);
       // A running turn's open permission prompt is asked in this window too, once it has the history.
       const perm = turns.get(t.id)?.perm;
@@ -373,9 +382,11 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
         if (opts.queue === false) throw { code: -32600, message: 'A turn is already running in this thread. Wait for it or cancel it.' };
         return new Promise((resolve, reject) => {
           const list = queues.get(t.id) ?? [];
-          list.push({ id: `q${++queueIds}`, text, conn: c, reqId: id, resolve, reject });
+          if (list.length >= 20) throw { code: -32600, message: 'This thread already has 20 messages waiting. Wait for some to go, or take one back.' };
+          list.push({ id: `q${++queueIds}`, text, conn: c, reqId: id, by: 'test', createdAt: new Date().toISOString(), resolve, reject });
           queues.set(t.id, list);
-          update(t, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `\nQueued: "${text}" goes to the agent when the current turn ends.\n` } });
+          update(t, notice(`Queued${list.length > 1 ? ` (${list.length} waiting)` : ''}: "${snippet(text)}" goes to the agent when the current turn ends.`));
+          notifyAll('_hearth/queue_changed', { sessionId: t.id });
         });
       }
       const u: Update = { sessionUpdate: 'user_message_chunk', content: { type: 'text', text } };
@@ -393,11 +404,28 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
         const [q] = list.splice(i, 1);
         q!.resolve({ stopReason: 'cancelled', _meta: { hearth: { queued: true } } });
         const t = threads.get(tid);
-        if (t) update(t, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '\nA queued message was taken back before it was sent.\n' } });
+        if (t) { update(t, notice('A queued message was taken back before it was sent.')); notifyAll('_hearth/queue_changed', { sessionId: t.id }); }
         return undefined;
       }
       for (const turn of turns.values()) if (turn.conn === c && turn.reqId === params?.requestId) turn.cancelled = true;
       return undefined;
+    },
+    // Proposed for core (sandbox/reports/app-rig-vs-server.md): a thread's waiting messages, so a window that opens
+    // or reconnects lists them as queued, and can take one back by its id (its own request died with the old socket).
+    '_hearth/queue': (params) => {
+      const t = thread(params);
+      return { items: (queues.get(t.id) ?? []).map((q) => ({ id: q.id, text: q.text, by: q.by, createdAt: q.createdAt })) };
+    },
+    '_hearth/queue/withdraw': (params) => {
+      const t = thread(params);
+      const list = queues.get(t.id) ?? [];
+      const i = list.findIndex((q) => q.id === params?.id);
+      if (i === -1) return { withdrawn: false }; // already sent, or taken back elsewhere
+      const [q] = list.splice(i, 1);
+      q!.resolve({ stopReason: 'cancelled', _meta: { hearth: { queued: true } } });
+      update(t, notice('A queued message was taken back before it was sent.'));
+      notifyAll('_hearth/queue_changed', { sessionId: t.id });
+      return { withdrawn: true };
     },
     'session/cancel': (params) => { const turn = turns.get(String(params?.sessionId)); if (turn) turn.cancelled = true; return undefined; },
     'session/set_mode': (params) => {
@@ -639,6 +667,7 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
   server.on('upgrade', (req, socket, head) => {
     const protocols = String(req.headers['sec-websocket-protocol'] ?? '').split(',').map((s) => s.trim());
     const bearer = protocols.find((p) => p.startsWith('bearer.'))?.slice('bearer.'.length);
+    if (!bearer) { socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); socket.destroy(); return; }
     // The lockout: after `lockoutAfter` wrong keys in `lockoutMs`, every socket from here is refused (a good key too).
     const now = Date.now();
     while (badKeys.length && now - badKeys[0]! > lockoutMs) badKeys.shift();

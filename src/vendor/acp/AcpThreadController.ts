@@ -108,15 +108,37 @@ export class AcpThreadController {
     _sessionId: string,
     update: AcpSessionUpdate,
   ) => {
+    // Hearth: the turn after this window's own may be another device's queued message (the server sends the oldest
+    // first). Its first update says whose it is: a user message is someone else's; anything the agent says is ours.
+    if (this.promotePending && update.sessionUpdate !== "session_info_update" && update.sessionUpdate !== "usage_update") {
+      this.promotePending = false;
+      if (update.sessionUpdate !== "user_message_chunk") {
+        const item = this.queuedSends.shift();
+        if (item) {
+          this.dispatch({ type: "queue-remove", id: item.id });
+          void this.adopt(item);
+        }
+      }
+    }
     const wasRemote = !!this.state.remoteRunning;
     this.dispatch({ type: "session-update", update });
     if (wasRemote && !this.state.remoteRunning) this.promote();
   };
 
+  /** Hearth: the server's queue for this thread changed (a message added, sent or taken back): read it again. */
+  private readonly boundOnExtNotification = (method: string, params: unknown) => {
+    if (method === "_hearth/queue_changed" && (params as { sessionId?: string } | undefined)?.sessionId === this.client.sessionId) {
+      void this.refreshServerQueue();
+    }
+  };
+
   private readonly boundOnConnectionChange = (
     connectionState: AcpConnectionState,
   ) => {
+    const before = this.state.sessionId;
     this.dispatch(this.connectionEvent(connectionState));
+    // Hearth: a thread that (re)opens lists the messages still waiting on the server.
+    if (connectionState === "connected" && this.client.sessionId && this.client.sessionId !== before) void this.refreshServerQueue();
   };
 
   private readonly boundPermissionHandler = (request: AcpPermissionRequest, withdrawn?: AbortSignal) =>
@@ -150,6 +172,7 @@ export class AcpThreadController {
       this.client.subscribeSessionUpdate(this.boundOnSessionUpdate),
       this.client.subscribeConnectionChange(this.boundOnConnectionChange),
       this.client.registerPermissionHandler(this.boundPermissionHandler),
+      this.client.subscribeExtNotification(this.boundOnExtNotification),
     ];
     this.detachFromClient = () => {
       for (const unsubscribe of unsubscribes) unsubscribe();
@@ -229,6 +252,12 @@ export class AcpThreadController {
 
   /** Hearth: take a queued message back while it still waits (once it runs, this stops its turn). */
   withdraw(id: string): void {
+    const sessionId = this.client.sessionId;
+    if (sessionId && this.state.serverQueued?.some((m) => m.id === id)) {
+      // Listed by the server: its id works whoever sent it (and whatever socket the request went out on).
+      void this.client.extRequest("_hearth/queue/withdraw", { sessionId, id }).then(() => this.refreshServerQueue(), (error: unknown) => this.reportError(error));
+      return;
+    }
     this.queuedSends.find((q) => q.id === id)?.withdraw();
   }
 
@@ -242,12 +271,29 @@ export class AcpThreadController {
   }
 
   /** The turn before ended: the oldest queued message is the running turn now (the server sends it in that order). */
+  /** The turn before ended: the next turn's first update decides whether it is this window's oldest queued message. */
   private promote(): void {
     if (this.state.run.type === "running" || this.state.remoteRunning || this.state.settlingAssistantId !== undefined) return;
-    const item = this.queuedSends.shift();
-    if (!item) return;
-    this.dispatch({ type: "queue-remove", id: item.id });
-    void this.adopt(item);
+    if (this.queuedSends.length) this.promotePending = true;
+  }
+  private promotePending = false;
+
+  /**
+   * Hearth: the thread's waiting messages as the server has them (`_hearth/queue`, servers with the `queue` extension):
+   * those this window sent and those it can no longer reach (sent before a reconnect, or from another window), each
+   * removable. Servers without it: only this window's own, from its requests.
+   */
+  private async refreshServerQueue(): Promise<void> {
+    const sessionId = this.client.sessionId;
+    const ext = this.client.initializeMeta?.hearth?.extensions;
+    if (!sessionId || !Array.isArray(ext) || !ext.includes("queue")) return;
+    try {
+      const r = await this.client.extRequest<{ items?: { id: string; text: string }[] }>("_hearth/queue", { sessionId });
+      if (this.client.sessionId !== sessionId) return;
+      this.dispatch({ type: "queue-server", items: (r?.items ?? []).map(({ id, text }) => ({ id, text })) });
+    } catch {
+      // the next change or reconnect reads it again
+    }
   }
 
   private async adopt(item: QueuedSend): Promise<void> {

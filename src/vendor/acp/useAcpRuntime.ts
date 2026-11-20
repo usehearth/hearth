@@ -258,7 +258,7 @@ export function useAcpRuntime(options: UseAcpRuntimeOptions): AssistantRuntime {
         availableCommands: state.availableCommands,
         configOptions: state.configOptions,
         usage: state.usage,
-        queued: state.queued ?? NO_QUEUED,
+        queued: state.serverQueued ?? state.queued ?? NO_QUEUED,
         queueMessage: (text: string) => controller.queue(text),
         withdrawQueued: (id: string) => controller.withdraw(id),
       }),

@@ -342,16 +342,44 @@ describe('messages sent during a turn (the server queue)', () => {
     t.ws.receive({ id: first!.id, result: { stopReason: 'end_turn' } });
     await flush();
     await flush();
+    // The next turn's first word is the agent's (the server does not echo our own message back): it is ours.
+    t.ws.update('s1', { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Goodbye' } });
+    await flush();
     const s = controller.getState();
     expect(s.queued).toEqual([]);
     expect(s.run.type).toBe('running');
     const users = s.messageOrder.map((id) => s.messagesById[id]!).filter((m) => m.role === 'user');
     expect(users.map((m) => (m.content[0] as { text: string }).text)).toEqual(['Count', 'Then say goodbye']);
-    t.ws.update('s1', { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Goodbye' } });
+    expect((s.messagesById[s.messageOrder.at(-1)!] as { content: readonly { text?: string }[] }).content[0]?.text).toBe('Goodbye');
     t.ws.receive({ id: second!.id, result: { stopReason: 'end_turn', _meta: { hearth: { queued: true } } } });
     await flush();
     await flush();
     expect(controller.getState().run.type).toBe('idle');
+  });
+
+  it("another device's message queued earlier runs first: ours waits for the turn after it", async () => {
+    const { t, controller } = await running();
+    controller.queue('Mine');
+    await flush();
+    t.ws.receive({ id: prompts(t)[0]!.id, result: { stopReason: 'end_turn' } });
+    await flush();
+    await flush();
+    // The server sends the other device's message (this window sees it as a user message) and its answer.
+    t.ws.update('s1', { sessionUpdate: 'session_info_update', _meta: { hearth: { status: 'running' } } });
+    t.ws.update('s1', { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'From the phone' } });
+    t.ws.update('s1', { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Phone answer' } });
+    await flush();
+    expect(controller.getState().queued).toEqual([{ id: expect.any(String), text: 'Mine' }]);
+    expect(controller.getState().run.type).toBe('idle');
+    // Its turn ends; ours goes next.
+    t.ws.update('s1', { sessionUpdate: 'session_info_update', _meta: { hearth: { status: 'idle' } } });
+    t.ws.update('s1', { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'My answer' } });
+    await flush();
+    const s = controller.getState();
+    expect(s.queued).toEqual([]);
+    expect(s.run.type).toBe('running');
+    const users = s.messageOrder.map((id) => s.messagesById[id]!).filter((m) => m.role === 'user').map((m) => (m.content[0] as { text: string }).text);
+    expect(users).toEqual(['Count', 'From the phone', 'Mine']);
   });
 
   it('can be taken back while it waits ($/cancel_request), and leaves the queue', async () => {
