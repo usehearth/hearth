@@ -274,7 +274,7 @@ export default function App() {
                 {dir.groups.length === 0 && <p className="px-2 py-3 text-sm text-muted-foreground">No threads on this server yet.</p>}
                 {listView === 'recent' ? (
                   <>
-                    <RecentList groups={dir.groups} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} menu={menu} />
+                    <RecentList groups={dir.groups} admin={canOpenAdmin} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} menu={menu} />
                     {!dir.workDevice && <ClientsSection groups={[]} lines={dir.clients} workDevice={false} render={() => null} />}
                   </>
                 ) : <>
@@ -427,9 +427,9 @@ function ProjectSection({ g, activeId, onOpen, onNew, onSettings, settingsOpen, 
 }
 
 /** Recent: every thread, newest first, in time groups (lib/recent.ts), with its project beside it. */
-function RecentList({ groups, activeId, onOpen, menu }: { groups: ProjectGroup[]; activeId?: string; onOpen: (t: ThreadItem) => void; menu?: (t: ThreadItem) => React.ReactNode }) {
+function RecentList({ groups, admin, activeId, onOpen, menu }: { groups: ProjectGroup[]; /** This device may open admin threads. */ admin: boolean; activeId?: string; onOpen: (t: ThreadItem) => void; menu?: (t: ThreadItem) => React.ReactNode }) {
   const [all, setAll] = useState(false);
-  const sections = useMemo(() => recentGroups(groups), [groups]);
+  const sections = useMemo(() => recentGroups(groups, new Date(), { admin }), [groups, admin]);
   let left = all ? Infinity : 40;
   return (
     <div className="mt-1">
@@ -533,13 +533,13 @@ function ThreadRow({ t, active, onOpen, main, menu, project }: { t: ThreadItem; 
   const needs = needsYou(t);
   const name = main || t.kind === 'main' ? 'Main thread' : t.title;
   const when = shortWhen(t.updatedAt);
-  const tip = [name, project ? t.projectName : null, when ? `last active ${when}` : null, needs ? 'needs you' : null].filter(Boolean).join(' · ');
+  const tip = [name, project ? t.projectName : null, project && t.client ? `client ${t.client}` : null, when ? `last active ${when}` : null, needs ? 'needs you' : null].filter(Boolean).join(' · ');
   return (
     <li className="group/row relative">
       <button onClick={() => onOpen(t)} title={tip} aria-label={tip} className={cn('flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors',
         menu && !main && 'pr-8',
         active ? 'bg-sidebar-accent font-medium text-foreground' : 'text-sidebar-foreground/85 hover:bg-sidebar-accent/60')}>
-        {main ? <Flame className="size-3.5 shrink-0 text-ember" /> : t.pinned ? <Pin className="size-3.5 shrink-0 p-px text-muted-foreground" aria-label="Pinned" /> : <span className="size-3.5 shrink-0" />}
+        {project && t.client ? <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label={`Client: ${t.client}`} /> : main ? <Flame className="size-3.5 shrink-0 text-ember" /> : t.pinned ? <Pin className="size-3.5 shrink-0 p-px text-muted-foreground" aria-label="Pinned" /> : <span className="size-3.5 shrink-0" />}
         <span className="min-w-0 truncate">{name}</span>
         {project && <span className="ml-auto max-w-[40%] shrink-0 truncate text-[11px] text-muted-foreground" title={fullWhen(t.updatedAt)}>{t.projectName}</span>}
         {needs && <span className={cn('size-2 shrink-0 rounded-full bg-primary', !project && 'ml-auto')} />}

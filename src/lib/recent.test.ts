@@ -22,6 +22,11 @@ describe('the Recent view', () => {
       ['Older', ['d', 'never']],
     ]);
   });
+  it('shows admin threads only to a device that may open them', () => {
+    const groups = [{ threads: [t('mine', new Date(2026, 10, 20, 10, 0)), t('adm', new Date(2026, 10, 20, 11, 0), { admin: true })] }];
+    expect(recentGroups(groups, now).flatMap((g) => g.items.map((x) => x.sessionId))).toEqual(['mine']);
+    expect(recentGroups(groups, now, { admin: true }).flatMap((g) => g.items.map((x) => x.sessionId))).toEqual(['adm', 'mine']);
+  });
   it('leaves out archived threads and empty groups', () => {
     const groups = [{ threads: [t('old', new Date(2026, 8, 1)), t('gone', new Date(2026, 10, 20, 10, 0), { archived: true })] }];
     expect(recentGroups(groups, now)).toEqual([{ label: 'Older', items: [groups[0].threads[0]] }]);

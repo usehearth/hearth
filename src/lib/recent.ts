@@ -7,8 +7,9 @@ export interface RecentGroup { label: string; items: ThreadItem[] }
 const DAY = 86_400_000;
 const at = (t: Pick<ThreadItem, 'updatedAt'>) => Date.parse(t.updatedAt ?? '') || 0;
 
-export function recentGroups(groups: readonly { main?: ThreadItem; threads: ThreadItem[] }[], now: Date = new Date()): RecentGroup[] {
-  const all = groups.flatMap((g) => [...(g.main ? [g.main] : []), ...g.threads]).filter((t) => !t.archived)
+export function recentGroups(groups: readonly { main?: ThreadItem; threads: ThreadItem[] }[], now: Date = new Date(), opts: { admin?: boolean } = {}): RecentGroup[] {
+  // Admin threads only where this device may open them (as the Projects view's Admin section).
+  const all = groups.flatMap((g) => [...(g.main ? [g.main] : []), ...g.threads]).filter((t) => !t.archived && (opts.admin || !t.admin))
     .sort((a, b) => at(b) - at(a));
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const buckets: { label: string; from: number }[] = [
