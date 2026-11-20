@@ -134,7 +134,7 @@ describe('opening a thread', () => {
     expect(t.client.modes?.currentModeId).toBe('plan');
   });
 
-  it.fails('a mode the server refuses before the first message stops that message (AcpClient.ts: the error is swallowed)', async () => {
+  it('a mode the server refuses before the first message stops that message, and says why', async () => {
     const t = setup();
     await connect(t);
     await t.client.setMode('plan');
@@ -290,7 +290,7 @@ describe('permissions', () => {
       expect(controller.getState().permissions).toEqual({});
     });
 
-    it.fails('a request the server withdraws ($/cancel_request: answered on another device) stops waiting here (AcpClient.ts ignores it)', async () => {
+    it('a request the server withdraws ($/cancel_request: answered on another device) stops waiting here', async () => {
       const { t, controller } = await waiting();
       t.ws.receive({ method: '$/cancel_request', params: { requestId: 99 } });
       await flush();

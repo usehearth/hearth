@@ -119,8 +119,8 @@ export class AcpThreadController {
     this.dispatch(this.connectionEvent(connectionState));
   };
 
-  private readonly boundPermissionHandler = (request: AcpPermissionRequest) =>
-    this.handlePermissionRequest(request);
+  private readonly boundPermissionHandler = (request: AcpPermissionRequest, withdrawn?: AbortSignal) =>
+    this.handlePermissionRequest(request, withdrawn);
 
   constructor(
     options: AcpThreadControllerOptions & { readonly client: AcpClient },
@@ -421,6 +421,7 @@ export class AcpThreadController {
    */
   private handlePermissionRequest(
     request: AcpPermissionRequest,
+    withdrawn?: AbortSignal,
   ): Promise<AcpPermissionOutcome> {
     const running =
       this.state.run.type === "running"
@@ -440,6 +441,12 @@ export class AcpThreadController {
     return new Promise<AcpPermissionOutcome>((resolve) => {
       this.pendingPermissions.set(approvalId, { request, resolve });
       this.dispatch({ type: "permission-request", approvalId, request });
+      // Hearth: answered on another device (the server withdrew the request): the buttons here go dead at once.
+      withdrawn?.addEventListener("abort", () => {
+        if (!this.pendingPermissions.delete(approvalId)) return;
+        this.dispatch({ type: "permission-resolved", approvalId, approved: false, cancelled: true, withdrawn: true });
+        resolve({ outcome: "cancelled" });
+      }, { once: true });
     });
   }
 

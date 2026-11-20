@@ -33,6 +33,8 @@ export type AcpWebSocketFactory = (url: string) => AcpWebSocketLike;
 
 export type AcpPermissionHandler = (
   request: AcpPermissionRequest,
+  /** Hearth: aborted when the server withdraws the request (`$/cancel_request`: answered on another device). */
+  withdrawn?: AbortSignal,
 ) => AcpPermissionOutcome | Promise<AcpPermissionOutcome>;
 
 export type AcpSessionUpdateListener = (
@@ -168,6 +170,8 @@ export class AcpClient {
     JsonRpcId,
     (outcome: AcpPermissionOutcome) => void
   >();
+  /** Hearth: one per open permission request, aborted when the server withdraws it. */
+  private readonly permissionWithdrawals = new Map<JsonRpcId, AbortController>();
   private readonly permissionHandlers: {
     readonly handler: AcpPermissionHandler;
   }[] = [];
@@ -597,12 +601,21 @@ export class AcpClient {
     this._sessionId = session.sessionId;
     this.lostSessionId = undefined;
     let modeApplied: string | undefined;
+    const refused: string[] = [];
     if (attach === undefined && lost === undefined) {
       // Hearth: what was picked before the thread existed applies before its first prompt.
       const p = this.beforeSession;
       this.beforeSession = {};
-      if (p.mode) modeApplied = await this.request("session/set_mode", { sessionId: session.sessionId, modeId: p.mode }).then(() => p.mode, () => undefined);
-      if (p.provider) await this.request("_hearth/thread/provider", { sessionId: session.sessionId, provider: p.provider.name, ...(p.provider.model ? { model: p.provider.model } : {}) }).catch(() => undefined);
+      // Hearth: a choice the server refuses is not dropped in silence: the first message waits (see below).
+      if (p.mode) {
+        const name = (session.modes?.availableModes as { id: string; name?: string }[] | undefined)?.find((m) => m.id === p.mode)?.name ?? p.mode;
+        modeApplied = await this.request("session/set_mode", { sessionId: session.sessionId, modeId: p.mode }).then(() => p.mode, (e: unknown) => { refused.push(`${name} mode (${toError(e).message})`); return undefined; });
+      }
+      if (p.provider) {
+        const provider = p.provider;
+        await this.request("_hearth/thread/provider", { sessionId: session.sessionId, provider: provider.name, ...(provider.model ? { model: provider.model } : {}) })
+          .catch((e: unknown) => { refused.push(`the model provider ${provider.model ?? provider.name ?? "Auto"} (${toError(e).message})`); });
+      }
     }
     // Hearth (N1): session/new reported the mode before set_mode changed it; the thread is in the mode just set, so
     // that is the one it opens with (otherwise the pill flips back to Ask after the first message).
@@ -612,6 +625,9 @@ export class AcpClient {
     this.sessionConfigOptions = session.configOptions ?? undefined;
     this.lastSessionMeta = ((session as { _meta?: { hearth?: Record<string, unknown> } })._meta?.hearth) ?? undefined;
     this.emitConnectionChange();
+    if (refused.length) {
+      throw new Error(`This thread could not start with ${refused.join(" or ")}, so your first message was not sent. Pick again and send it, or send it as it is.`);
+    }
     return session.sessionId;
   }
 
@@ -811,6 +827,7 @@ export class AcpClient {
       if (settled) return;
       settled = true;
       this.pendingPermissions.delete(requestId);
+      this.permissionWithdrawals.delete(requestId);
       try {
         this.sendRaw({ jsonrpc: "2.0", id: requestId, result: { outcome } });
       } catch {
@@ -818,6 +835,8 @@ export class AcpClient {
       }
     };
     this.pendingPermissions.set(requestId, reply);
+    const withdrawn = new AbortController();
+    this.permissionWithdrawals.set(requestId, withdrawn);
 
     const handler =
       this.options.permissionHandler ??
@@ -825,7 +844,7 @@ export class AcpClient {
       cancelPermissionHandler;
     let handled: Promise<AcpPermissionOutcome>;
     try {
-      handled = Promise.resolve(handler(params));
+      handled = Promise.resolve(handler(params, withdrawn.signal));
     } catch (error) {
       invokeUserCallback("acp", "permissionHandler", () => {
         throw error;
@@ -840,6 +859,16 @@ export class AcpClient {
   }
 
   private handleNotification(msg: any): void {
+    // Hearth: the server withdrew a request it made (a permission answered on another device): stop asking here.
+    if (msg.method === "$/cancel_request") {
+      const id = msg.params?.requestId as JsonRpcId | undefined;
+      const withdrawn = id === undefined ? undefined : this.permissionWithdrawals.get(id);
+      if (withdrawn) {
+        withdrawn.abort();
+        this.pendingPermissions.get(id!)?.({ outcome: "cancelled" });
+      }
+      return;
+    }
     // Hearth: extension notifications go to their own listeners.
     if (typeof msg.method === "string" && msg.method.startsWith("_")) {
       for (const listener of [...this.extListeners]) {

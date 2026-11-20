@@ -139,6 +139,8 @@ export type AcpThreadEvent =
       readonly approved: boolean;
       readonly optionId?: string | undefined;
       readonly cancelled: boolean;
+      /** Hearth: the server withdrew it (answered on another device). */
+      readonly withdrawn?: boolean | undefined;
     }
   | { readonly type: "permissions-cancelled" }
   | {
@@ -558,6 +560,7 @@ export const reduceAcpThreadState = (
             approved: event.approved,
             ...(event.optionId !== undefined && { optionId: event.optionId }),
             ...(event.cancelled && { resolution: "cancelled" as const }),
+            ...(event.withdrawn && ({ withdrawn: true } as object)),
           },
           stillWaiting,
         ),
