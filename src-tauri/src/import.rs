@@ -27,7 +27,8 @@ use tauri::{Emitter, State};
 pub struct Scanned(Mutex<ScanState>);
 #[derive(Default)]
 pub struct ScanState {
-    files: HashMap<String, (PathBuf, Vec<(String, u64)>)>,
+    /// Each conversation's copies: the source it was found in, its folder and its files. The first is the largest.
+    files: HashMap<String, Vec<(String, PathBuf, Vec<(String, u64)>)>>,
     /// Project folders (repos) the latest scan found conversations in: the only ones whose .claude folder may be read.
     repos: HashSet<String>,
 }
@@ -285,6 +286,30 @@ pub struct Unit {
     unreadable: Option<String>,
     /// Other places the same conversation was found (their `from`): this copy is the bigger one.
     also: Vec<String>,
+    /// The copies in those places, each as it is there (its own files, sizes and content hash), so the app can send
+    /// the copy from a home that is kept when the home with the bigger copy is left out.
+    copies: Vec<Copy>,
+}
+/// Another copy of a conversation: what differs between copies.
+#[derive(Serialize, Clone)]
+pub struct Copy {
+    from: String, root: String, fingerprint: String, started: Option<String>, ended: Option<String>,
+    messages: u64, threads: u64, bytes: u64, files: Vec<FileOut>, empty: bool, unreadable: Option<String>,
+}
+/// One copy as the scan found it, before the copies of a conversation are put together.
+struct Found { from: String, root: PathBuf, mrel: String, msize: u64, files: Vec<(String, u64, u128)>, bytes: u64, f: Facts }
+impl Found {
+    fn fingerprint(&self) -> String {
+        // Changed or not: names, sizes and the main transcript's content, never modified times (a copy, a restore or a
+        // sync tool touches those without changing a word: 212 transcripts on 12 Nov 2026).
+        let mut fp: Vec<String> = self.files.iter().map(|(r, s, _)| format!("{r}:{s}")).collect();
+        fp.sort();
+        fp.push(format!("main:{}", self.f.sha256.as_deref().unwrap_or("unread")));
+        sha_hex(&fp.join("\n"))[..32].to_string()
+    }
+    fn files_out(&self) -> Vec<FileOut> { self.files.iter().map(|(r, s, _)| FileOut { rel: r.clone(), size: *s, sha256: if *r == self.mrel { self.f.sha256.clone() } else { None } }).collect() }
+    fn threads(&self) -> u64 { self.files.iter().filter(|(r, _, _)| r.contains("/subagents/") && r.ends_with(".jsonl")).count() as u64 }
+    fn empty(&self) -> bool { self.msize == 0 && self.files.len() == 1 }
 }
 /// A transcript Hearth can't take (an id or folder name the server would refuse), named for the receipt.
 #[derive(Serialize, Clone)]
@@ -373,8 +398,8 @@ pub fn scan(progress: &dyn Fn(usize, usize), paths: &[String], st: &Scanned) -> 
     let h = home();
     let index = sessions();
     let mut repo_cache = HashMap::new();
-    let mut units: HashMap<String, Unit> = HashMap::new();
-    let mut reg: HashMap<String, (PathBuf, Vec<(String, u64)>)> = HashMap::new();
+    // Every copy of every conversation, in the order found (the folder, folder and uuid for each id).
+    let mut found: HashMap<String, (String, String, Vec<Found>)> = HashMap::new();
     let mut other = 0u64;
     let mut odd = vec![];
     let roots: Vec<(String, PathBuf)> = paths.iter().flat_map(|s| projects_roots(s).into_iter().map(move |r| (s.clone(), r))).collect();
@@ -405,45 +430,54 @@ pub fn scan(progress: &dyn Fn(usize, usize), paths: &[String], st: &Scanned) -> 
                 for f in &files { claimed.insert(f.0.clone()); }
                 let id = sha_hex(&format!("{folder}/{uuid}"))[..24].to_string();
                 let bytes: u64 = files.iter().map(|f| f.1).sum();
-                // The same conversation in two places (e.g. two homes, or the archive and ~/.claude): keep the larger copy.
-                if let Some(had) = units.get_mut(&id) {
-                    if had.bytes >= bytes { if had.from != from && !had.also.contains(&from) { had.also.push(from.clone()); } continue; }
+                // The same conversation in two places (e.g. two homes, or the archive and ~/.claude): every copy is
+                // read, so the app can send the one from a home that is kept. Twice in one source: the larger.
+                let e = found.entry(id).or_insert_with(|| (folder.clone(), uuid.clone(), vec![]));
+                if let Some(i) = e.2.iter().position(|c| c.from == from) {
+                    if e.2[i].bytes >= bytes { continue; }
+                    e.2.remove(i);
                 }
-                let mut also: Vec<String> = units.get(&id).map(|u| { let mut a = u.also.clone(); if u.from != from { a.push(u.from.clone()); } a }).unwrap_or_default();
-                also.retain(|a| a != &from);
                 let f = facts(&root.join(mrel));
-                // Changed or not: names, sizes and the main transcript's content, never modified times (a copy, a
-                // restore or a sync tool touches those without changing a word: 212 transcripts on 12 Nov 2026).
-                let mut fp: Vec<String> = files.iter().map(|(r, s, _)| format!("{r}:{s}")).collect();
-                fp.sort();
-                fp.push(format!("main:{}", f.sha256.as_deref().unwrap_or("unread")));
-                let s = index.get(&uuid);
-                let title = s.and_then(|s| s.title.clone()).or(f.custom.clone()).or(f.ai.clone()).or(f.first_user.clone()).unwrap_or_else(|| "Untitled conversation".into());
-                let repo = f.cwd.as_deref().and_then(|c| repo_of(&c.replace('\\', "/").split("/.claude/worktrees/").next().unwrap_or(c).to_string(), &h, &mut repo_cache));
-                let threads = files.iter().filter(|(r, _, _)| r.contains("/subagents/") && r.ends_with(".jsonl")).count() as u64;
-                units.insert(id.clone(), Unit {
-                    id: id.clone(), folder: folder.clone(), uuid: uuid.clone(), source: "claude-code", fingerprint: sha_hex(&fp.join("\n"))[..32].to_string(),
-                    cwd: f.cwd, repo, title, started: f.started, ended: f.ended, messages: f.messages, threads, bytes,
-                    files: files.iter().map(|(r, s, _)| FileOut { rel: r.clone(), size: *s, sha256: if r == mrel { f.sha256.clone() } else { None } }).collect(), from: from.clone(), root: fwd(&root),
-                    profile: s.map(|s| s.profile.clone()), empty: *msize == 0 && files.len() == 1, unreadable: f.unreadable, also,
-                });
-                reg.insert(id, (root.clone(), files.iter().map(|(r, s, _)| (r.clone(), *s)).collect()));
+                e.2.push(Found { from: from.clone(), root: root.clone(), mrel: mrel.clone(), msize: *msize, files, bytes, f });
             }
             other += all.iter().filter(|(r, _, _)| !claimed.contains(r)).count() as u64;
         }
     }
     progress(total, total);
-    let repos: HashSet<String> = units.values().filter_map(|u| u.repo.clone()).collect();
+    let mut units: Vec<Unit> = vec![];
+    let mut reg: HashMap<String, Vec<(String, PathBuf, Vec<(String, u64)>)>> = HashMap::new();
+    for (id, (folder, uuid, mut cs)) in found {
+        // The largest copy describes the conversation (the first found, if two are the same size); the others go with it.
+        let mut best = 0;
+        for (i, c) in cs.iter().enumerate() { if c.bytes > cs[best].bytes { best = i; } }
+        let p = cs.remove(best);
+        let s = index.get(&uuid);
+        let title = s.and_then(|s| s.title.clone()).or(p.f.custom.clone()).or(p.f.ai.clone()).or(p.f.first_user.clone()).unwrap_or_else(|| "Untitled conversation".into());
+        let repo = p.f.cwd.as_deref().and_then(|c| repo_of(&c.replace('\\', "/").split("/.claude/worktrees/").next().unwrap_or(c).to_string(), &h, &mut repo_cache));
+        let mut copies = vec![(p.from.clone(), p.root.clone(), p.files.iter().map(|(r, s, _)| (r.clone(), *s)).collect::<Vec<_>>())];
+        copies.extend(cs.iter().map(|c| (c.from.clone(), c.root.clone(), c.files.iter().map(|(r, s, _)| (r.clone(), *s)).collect())));
+        reg.insert(id.clone(), copies);
+        units.push(Unit {
+            id, folder, uuid, source: "claude-code", fingerprint: p.fingerprint(), cwd: p.f.cwd.clone(), repo, title, started: p.f.started.clone(), ended: p.f.ended.clone(),
+            messages: p.f.messages, threads: p.threads(), bytes: p.bytes, files: p.files_out(), from: p.from.clone(), root: fwd(&p.root),
+            profile: s.map(|s| s.profile.clone()), empty: p.empty(), unreadable: p.f.unreadable.clone(), also: cs.iter().map(|c| c.from.clone()).collect(),
+            copies: cs.iter().map(|c| Copy { from: c.from.clone(), root: fwd(&c.root), fingerprint: c.fingerprint(), started: c.f.started.clone(), ended: c.f.ended.clone(),
+                messages: c.f.messages, threads: c.threads(), bytes: c.bytes, files: c.files_out(), empty: c.empty(), unreadable: c.f.unreadable.clone() }).collect(),
+        });
+    }
+    let repos: HashSet<String> = units.iter().filter_map(|u| u.repo.clone()).collect();
     *st.0.lock().unwrap() = ScanState { files: reg, repos };
-    let mut list: Vec<Unit> = units.into_values().collect();
+    let mut list: Vec<Unit> = units;
     list.sort_by(|a, b| b.ended.cmp(&a.ended));
     Ok(ScanOut { home: fwd(&h), units: list, other_files: other, titles: index.len(), odd })
 }
 
-/// Bytes [offset, offset+length) of one file of a scanned conversation (at most 8 MB).
-pub fn read(id: &str, rel: &str, offset: u64, length: u64, st: &Scanned) -> Result<Vec<u8>, String> {
+/// Bytes [offset, offset+length) of one file of a scanned conversation (at most 8 MB), from the copy found in `from`
+/// (the largest copy when not named).
+pub fn read(id: &str, from: Option<&str>, rel: &str, offset: u64, length: u64, st: &Scanned) -> Result<Vec<u8>, String> {
     let g = st.0.lock().unwrap();
-    let (root, files) = g.files.get(id).ok_or("not a conversation from the latest scan; scan again")?;
+    let copies = g.files.get(id).ok_or("not a conversation from the latest scan; scan again")?;
+    let (_, root, files) = match from { Some(f) => copies.iter().find(|(c, _, _)| c == f).ok_or("no copy of that conversation there")?, None => &copies[0] };
     let (_, size) = files.iter().find(|(r, _)| r == rel).ok_or("no such file in that conversation")?;
     let len = length.min(8 << 20).min(size.saturating_sub(offset));
     let mut f = fs::File::open(root.join(rel)).map_err(|e| e.to_string())?;
@@ -705,8 +739,8 @@ pub async fn import_scan(app: tauri::AppHandle, paths: Vec<String>, state: State
 }
 
 #[tauri::command]
-pub fn import_read(id: String, rel: String, offset: u64, length: u64, state: State<'_, Scanned>) -> Result<tauri::ipc::Response, String> {
-    read(&id, &rel, offset, length, &state).map(tauri::ipc::Response::new)
+pub fn import_read(id: String, from: Option<String>, rel: String, offset: u64, length: u64, state: State<'_, Scanned>) -> Result<tauri::ipc::Response, String> {
+    read(&id, from.as_deref(), &rel, offset, length, &state).map(tauri::ipc::Response::new)
 }
 
 #[tauri::command]
@@ -776,8 +810,8 @@ mod tests {
         assert_eq!(out.other_files, 1);
         assert!(u1.bytes > 3, "the bigger copy wins over the archive one");
         assert_eq!(u1.also.len(), 1, "the archive copy is named as another place it was found");
-        assert_eq!(read(&u1.id, "repo-sub/u1.jsonl", 0, 5, &st).unwrap(), b"{\"typ".to_vec());
-        assert!(read(&u1.id, "repo-sub/memory/note.md", 0, 5, &st).is_err(), "only a conversation's own files");
+        assert_eq!(read(&u1.id, None, "repo-sub/u1.jsonl", 0, 5, &st).unwrap(), b"{\"typ".to_vec());
+        assert!(read(&u1.id, None, "repo-sub/memory/note.md", 0, 5, &st).is_err(), "only a conversation's own files");
         assert!(scan(&|_, _| {}, &[fwd(&base)], &Scanned::default()).is_err(), "only folders sources() lists");
         let _ = fs::remove_dir_all(&base);
     }
@@ -852,7 +886,7 @@ mod tests {
         let c2 = home.join(".claude-work");
         let p2 = c2.join("projects").join("garden");
         fs::create_dir_all(&p2).unwrap();
-        fs::write(p2.join("aaa.jsonl"), line(&repo, "personal one", "user")).unwrap();
+        fs::write(p2.join("aaa.jsonl"), line(&repo, "personal", "user")).unwrap(); // a shorter copy
         fs::write(p2.join("ddd.jsonl"), line(&repo, "only here", "user")).unwrap();
         fs::write(c2.join(".claude.json"), "{\"oauthAccount\":{\"emailAddress\":\"sam@work.example\"}}").unwrap();
         // A third home with only a slash command; an empty home (left out).
@@ -892,6 +926,17 @@ mod tests {
         assert_eq!(by("bbb").profile.as_deref(), Some("Work"));
         assert_eq!(by("ccc").profile, None, "a terminal session");
         assert_eq!(by("aaa").also.len(), 1, "the copy in the second home is named, not counted twice");
+        // That copy as it is in the second home: its own size and hash, and read from there when asked for.
+        let work = at("~/.claude-work").path.clone();
+        let (a, c) = (by("aaa"), &by("aaa").copies[0]);
+        assert_eq!((a.copies.len(), c.from.as_str()), (1, work.as_str()));
+        assert!(c.bytes < a.bytes && c.fingerprint != a.fingerprint, "the bigger copy describes it; the other keeps its own");
+        let mine = fs::read(p2.join("aaa.jsonl")).unwrap();
+        let want2: String = Sha256::digest(&mine).iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(c.files[0].sha256.as_deref(), Some(want2.as_str()));
+        assert_eq!(read(&a.id, Some(&work), &c.files[0].rel, 0, 1 << 20, &st).unwrap(), mine, "read from the copy in the second home");
+        assert_eq!(read(&a.id, None, &a.files[0].rel, 0, 1 << 20, &st).unwrap(), fs::read(p1.join("aaa.jsonl")).unwrap(), "the bigger copy by default");
+        assert!(read(&a.id, Some("C:/nowhere"), &a.files[0].rel, 0, 10, &st).is_err(), "only a place it was found in");
         assert!(by("empty").empty);
         // The main transcript's content hash, read in the same pass; the fingerprint ignores modified times.
         let a = by("aaa");
@@ -956,8 +1001,8 @@ mod tests {
         println!("units {} other {} titles {} odd {} in {:?}", out.units.len(), out.other_files, out.titles, out.odd.len(), t.elapsed());
         if let Ok(f) = std::env::var("HEARTH_IMPORT_DUMP") { fs::write(f, serde_json::to_string(&out).unwrap()).unwrap(); }
         let u = &out.units[0];
-        let b = read(&u.id, &u.files[0].rel, 0, 64, &st).unwrap();
+        let b = read(&u.id, None, &u.files[0].rel, 0, 64, &st).unwrap();
         assert!(!b.is_empty());
-        assert!(read(&u.id, "../../etc/passwd", 0, 10, &st).is_err());
+        assert!(read(&u.id, None, "../../etc/passwd", 0, 10, &st).is_err());
     }
 }

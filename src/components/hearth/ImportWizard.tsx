@@ -15,7 +15,7 @@ import { type ChatExport, type ExportFile } from '@/lib/claudeai';
 import { readExportsInBackground } from '@/lib/exportReader';
 import { filesFromDrop, filesFromInput } from '@/lib/dropfiles';
 import {
-  applyPlaceDecisions, bringAcross, canScanThisMachine, configGroup, dateRange, defaultChoices, gather, homeStats, homeWords, leftOutFrom, localSources, previewOf, readConfig, rememberOf, scanLocal,
+  applyPlaceDecisions, bringAcross, canScanThisMachine, configGroup, copyIn, dateRange, defaultChoices, gather, homeStats, homeWords, leftOutFrom, localSources, previewOf, readConfig, rememberOf, scanLocal,
   type Choice, type ConfigItem, type Decisions, type Gathered, type LocalSource, type LocalUnit, type Odd, type Preview, type Proposal, type RunProgress,
 } from '@/lib/importer';
 import { clientMatcher, holdBack, secretLines } from '@/lib/secrets';
@@ -228,7 +228,7 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
               {canScanThisMachine && sources?.length === 0 && <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-muted-foreground">No Claude Code on this computer. If you use it on another computer, run Hearth there too.</p>}
               {!!sources?.length && (
                 <ul className="divide-y rounded-xl border bg-card">
-                  {sources.map((s) => <HomeRow key={s.path} s={s} units={scan?.units.filter((u) => u.from === s.path || u.also?.includes(s.path)) ?? null} />)}
+                  {sources.map((s) => <HomeRow key={s.path} s={s} units={scan?.units.filter((u) => u.from === s.path || u.also?.includes(s.path)).map((u) => copyIn(u, s.path)) ?? null} />)}
                 </ul>
               )}
               {scanning && <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />{scanning.total ? `Reading conversations: ${n(scanning.done)} of ${n(scanning.total)}…` : 'Reading…'} Nothing is sent yet.</p>}
