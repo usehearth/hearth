@@ -331,6 +331,13 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     '_hearth/devices': () => ({ devices: [{ id: 'd1', name: 'Test device', created_by: 'owner', created_at: iso(600), last_used_at: iso(0), revoked_at: null, current: true }] }),
     '_hearth/clients': () => ({ clients: [], workDevice: true }),
     '_hearth/history/counts': () => ({ projects: [], groups: [] }),
+    // One imported Claude Code conversation, for the search over threads and history.
+    '_hearth/history/search': (params) => {
+      const q = String(params?.query ?? '').toLowerCase();
+      const all = [{ id: 'h-deploy', title: 'Deploy checklist from Claude Code', source: 'claude-code', group: 'todo-api', project: 'todo-api', projectName: 'Todo API',
+        startedAt: '2026-09-02T10:00:00Z', endedAt: '2026-09-02T10:30:00Z', messages: 12, threads: 1, client: false, snippet: 'run the migration before you deploy' }];
+      return { hits: all.filter((h) => `${h.title} ${h.snippet}`.toLowerCase().includes(q)), clientUnavailable: false, titlesOnly: false };
+    },
     '_hearth/cards': (params) => {
       const out = [];
       for (const t of live()) {

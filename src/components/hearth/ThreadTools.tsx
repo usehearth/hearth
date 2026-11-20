@@ -3,11 +3,13 @@
 // every window (`_hearth/sessions_changed`), so the list updates itself.
 import { useEffect, useState } from 'react';
 import { DropdownMenu } from 'radix-ui';
-import { Archive, ArchiveRestore, Loader2, MoreHorizontal, Pencil, Pin, PinOff, Search, Trash2, X } from 'lucide-react';
+import { Archive, ArchiveRestore, History as HistoryIcon, Loader2, Lock, MessageSquare, MoreHorizontal, Pencil, Pin, PinOff, Search, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toItem, type ThreadItem } from '@/lib/directory';
 import { cn } from '@/lib/utils';
+import { resultMeta, usefulSnippet } from '@/lib/search';
+import type { ImportedSummary } from '@/components/hearth/History';
 import { field } from '@/components/ui/field';
 
 export type Request = <T = unknown>(method: string, params?: unknown) => Promise<T>;
@@ -111,12 +113,13 @@ function DeleteDialog({ t, onClose, remove }: { t: ThreadItem; onClose: () => vo
 
 export interface SearchHit { sessionId: string; project: string; title: string; updatedAt: string; client: boolean; snippet: string | null }
 
-/** The search box: as you type (2+ characters), threads whose name or text matches. */
-export function SidebarSearch({ query, onQuery }: { query: string; onQuery: (q: string) => void }) {
+/** The search box: as you type (2+ characters), threads and imported history whose name or text matches. */
+export function SidebarSearch({ query, onQuery, history }: { query: string; onQuery: (q: string) => void; /** Imported history is searched too. */ history?: boolean }) {
+  const label = history ? 'Search threads and history' : 'Search threads';
   return (
     <div className="relative mx-3 mb-1">
       <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-      <input value={query} onChange={(e) => onQuery(e.target.value)} placeholder="Search threads" aria-label="Search threads"
+      <input value={query} onChange={(e) => onQuery(e.target.value)} placeholder={label} aria-label={label}
         onKeyDown={(e) => { if (e.key === 'Escape') onQuery(''); }}
         className="h-8 w-full rounded-lg border border-sidebar-border bg-background/60 pr-7 pl-8 text-[13px] outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/40" />
       {query && <button aria-label="Clear search" onClick={() => onQuery('')} className="absolute top-1/2 right-1.5 grid size-5 -translate-y-1/2 place-items-center rounded text-muted-foreground hover:text-foreground"><X className="size-3" /></button>}
@@ -124,34 +127,80 @@ export function SidebarSearch({ query, onQuery }: { query: string; onQuery: (q: 
   );
 }
 
-export function SearchResults({ query, request, onOpen }: { query: string; request: Request; onOpen: (h: SearchHit) => void }) {
+/**
+ * One search over threads and, when the server keeps it, the imported Claude history: both are asked at once and shown
+ * in two groups, each result with its project, its date and the words that matched.
+ */
+export function SearchResults({ query, request, onOpen, history, projectName = (s) => s, onOpenImported }: {
+  query: string; request: Request; onOpen: (h: SearchHit) => void;
+  /** Search the imported history too (server extension `history`). */ history?: boolean;
+  /** A project's name from its slug. */ projectName?: (slug: string) => string;
+  onOpenImported?: (s: ImportedSummary) => void;
+}) {
   const [hits, setHits] = useState<SearchHit[] | null>(null);
+  const [past, setPast] = useState<ImportedSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pastNote, setPastNote] = useState<string | null>(null);
   useEffect(() => {
     const q = query.trim();
-    if (q.length < 2) { setHits(null); return; }
+    if (q.length < 2) { setHits(null); setPast(null); return; }
     let live = true;
     const t = setTimeout(() => {
       request<{ results: SearchHit[] }>('_hearth/threads/search', { query: q })
         .then((r) => { if (live) { setHits(r.results ?? []); setError(null); } }, (e) => live && setError(errText(e)));
+      if (history) {
+        request<{ hits: ImportedSummary[]; clientUnavailable?: boolean; titlesOnly?: boolean }>('_hearth/history/search', { query: q })
+          .then((r) => { if (live) { setPast(r.hits ?? []); setPastNote(r.titlesOnly ? 'Only titles were searched: the search index is unavailable right now.' : null); } },
+            () => { if (live) { setPast([]); setPastNote("Imported history couldn't be searched right now."); } });
+      } else setPast([]);
     }, 250);
     return () => { live = false; clearTimeout(t); };
-  }, [query, request]);
+  }, [query, request, history]);
   if (query.trim().length < 2) return <p className="px-2 py-3 text-sm text-muted-foreground">Type at least two letters.</p>;
   if (error) return <p className="px-2 py-3 text-sm text-destructive">{error}</p>;
-  if (!hits) return <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Searching…</div>;
-  if (!hits.length) return <p className="px-2 py-3 text-sm text-muted-foreground">No threads match “{query.trim()}”.</p>;
+  if (!hits || !past) return <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Searching…</div>;
+  if (!hits.length && !past.length) return <p className="px-2 py-3 text-sm text-muted-foreground">Nothing matches “{query.trim()}”{history ? ' in threads or imported history' : ''}.{pastNote ? ` ${pastNote}` : ''}</p>;
+  const row = 'flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-sidebar-accent/60';
   return (
-    <ul className="space-y-0.5 pt-1" aria-label="Search results">
-      {hits.map((h) => (
-        <li key={h.sessionId}>
-          <button onClick={() => onOpen(h)} className="w-full rounded-lg px-2 py-1.5 text-left hover:bg-sidebar-accent/60">
-            <span className="block truncate text-[13px] font-medium">{h.title}</span>
-            <span className="block truncate text-[11px] text-muted-foreground">{h.project}{h.snippet ? ` · ${h.snippet}` : ''}</span>
-          </button>
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-2 pt-1">
+      {hits.length > 0 && (
+        <section aria-label="Threads">
+          {history && <div className="px-2 pb-0.5 text-[11px] font-medium text-muted-foreground">Threads <span className="tabular-nums">{hits.length}</span></div>}
+          <ul className="space-y-0.5" aria-label="Search results">
+            {hits.map((h) => (
+              <li key={h.sessionId}>
+                <button onClick={() => onOpen(h)} className={row}>
+                  <MessageSquare className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-medium">{h.title}</span>
+                    <span className="block truncate text-[11px] text-muted-foreground">{resultMeta({ project: projectName(h.project), at: h.updatedAt, snippet: usefulSnippet(h.title, h.snippet) })}</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {past.length > 0 && (
+        <section aria-label="Imported history">
+          <div className="px-2 pb-0.5 text-[11px] font-medium text-muted-foreground">Imported history <span className="tabular-nums">{past.length}</span></div>
+          <ul className="space-y-0.5">
+            {past.map((h) => (
+              <li key={h.id}>
+                <button onClick={() => onOpenImported?.(h)} disabled={!onOpenImported} className={row}>
+                  {h.client ? <Lock className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-label="Client" /> : <HistoryIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-medium">{h.title}</span>
+                    <span className="block truncate text-[11px] text-muted-foreground">{resultMeta({ project: h.projectName ?? h.group, at: h.startedAt, dateOnly: true, snippet: usefulSnippet(h.title, h.snippet) })}</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {pastNote && (hits.length > 0 || past.length > 0) && <p className="px-2 text-[11px] text-muted-foreground">{pastNote}</p>}
+    </div>
   );
 }
 
