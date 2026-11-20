@@ -23,7 +23,7 @@ export interface Thread {
   history: Update[]; modeId: string; provider: string | null; plan: string | null; cards: Card[]; deleted?: boolean;
 }
 
-export interface Project { slug: string; name: string; cwd: string }
+export interface Project { slug: string; name: string; cwd: string; /** A client project's client (its one rule: only providers OK for client work). */ client?: string }
 
 export interface Call { method: string; params: any; conn: number; at: number }
 
@@ -428,7 +428,16 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     '_hearth/plan': (params) => { const t = thread(params); return { path: `${t.cwd}/.hearth/threads/${t.id}/plan.md`, text: t.plan, ...(t.plan ? {} : { note: 'No plan yet.' }) }; },
     '_hearth/files': (params) => { thread(params); return { files: [] }; },
     '_hearth/commands': () => ({ availableCommands: COMMANDS }),
-    '_hearth/providers': () => ({ providers: [{ name: 'claude', kind: 'anthropic', enabled: true, status: 'ok', models: {} }, { name: 'gemini', kind: 'openai', enabled: true, status: 'ok', models: { default: 'gemini-flash' } }], canEdit: true }),
+    // Like core: with {sessionId} or {project}, only the providers that thread may use (a client project: only those OK
+    // for client work), and the project it answered for.
+    '_hearth/providers': (params) => {
+      const all = [{ name: 'claude', kind: 'anthropic', enabled: true, status: 'ok', models: {}, sensitive_ok: true },
+        { name: 'gemini', kind: 'openai', enabled: true, status: 'ok', models: { default: 'gemini-flash' }, sensitive_ok: false }];
+      const slug = params?.sessionId ? thread(params).project : params?.project ? String(params.project) : null;
+      const p = slug ? projects.get(slug) : undefined;
+      if (!p) return { providers: all, canEdit: true };
+      return { providers: all.filter((x) => !p.client || x.sensitive_ok), canEdit: true, project: p.slug };
+    },
     '_hearth/thread/archive': (params) => { const t = thread(params); t.archived = !!params.archived; listChanged([t.id]); return {}; },
     '_hearth/thread/pin': (params) => { const t = thread(params); t.pinned = !!params.pinned; listChanged([t.id]); return {}; },
     '_hearth/thread/rename': (params) => { const t = thread(params); t.title = String(params.title); listChanged([t.id]); return {}; },

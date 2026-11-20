@@ -61,7 +61,7 @@ function ModePicker({ client, onError }: { client: AcpClient; onError: (m: strin
   );
 }
 
-interface Provider { name: string; kind: string; enabled: boolean; status?: string; models?: Record<string, unknown> }
+interface Provider { name: string; kind: string; enabled: boolean; status?: string; models?: Record<string, unknown>; sensitive_ok?: boolean }
 
 /**
  * What the model pill says: a model picked by name (an OpenCode provider's), else the engine's current model
@@ -88,7 +88,17 @@ function ModelPicker({ client, onError }: { client: AcpClient; onError: (m: stri
   useEffect(() => { setChosen((client.sessionMeta?.provider as string | null) ?? null); }, [client, live]);
   const config = ((useAcpConfigOptions() ?? client.configOptions ?? []) as unknown as SelectOption[])
     .filter((o) => o.type === 'select' && Array.isArray(o.options) && o.category !== 'mode' && !/^(mode|permission_?mode)$/i.test(o.id));
-  const load = () => { if (!providers) client.extRequest<{ providers: Provider[] }>('_hearth/providers', {}).then((r) => setProviders(r.providers.filter((p) => p.enabled)), () => setProviders([])); };
+  // Only the providers this thread may use (the server answers for the thread or its project: a client project only
+  // gets providers OK for client work). A server from before that answers with every provider and no `project`; a
+  // client thread then still only shows the ones OK for client work.
+  const load = () => {
+    if (providers) return;
+    const scope = client.sessionId ? { sessionId: client.sessionId } : client.newProject ? { project: client.newProject } : {};
+    client.extRequest<{ providers: Provider[]; project?: string }>('_hearth/providers', scope).then((r) => {
+      const clientThread = !r.project && !!client.sessionMeta?.client;
+      setProviders(r.providers.filter((p) => p.enabled && (!clientThread || p.sensitive_ok)));
+    }, () => setProviders([]));
+  };
   const engineModel = config.find((o) => o.category === 'model' || o.id === 'model');
   const label = modelLabel({ chosenModel, chosen, engineModel });
   // A model by name goes with an OpenCode provider (its engine offers one model only); Claude Code threads pick theirs

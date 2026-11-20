@@ -239,6 +239,12 @@ export class AcpClient {
     return this.request("session/set_config_option", { sessionId: this._sessionId, configId, value });
   }
 
+  /** Hearth: the project a new thread will be made in (`newSessionMeta.hearth.project`), before it has a session. */
+  get newProject(): string | undefined {
+    const p = (this.options.newSessionMeta?.hearth as { project?: unknown } | undefined)?.project;
+    return typeof p === 'string' && p ? p : undefined;
+  }
+
   /** Hearth (parity): `_meta.hearth` of the last session/new or session/load answer (e.g. the thread's provider). */
   get sessionMeta(): Record<string, unknown> | undefined {
     return this.lastSessionMeta;
