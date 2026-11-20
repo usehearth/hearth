@@ -74,6 +74,12 @@ export type DirectoryState =
       /** H5: client lines for this device (empty on a work device, which lists client threads instead). */
       clients: ClientLine[];
       workDevice: boolean;
+      /**
+       * The server's client mode (`_hearth/device`). "simple": a client project is an ordinary project with a client
+       * label. "strict": the server's strict client rules (work devices, the Clients section). Servers from before the
+       * setting behave as strict.
+       */
+      clientMode: 'simple' | 'strict';
       /** An admin device (may make projects, change providers). */
       admin: boolean;
       /** Imported conversations whose folder isn't a project, by group. */
@@ -191,6 +197,7 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
     let hasClients = false;
     let hasHistory = false;
     let admin = false;
+    let clientMode: 'simple' | 'strict' = 'strict';
     const list = async () => {
       const [res, cards] = await Promise.all([
         listAll(),
@@ -209,7 +216,7 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
         hasClients ? (conn.agent.request('_hearth/clients' as any, {}) as Promise<any>).catch(() => null) : null,
         hasHistory ? (conn.agent.request('_hearth/history/counts' as any, {}) as Promise<any>).catch(() => null) : null,
       ]);
-      return { groups: withHistory(group((res.sessions ?? []).map(toItem)), (hc?.projects ?? []) as HistoryCount[]), cards, cardsStale, more: res.more, loadMore, clients: (cl?.clients ?? []) as ClientLine[], workDevice: !!cl?.workDevice, admin, importedGroups: (hc?.groups ?? []) as ImportedGroup[] };
+      return { groups: withHistory(group((res.sessions ?? []).map(toItem)), (hc?.projects ?? []) as HistoryCount[]), cards, cardsStale, more: res.more, loadMore, clients: (cl?.clients ?? []) as ClientLine[], workDevice: !!cl?.workDevice, admin, clientMode, importedGroups: (hc?.groups ?? []) as ImportedGroup[] };
     };
     const answer = async (e: CardEntry, a: CardAnswer) => {
       // An admin card counts only with this install's signature (the runner checks it).
@@ -239,7 +246,11 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
         const ext: string[] = Array.isArray(init?._meta?.hearth?.extensions) ? init._meta.hearth.extensions : [];
         hasClients = ext.includes('clients');
         hasHistory = ext.includes('history');
-        if (ext.includes('new_project')) admin = !!(await (conn.agent.request('_hearth/device' as any, {}) as Promise<any>).catch(() => null))?.admin;
+        if (ext.includes('new_project') || ext.includes('device')) {
+          const dev = await (conn.agent.request('_hearth/device' as any, {}) as Promise<any>).catch(() => null);
+          if (ext.includes('new_project')) admin = !!dev?.admin;
+          clientMode = dev?.clientMode === 'simple' ? 'simple' : 'strict';
+        }
         const first = await list();
         if (!live) return;
         const agent = String(init.agentInfo?.title ?? init.agentInfo?.name ?? 'ACP server');

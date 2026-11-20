@@ -78,7 +78,7 @@ const dir: DirectoryState = {
     { project: 'historic-scotland', name: 'historic-scotland', cwd: 'C:/p/hs', threads: [], client: 'Storm' },
     { project: 'compdev-platform', name: 'compdev-platform', cwd: 'C:/p/compdev', threads: [] },
   ], refresh: () => {}, cards: [], answer: async () => {}, extensions: ['schedules', 'usage', 'audit', 'extensions', 'providers'],
-  clients: [], workDevice: false, admin: true, importedGroups: [], request: request as never,
+  clients: [], workDevice: false, clientMode: 'strict', admin: true, importedGroups: [], request: request as never,
 };
 
 export default function Preview() {

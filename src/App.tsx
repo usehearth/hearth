@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { notify } from '@/lib/notify';
 import { assetUrl, hostReady, inVsCode, onHostEvent } from '@/lib/hostBridge';
 import { Archive, BellDot, Briefcase, ChevronDown, FolderPlus, History as HistoryIcon, Lock, Menu, Settings as SettingsIcon, ShieldAlert, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert, Download, X } from 'lucide-react';
@@ -72,6 +72,9 @@ export default function App() {
   const adminKey = useAdminKey(dir.state === 'ready' ? dir.request : undefined, adminExt);
   const canSign = adminExt && adminKey.pinned;
   const canOpenAdmin = canSign && dir.state === 'ready' && dir.admin;
+  // The server's simple client mode: client projects are ordinary projects with a client label (no Clients section, no
+  // strip, Open in admin as anywhere). Strict mode, and servers from before the setting, keep the strict screens.
+  const simpleClients = dir.state === 'ready' && dir.clientMode === 'simple';
 
   useEffect(() => { if (!serverId && servers[0]) setServerId(servers[0].id); }, [servers, serverId]);
   const setup = useSetup();
@@ -198,6 +201,7 @@ export default function App() {
 
   const key = server ? keyFor(server.id) : undefined;
   return (
+    <SimpleClients.Provider value={simpleClients}>
     <TooltipProvider delayDuration={300}>
       <div className="flex h-full">
         {navOpen && <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setNavOpen(false)} aria-hidden />}
@@ -294,17 +298,17 @@ export default function App() {
                   </>
                 ) : <>
                 <AdminSection group={dir.groups.find(isAdminGroup)} canOpen={canOpenAdmin} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => void openAdmin()} menu={menu} />
-                {dir.groups.filter((g) => !g.client && !isAdminGroup(g)).map((g) => (
+                {dir.groups.filter((g) => (simpleClients || !g.client) && !isAdminGroup(g)).map((g) => (
                   <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)} menu={menu}
                     onSettings={dir.extensions.includes('project') ? () => { setProjectView({ slug: g.project, name: g.name }); go('project'); } : undefined}
                     settingsOpen={view === 'project' && projectView?.slug === g.project} onHistory={() => openHistory({ project: g.project, name: g.name })} historyOpen={(view === 'history' || view === 'imported') && histKey === `p:${g.project}`} />
                 ))}
-                <ClientsSection groups={dir.groups.filter((g) => !!g.client)} lines={dir.clients} workDevice={dir.workDevice}
+                {!simpleClients && <ClientsSection groups={dir.groups.filter((g) => !!g.client)} lines={dir.clients} workDevice={dir.workDevice}
                   render={(g) => (
                     <ProjectSection key={g.project} g={g} activeId={view === 'thread' ? target?.sessionId : undefined} onOpen={open} onNew={() => newThread(g)} menu={menu}
                       onSettings={dir.extensions.includes('project') ? () => { setProjectView({ slug: g.project, name: g.name }); go('project'); } : undefined}
                       settingsOpen={view === 'project' && projectView?.slug === g.project} onHistory={() => openHistory({ project: g.project, name: g.name })} historyOpen={(view === 'history' || view === 'imported') && histKey === `p:${g.project}`} />
-                  )} />
+                  )} />}
                 <ImportedSection groups={dir.importedGroups} active={(view === 'history' || view === 'imported') ? histKey : ''} onOpen={(g) => openHistory({ group: g.group, name: g.group, client: g.client })} />
                 </>}
                 {/* The list stops after a few pages so a big server opens fast; older threads are a click away, not hidden. */}
@@ -347,17 +351,18 @@ export default function App() {
               <>
                 <span className="truncate text-sm font-medium">{target.title}</span>
                 {target.project && <span className="truncate text-sm text-muted-foreground">· {target.project}</span>}
+                {simpleClients && target.client && <ClientChip name={target.client} />}
               </>
             ) : <span className="text-sm text-muted-foreground">Pick a thread</span>}
             <div ref={setActionsEl} className={cn('ml-auto flex items-center gap-1', view !== 'thread' && 'hidden')} />
           </header>
-          {view === 'imported' && imported?.client && (
+          {view === 'imported' && imported?.client && !simpleClients && (
             <div className="flex items-center gap-2 border-b bg-warning/10 px-5 py-1.5 text-xs text-warning-text max-md:px-3" role="note">
               <Lock className="size-3.5 shrink-0" />
               <span><span className="font-semibold">Client conversation.</span> Stored on your server, encrypted at rest.</span>
             </div>
           )}
-          {view === 'thread' && target?.client && (
+          {view === 'thread' && target?.client && !simpleClients && (
             <div className="flex items-center gap-2 border-b bg-warning/10 px-5 py-1.5 text-xs text-warning-text max-md:px-3" role="note">
               <Lock className="size-3.5 shrink-0" />
               <span><span className="font-semibold">Client: {target.client}.</span> Content stays on the work machine; the server keeps only summaries.</span>
@@ -395,7 +400,7 @@ export default function App() {
           )}
           {view === 'needs' && dir.state === 'ready' && (
             <div className="min-h-0 flex-1"><NeedsYou cards={dir.cards} onAnswer={dir.answer} onOpen={openCard}
-              onOpenAdmin={canOpenAdmin ? (e) => { if (!groupOf(e.project)?.client && e.project !== 'admin') void openAdmin({ sessionId: e.sessionId, title: e.title }, { tool: e.card.toolCall?.title, reason: e.card.why || e.card.title }); } : undefined}
+              onOpenAdmin={canOpenAdmin ? (e) => { if ((simpleClients || !groupOf(e.project)?.client) && e.project !== 'admin') void openAdmin({ sessionId: e.sessionId, title: e.title }, { tool: e.card.toolCall?.title, reason: e.card.why || e.card.title }); } : undefined}
               adminRequest={adminExt ? dir.request : undefined}
               onOpenThread={(sessionId, title) => open({ sessionId, title, cwd: '', updatedAt: null, project: 'admin', projectName: 'Admin', kind: 'work', status: null, runnerOnline: null, pinned: false, openCards: 0, admin: true })} /></div>
           )}
@@ -404,12 +409,13 @@ export default function App() {
             {target && server && key
               ? <ThreadPane key={target.id} url={server.url} serverKey={key} target={target.t} events={events} actionsEl={actionsEl} first={target.first} insert={insert}
                   admin={target.admin ? { canSign, origin: adminOrigin(target.sessionId), title: target.title, onFinished: () => { refresh?.(); void adminKey.reload(); setTarget(null); } } : undefined}
-                  onOpenAdmin={canOpenAdmin && !target.admin && !target.client && target.sessionId ? (b) => void openAdmin({ sessionId: target.sessionId!, title: target.title }, b) : undefined} />
+                  onOpenAdmin={canOpenAdmin && !target.admin && (simpleClients || !target.client) && target.sessionId ? (b) => void openAdmin({ sessionId: target.sessionId!, title: target.title }, b) : undefined} />
               : <Welcome />}
           </div>
         </main>
       </div>
     </TooltipProvider>
+    </SimpleClients.Provider>
   );
 }
 
@@ -427,6 +433,7 @@ function ProjectSection({ g, activeId, onOpen, onNew, onSettings, settingsOpen, 
         <button onClick={() => setOpenSec((o) => !o)} className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-left text-[13px] font-semibold">
           <ChevronDown className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', !openSec && '-rotate-90')} />
           <span className="truncate">{g.name}</span>
+          {g.client && <ClientChip name={g.client} />}
           {!openSec && needs > 0 && <span className="ml-auto rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary" title="Threads that need you">{needs}</span>}
         </button>
         {onSettings && <IconBtn label={`Settings for ${g.name}`} onClick={onSettings} className={cn('opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100', settingsOpen && 'bg-sidebar-accent text-foreground opacity-100')}><SlidersHorizontal className="size-3.5" /></IconBtn>}
@@ -485,6 +492,14 @@ function RecentList({ groups, admin, activeId, onOpen, menu }: { groups: Project
   );
 }
 
+/** The server's simple client mode, for rows deep in the list (a lock on client items only in strict mode). */
+const SimpleClients = createContext(false);
+
+/** A client project's label: the client's name, small and neutral (no rules to read). */
+function ClientChip({ name }: { name: string }) {
+  return <span className="shrink-0 rounded-md bg-muted px-1.5 py-px text-[11px] font-normal text-muted-foreground" title={`Client: ${name}`}>{name}</span>;
+}
+
 const isAdminGroup = (g: ProjectGroup) => [g.main, ...g.threads].some((t) => t?.admin);
 
 /**
@@ -510,6 +525,7 @@ function AdminSection({ group: g, canOpen, activeId, onOpen, onNew, menu }: { gr
 
 /** Imported Claude Code conversations from folders that aren't Hearth projects, one row per folder (group). */
 function ImportedSection({ groups, active, onOpen }: { groups: ImportedGroup[]; active: string; onOpen: (g: ImportedGroup) => void }) {
+  const simple = useContext(SimpleClients);
   if (!groups.length) return null;
   return (
     <div className="mt-3" aria-label="Imported">
@@ -522,7 +538,7 @@ function ImportedSection({ groups, active, onOpen }: { groups: ImportedGroup[]; 
           <li key={`${g.client}:${g.group}`}>
             <button onClick={() => onOpen(g)} className={cn('flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors',
               active === `g:${g.group}` ? 'bg-sidebar-accent font-medium text-foreground' : 'text-sidebar-foreground/85 hover:bg-sidebar-accent/60')}>
-              {g.client ? <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label="Client" /> : <span className="size-3.5 shrink-0" />}
+              {g.client && !simple ? <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label="Client" /> : <span className="size-3.5 shrink-0" />}
               <span className="truncate">{g.group}</span>
               <span className="ml-auto text-[11px] text-muted-foreground">{g.count}</span>
             </button>
@@ -565,6 +581,7 @@ const needsYou = (t: ThreadItem) => t.status === 'needs_permission' || t.openCar
 function ThreadRow({ t, active, onOpen, main, menu, project }: { t: ThreadItem; active: boolean; onOpen: (t: ThreadItem) => void; main?: boolean; menu?: (t: ThreadItem) => React.ReactNode; /** Recent view: the project's name beside the title. */ project?: boolean }) {
   const running = t.status === 'running' || t.status === 'starting';
   const needs = needsYou(t);
+  const simple = useContext(SimpleClients);
   const name = main || t.kind === 'main' ? 'Main thread' : t.title;
   const when = shortWhen(t.updatedAt);
   const tip = [name, project ? t.projectName : null, project && t.client ? `client ${t.client}` : null, when ? `last active ${when}` : null, needs ? 'needs you' : null].filter(Boolean).join(' · ');
@@ -573,7 +590,7 @@ function ThreadRow({ t, active, onOpen, main, menu, project }: { t: ThreadItem; 
       <button onClick={() => onOpen(t)} title={tip} aria-label={tip} className={cn('flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors',
         menu && !main && 'pr-8',
         active ? 'bg-sidebar-accent font-medium text-foreground' : 'text-sidebar-foreground/85 hover:bg-sidebar-accent/60')}>
-        {project && t.client ? <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label={`Client: ${t.client}`} /> : main ? <Flame className="size-3.5 shrink-0 text-ember" /> : t.pinned ? <Pin className="size-3.5 shrink-0 p-px text-muted-foreground" aria-label="Pinned" /> : <span className="size-3.5 shrink-0" />}
+        {project && t.client && !simple ? <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label={`Client: ${t.client}`} /> : main ? <Flame className="size-3.5 shrink-0 text-ember" /> : t.pinned ? <Pin className="size-3.5 shrink-0 p-px text-muted-foreground" aria-label="Pinned" /> : <span className="size-3.5 shrink-0" />}
         <span className="min-w-0 truncate">{name}</span>
         {project && <span className="ml-auto max-w-[40%] shrink-0 truncate text-[11px] text-muted-foreground" title={fullWhen(t.updatedAt)}>{t.projectName}</span>}
         {needs && <span className={cn('size-2 shrink-0 rounded-full bg-primary', !project && 'ml-auto')} />}

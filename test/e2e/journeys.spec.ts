@@ -437,3 +437,39 @@ test.describe('client projects', () => {
   });
 });
 
+/** The default world plus a client project, "Acme site" (client Acme), with its main thread. */
+function clientWorld() {
+  const world = defaultWorld();
+  world.projects.push({ slug: 'acme-site', name: 'Acme site', cwd: '/workspace/acme-site', client: 'Acme' });
+  world.threads.push({ id: 'main-acme', title: 'Main thread', project: 'acme-site', kind: 'main', updatedAt: new Date(Date.now() - 30 * 60_000).toISOString(), history: [] });
+  return world;
+}
+
+test.describe('client projects, simple client mode', () => {
+  test.use({ fakeOptions: { world: clientWorld(), clientMode: 'simple' } });
+
+  test('a client project sits with the other projects, labelled with its client; no Clients section and no warning strip', async ({ page, fake }, info) => {
+    await connect(page, fake);
+    const side = sidebar(page);
+    await expect(side.getByRole('button', { name: 'New thread in Acme site' })).toBeVisible();
+    await expect(side.getByTitle('Client: Acme')).toBeVisible();
+    await expect(side.getByLabel('Clients')).toHaveCount(0);
+    await newThread(page, 'Acme site');
+    await expect(header(page).getByTitle('Client: Acme')).toBeVisible();
+    await expect(page.getByRole('note').filter({ hasText: 'Client: Acme' })).toHaveCount(0);
+    await page.screenshot({ path: info.outputPath('simple-client-project.png') });
+  });
+});
+
+test.describe('client projects, strict client mode', () => {
+  test.use({ fakeOptions: { world: clientWorld(), clientMode: 'strict' } });
+
+  test('strict mode keeps the Clients section and the strip on a client thread', async ({ page, fake }, info) => {
+    await connect(page, fake);
+    await expect(sidebar(page).getByLabel('Clients')).toBeVisible();
+    await newThread(page, 'Acme site');
+    await expect(page.getByRole('note').filter({ hasText: 'Client: Acme.' })).toBeVisible();
+    await page.screenshot({ path: info.outputPath('strict-client-project.png') });
+  });
+});
+
