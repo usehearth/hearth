@@ -180,6 +180,14 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     if (opts.record !== false) t.history.push(u);
     for (const c of conns) if (c !== opts.except && c.attached.has(t.id)) notify(c, 'session/update', { sessionId: t.id, update: u });
   };
+  const projectView = (slug: unknown) => {
+    const p = projects.get(String(slug));
+    if (!p) throw { code: -32602, message: 'No such project.' };
+    return { slug: p.slug, name: p.name, kind: p.client ? 'client' : 'personal', client: !!p.client, clientName: p.client ?? null,
+      ...(opts.clientMode ? { clientMode: opts.clientMode } : {}), agent: 'claude-code',
+      roles: [{ role: 'pm', label: 'Threads and planning', model: null, default: 'claude-opus-5-5' }], modelChoices: [], providers: null,
+      availableProviders: [{ name: 'claude', kind: 'anthropic', priority: 10 }], planFirst: false, tools: [], instructions: '', canEdit: true };
+  };
   const listChanged = (ids: string[]) => notifyAll('_hearth/sessions_changed', { sessionIds: ids });
   const setStatus = (t: Thread, status: Thread['status']) => {
     t.status = status;
@@ -404,6 +412,36 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     '_hearth/devices': () => ({ devices: [{ id: 'd1', name: 'Test device', created_by: 'owner', created_at: iso(600), last_used_at: iso(0), revoked_at: null, current: true }] }),
     '_hearth/clients': () => ({ clients: [], workDevice: true }),
     '_hearth/history/counts': () => ({ projects: [], groups: [] }),
+    // Project settings and New project (servers with `project` / `new_project`), enough for the client field: like core,
+    // a project's client can be changed in simple client mode and is refused in strict.
+    '_hearth/project': (params) => projectView(params?.project),
+    '_hearth/project/update': (params) => {
+      const p = projects.get(String(params?.project));
+      if (!p) throw { code: -32602, message: 'No such project.' };
+      if (typeof params.name === 'string' && params.name.trim()) p.name = params.name.trim();
+      if ('client' in params) {
+        if (opts.clientMode !== 'simple') throw { code: -32602, message: "In strict client mode a project's client can't be changed here." };
+        const c = String(params.client ?? '').trim();
+        if (c) p.client = c; else delete p.client;
+        listChanged(live().filter((t) => t.project === p.slug).map((t) => t.id));
+      }
+      return projectView(p.slug);
+    },
+    '_hearth/project/options': () => ({ pools: [{ name: 'default', title: 'This machine', clientOk: true }], defaultPool: 'default', clientAllowed: true,
+      clients: [...new Set([...projects.values()].map((p) => p.client).filter((c): c is string => !!c))].sort(), ...(opts.clientMode ? { clientMode: opts.clientMode } : {}) }),
+    '_hearth/project/create': (params) => {
+      const name = String(params?.name ?? '').trim();
+      const slug = String(params?.slug ?? '') || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      if (projects.has(slug)) throw { code: -32602, message: `A project called ${slug} exists already.` };
+      const client = String(params?.client ?? '').trim();
+      const p: Project = { slug, name, cwd: params?.path || `/workspace/${slug}`, ...(client ? { client } : {}) };
+      projects.set(slug, p);
+      const id = `main-${slug}`;
+      threads.set(id, { id, title: 'Main thread', project: slug, projectName: name, cwd: p.cwd, kind: 'main', updatedAt: iso(0), status: 'idle', pinned: false, archived: false,
+        history: [], modeId: 'default', provider: null, plan: null, cards: [] } as Thread);
+      listChanged([id]);
+      return { slug, name, client: !!client, sessionId: id, cwd: p.cwd, tools: { ok: true } };
+    },
     // One imported Claude Code conversation, for the search over threads and history.
     '_hearth/history/search': (params) => {
       const q = String(params?.query ?? '').toLowerCase();

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { strToU8, zipSync } from 'fflate';
 import { assistantMessages, composer, connect, expect, header, newThread, openThread, rememberServer, send, sendButton, sidebar, stopButton, test, threadRow, userMessages } from './support';
 import { FALLBACK_LINE } from '../fake-server/fixtures.ts';
-import { defaultWorld } from '../fake-server/server.ts';
+import { defaultWorld, EXTENSIONS } from '../fake-server/server.ts';
 
 test('connect: add a server with its address and device key', async ({ page, fake }) => {
   await page.goto('/');
@@ -470,6 +470,37 @@ test.describe('client projects, strict client mode', () => {
     await newThread(page, 'Acme site');
     await expect(page.getByRole('note').filter({ hasText: 'Client: Acme.' })).toBeVisible();
     await page.screenshot({ path: info.outputPath('strict-client-project.png') });
+  });
+});
+
+test.describe('client field, simple client mode', () => {
+  test.use({ fakeOptions: { world: clientWorld(), clientMode: 'simple', extensions: [...EXTENSIONS, 'project'] } });
+
+  test('New project: the client is picked from the clients in use, or a new one is named', async ({ page, fake }, info) => {
+    await connect(page, fake);
+    await sidebar(page).getByRole('button', { name: 'New project' }).click();
+    await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Beta portal');
+    const pick = page.getByRole('combobox', { name: 'Client' });
+    await expect(pick.locator('option')).toHaveText(['No client (a personal project)', 'Acme', 'New client…']);
+    await pick.selectOption({ label: 'New client…' });
+    await page.getByRole('textbox', { name: "New client's name" }).fill('Beta');
+    await expect(page.getByText('a client project only uses model providers marked OK for client work')).toBeVisible();
+    await page.screenshot({ path: info.outputPath('new-project-client.png') });
+    await page.getByRole('button', { name: 'Add project' }).click();
+    await expect.poll(() => fake.callsOf('_hearth/project/create').at(-1)?.params?.client).toBe('Beta');
+  });
+
+  test("Project settings: one line says the project's client and its one rule; Change picks another or none", async ({ page, fake }, info) => {
+    await connect(page, fake);
+    await sidebar(page).getByRole('button', { name: 'Settings for Acme site' }).click();
+    const line = page.getByRole('region', { name: 'Client' });
+    await expect(line).toContainText('Client: Acme. Uses only providers marked OK for client work.');
+    await page.screenshot({ path: info.outputPath('project-settings-client.png') });
+    await line.getByRole('button', { name: 'Change' }).click();
+    await line.getByRole('combobox', { name: 'Client' }).selectOption({ label: 'No client (a personal project)' });
+    await line.getByRole('button', { name: 'Save' }).click();
+    await expect(line).toContainText('No client: a personal project.');
+    expect(fake.callsOf('_hearth/project/update').at(-1)?.params).toEqual({ project: 'acme-site', client: '' });
   });
 });
 

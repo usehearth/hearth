@@ -381,7 +381,7 @@ export default function App() {
             </div>
           )}
           {view === 'project' && projectView && dir.state === 'ready' && (
-            <div className="min-h-0 flex-1"><ProjectSettings project={projectView.slug} request={dir.request} extensions={dir.extensions} /></div>
+            <div className="min-h-0 flex-1"><ProjectSettings project={projectView.slug} request={dir.request} extensions={dir.extensions} clients={clientNames(dir.groups, dir.clients)} /></div>
           )}
           {view === 'history' && historyOf && dir.state === 'ready' && (
             <div className="min-h-0 flex-1"><HistoryView request={dir.request} scope={historyOf} onOpen={openImported} /></div>
