@@ -186,7 +186,8 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     return { slug: p.slug, name: p.name, kind: p.client ? 'client' : 'personal', client: !!p.client, clientName: p.client ?? null,
       ...(opts.clientMode ? { clientMode: opts.clientMode } : {}), agent: 'claude-code',
       roles: [{ role: 'pm', label: 'Threads and planning', model: null, default: 'claude-opus-5-5' }], modelChoices: [], providers: null,
-      availableProviders: [{ name: 'claude', kind: 'anthropic', priority: 10 }], planFirst: false, tools: [], instructions: '', canEdit: true };
+      availableProviders: [{ name: 'claude', kind: 'anthropic', priority: 10 }], planFirst: false, tools: [], instructions: '', canEdit: true,
+      permissions: { mode: 'default', allow: [], deny: [], defaults: [], alwaysDenied: [], allowAuto: false } };
   };
   const listChanged = (ids: string[]) => notifyAll('_hearth/sessions_changed', { sessionIds: ids });
   const setStatus = (t: Thread, status: Thread['status']) => {
