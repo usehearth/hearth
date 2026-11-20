@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   EMPTY_ACP_THREAD_STATE,
+  isAcpStateRunning,
   reduceAcpThreadState,
   splitAttached,
   splitContext,
@@ -94,14 +95,30 @@ describe('history and other windows (no turn of ours running)', () => {
     expect(s.messagesById[s.messageOrder[0]!]).toMatchObject({ role: 'user', content: [{ type: 'text', text: 'Hello there' }] });
   });
 
-  it('builds a replayed turn as finished, even one the server is still running (see faults.spec.ts: drop mid-turn)', () => {
-    // Nothing in a replay says the turn is still going: the server's status rides on session_info_update, which only
-    // the title is read from. So after a reconnect a running turn shows as finished, with no Stop.
-    const s = reduce([userText('Count slowly'), text('Step 1. '), update({ sessionUpdate: 'session_info_update', title: 'Count', _meta: { hearth: { status: 'running' } } }), text('Step 2. ')]);
-    const last = s.messagesById[s.messageOrder.at(-1)!] as AcpAssistantMessage;
-    expect(last.status).toEqual({ type: 'complete', reason: 'unknown' });
-    expect(s.run).toEqual({ type: 'idle' });
-    expect(s.sessionTitle).toBe('Count');
+  it('a turn the server is still running when the thread opens shows as running, until the server says idle', () => {
+    const opened = reduce([userText('Count slowly'), text('Step 1. '), { type: 'connection', connectionState: 'connected', sessionId: 's1', sessionStatus: 'running' }]);
+    expect(isAcpStateRunning(opened)).toBe(true);
+    const live = reduce([text('Step 2. ')], opened);
+    expect((live.messagesById[live.messageOrder.at(-1)!] as AcpAssistantMessage).status).toEqual({ type: 'running' });
+    const done = reduce([update({ sessionUpdate: 'session_info_update', title: 'Count', _meta: { hearth: { status: 'idle' } } })], live);
+    expect(isAcpStateRunning(done)).toBe(false);
+    expect((done.messagesById[done.messageOrder.at(-1)!] as AcpAssistantMessage).status).toEqual({ type: 'complete', reason: 'unknown' });
+    expect(done.sessionTitle).toBe('Count');
+  });
+
+  it('a turn started in another window shows as running from its status, and its answer lands as running', () => {
+    const s = reduce([{ type: 'connection', connectionState: 'connected', sessionId: 's1', sessionStatus: 'idle' }, update({ sessionUpdate: 'session_info_update', _meta: { hearth: { status: 'running' } } }), userText('From the phone'), text('On it')]);
+    expect(isAcpStateRunning(s)).toBe(true);
+    expect((s.messagesById[s.messageOrder.at(-1)!] as AcpAssistantMessage).status).toEqual({ type: 'running' });
+    expect(isAcpStateRunning(reduce([update({ sessionUpdate: 'session_info_update', _meta: { hearth: { status: 'needs_permission' } } })], s))).toBe(true);
+  });
+
+  it("during this window's own turn the server's status changes nothing, and its own run clears a remote one", () => {
+    const remote = reduce([{ type: 'connection', connectionState: 'connected', sessionId: 's1', sessionStatus: 'running' }]);
+    const own = reduce([{ type: 'run-start', message: assistant('a1') }], remote);
+    expect(own.remoteRunning).toBe(false);
+    const ended = reduce([update({ sessionUpdate: 'session_info_update', _meta: { hearth: { status: 'running' } } }), { type: 'run-end', assistantId: 'a1', status: { type: 'complete', reason: 'stop' } }], own);
+    expect(isAcpStateRunning(ended)).toBe(false);
   });
 
   it('shows embedded files and saved attachments as file chips, not text', () => {
