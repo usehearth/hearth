@@ -6,8 +6,9 @@ import { Copy, Download, FileDown } from 'lucide-react';
 import { acpMetaOf, diffsOf } from '@/components/hearth/ToolViews';
 import { createTwoFilesPatch } from 'diff';
 import { useAcpSessionTitle } from '@/vendor/acp';
+import { NOTICE_PART } from '@/vendor/acp/conversions';
 
-type Part = { type: string; text?: string; toolName?: string; args?: unknown; providerMetadata?: unknown };
+type Part = { type: string; text?: string; toolName?: string; args?: unknown; providerMetadata?: unknown; name?: string; data?: { text?: string } };
 
 export function threadMarkdown(title: string, messages: readonly { role: string; content: readonly Part[] }[]): string {
   const out: string[] = [`# ${title}`, '', `_Exported from Hearth, ${new Date().toISOString().slice(0, 16).replace('T', ' ')}_`, ''];
@@ -16,6 +17,7 @@ export function threadMarkdown(title: string, messages: readonly { role: string;
     for (const p of m.content) {
       if (p.type === 'text' && p.text) lines.push(p.text);
       else if (p.type === 'reasoning' && p.text) lines.push(`> _Thinking:_ ${p.text.replace(/\n/g, '\n> ')}`);
+      else if (p.type === 'data' && p.name === NOTICE_PART && p.data?.text) lines.push(`_${p.data.text}_`);
       else if (p.type === 'tool-call') {
         const meta = acpMetaOf(p);
         const title = (meta?.title ?? p.toolName ?? 'tool').replace(/`/g, '');

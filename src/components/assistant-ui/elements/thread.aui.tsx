@@ -28,6 +28,7 @@ import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-ic
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { NOTICE_PART } from "@/vendor/acp/conversions";
 import {
   ActionBarMorePrimitive,
   ActionBarPrimitive,
@@ -55,6 +56,7 @@ import {
   ChevronRightIcon,
   CopyIcon,
   DownloadIcon,
+  InfoIcon,
   MicIcon,
   MoreHorizontalIcon,
   PencilIcon,
@@ -705,6 +707,18 @@ const MessageError: FC = () => {
   );
 };
 
+/** Hearth: a server notice (a provider fallback, a machine going offline): a quiet line, not the agent's words. */
+const NoticeLine: FC<{ text: string }> = ({ text }) => (
+  <p
+    data-slot="hearth-notice"
+    role="note"
+    className="text-muted-foreground my-2 flex items-start gap-1.5 text-[13px] leading-snug"
+  >
+    <InfoIcon className="mt-px size-3.5 shrink-0" aria-hidden />
+    <span>{text}</span>
+  </p>
+);
+
 const AssistantMessage: FC = () => {
   const {
     ToolFallback: ToolFallbackComponent = ToolFallback,
@@ -770,7 +784,11 @@ const AssistantMessage: FC = () => {
               case "tool-call":
                 return part.toolUI ?? <ToolFallbackComponent {...part} />;
               case "data":
-                return part.dataRendererUI;
+                return part.name === NOTICE_PART ? (
+                  <NoticeLine text={String((part.data as { text?: unknown })?.text ?? "")} />
+                ) : (
+                  part.dataRendererUI
+                );
               case "file":
                 return (
                   <div data-slot="aui_assistant-message-file" className="py-1">

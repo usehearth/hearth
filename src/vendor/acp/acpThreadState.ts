@@ -19,7 +19,7 @@ import type {
   AcpUsage,
 } from "./types";
 import {
-  appendContentBlock,
+  appendAgentChunk,
   applyToolCallUpdate,
   attachToolCallApproval,
   permissionOptionToApprovalOption,
@@ -349,7 +349,7 @@ const reducePassive = (
       }
       const kind = u.sessionUpdate === "agent_message_chunk" ? "text" : "reasoning";
       return patchAssistant(next, id, (message) => {
-        const content = appendContentBlock(message.content, u.content, kind);
+        const content = appendAgentChunk(message.content, u, kind);
         return content ? { ...message, content } : message;
       });
     }
@@ -375,11 +375,7 @@ const reduceSessionUpdate = (
       const kind =
         update.sessionUpdate === "agent_message_chunk" ? "text" : "reasoning";
       return patchAssistant(state, runningId(state), (message) => {
-        const content = appendContentBlock(
-          message.content,
-          update.content,
-          kind,
-        );
+        const content = appendAgentChunk(message.content, update, kind);
         return content ? { ...message, content } : message;
       });
     }

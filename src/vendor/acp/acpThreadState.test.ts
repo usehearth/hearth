@@ -126,6 +126,31 @@ describe('thread-wide updates', () => {
     expect(s.plan).toHaveLength(1);
   });
 
+  // The server's own thread lines (provider fallback, machine offline): marked `_meta.hearth.notice`, padded as a paragraph.
+  const notice = (t: string, mark: 'hearth' | 'monolith' = 'hearth') =>
+    update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `\n\n${t}\n\n` }, _meta: { [mark]: { notice: true } } });
+  const line = (t: string) => ({ type: 'data', name: 'hearth-notice', data: { text: t } });
+
+  it('keeps a server notice apart from the agent text of a running turn, as its own line', () => {
+    const s = reduce([{ type: 'run-start', message: assistant('a1') }, text('Looking'), notice('primary is overloaded, so your message went to the next model provider.'), text('Found it.')]);
+    expect(msg(s, 'a1').content).toEqual([
+      { type: 'text', text: 'Looking' },
+      line('primary is overloaded, so your message went to the next model provider.'),
+      { type: 'text', text: 'Found it.' },
+    ]);
+  });
+
+  it('keeps notices apart in a replay too, and reads core’s own mark', () => {
+    const s = reduce([userText('Deploy'), notice('The machine for this project is offline.', 'monolith'), text('Done.')]);
+    const reply = s.messagesById[s.messageOrder[1]!] as AcpAssistantMessage;
+    expect(reply.content).toEqual([line('The machine for this project is offline.'), { type: 'text', text: 'Done.' }]);
+  });
+
+  it('drops an empty notice, and treats unmarked text as the agent’s', () => {
+    const s = reduce([{ type: 'run-start', message: assistant('a1') }, notice('  '), text('[not a notice]')]);
+    expect(msg(s, 'a1').content).toEqual([{ type: 'text', text: '[not a notice]' }]);
+  });
+
   it('ignores cards (Hearth draws them itself)', () => {
     const s = reduce([update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Approve?' }, _meta: { hearth: { card: { id: 'c1' } } } })]);
     expect(s).toBe(EMPTY_ACP_THREAD_STATE);

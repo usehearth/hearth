@@ -67,6 +67,15 @@ export function long(prompt: string, n = 60, every = 250, dropAfter?: number): S
   return { name: dropAfter ? 'drop' : 'long', prompt, steps, realtime: true };
 }
 
+/** The real server's fallback line, as /acp sends it: a paragraph marked `_meta.monolith.notice` and `_meta.hearth.notice`. */
+export const FALLBACK_LINE = 'primary is overloaded, so your message went to the next model provider, with a short summary of this thread.';
+const notice = (t: number, s: string): Step => ({ t, kind: 'update', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `\n\n${s}\n\n` },
+  _meta: { monolith: { notice: true }, hearth: { notice: true } } } });
+
+/** The usual provider is overloaded: the server's notice, then the next provider's answer. */
+export const fallback = (prompt: string): Script => ({ name: 'fallback', prompt, realtime: true,
+  steps: [notice(50, FALLBACK_LINE), text(150, 'Done: the tests pass.'), { t: 200, kind: 'end', stopReason: 'end_turn' }] });
+
 /** Never answers and sends nothing. */
 export const never = (prompt: string): Script => ({ name: 'never', prompt, steps: [{ t: 0, kind: 'hang' }], realtime: true });
 
@@ -98,6 +107,7 @@ export function scriptFor(prompt: string): Script {
     case 'drop': return long(prompt, 40, 200, 5);
     case 'never': return never(prompt);
     case 'error': return failing(prompt);
+    case 'fallback': return fallback(prompt);
     case 'elsewhere': return elsewhere(prompt);
     default: return hello(prompt);
   }
