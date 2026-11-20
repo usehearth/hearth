@@ -220,7 +220,8 @@ export default function App() {
             </button>
           )}
           {threadsExt && <SidebarSearch query={query} history={dir.state === 'ready' && dir.extensions.includes('history')} onQuery={(q) => { setQuery(q); if (q) setShowArchived(false); }} />}
-          {dir.state === 'ready' && dir.extensions.includes('history') && (
+          {/* The search box covers imported history too; this row is only for a server without thread search. */}
+          {dir.state === 'ready' && !threadsExt && dir.extensions.includes('history') && (
             <button onClick={() => openHistory({})} aria-current={view === 'history' && !histKey ? 'page' : undefined}
               className={cn('mx-3 mb-1 flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] hover:bg-sidebar-accent', view === 'history' && !histKey && 'bg-sidebar-accent font-medium')}>
               <HistoryIcon className="size-4 text-muted-foreground" /><span>Search history</span>

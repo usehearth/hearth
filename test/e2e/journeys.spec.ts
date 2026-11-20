@@ -184,6 +184,8 @@ test('delete: an open thread is deleted, closed and gone from the list', async (
 test('search: one box finds threads and imported history, with project, date and the words that matched', async ({ page, fake }) => {
   await connect(page, fake);
   const side = sidebar(page);
+  // One box: no separate "Search history" row beside it.
+  await expect(side.getByRole('button', { name: 'Search history' })).toHaveCount(0);
   await side.getByRole('textbox', { name: 'Search threads and history' }).fill('deploy');
   const threads = side.getByRole('region', { name: 'Threads' });
   const past = side.getByRole('region', { name: 'Imported history' });
