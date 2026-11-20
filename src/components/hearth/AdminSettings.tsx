@@ -68,7 +68,7 @@ export function ProviderForm({ initial, request, onSaved, onCancel }: {
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
         <label className="flex items-center gap-2">Order <input type="number" min={0} max={1000} value={f.priority} onChange={(e) => set('priority', Number(e.target.value))} className={cn(field, 'w-20')} /></label>
         <label className="flex items-center gap-2"><input type="checkbox" checked={f.enabled} onChange={(e) => set('enabled', e.target.checked)} className="size-4 accent-primary" />On</label>
-        <label className="flex items-center gap-2"><input type="checkbox" checked={f.sensitive_ok} onChange={(e) => set('sensitive_ok', e.target.checked)} className="size-4 accent-primary" />Allowed for client work</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={f.sensitive_ok} onChange={(e) => set('sensitive_ok', e.target.checked)} className="size-4 accent-primary" />OK for client work</label>
       </div>
       {err && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{err}</p>}
       <div className="flex justify-end gap-2">

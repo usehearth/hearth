@@ -4,6 +4,7 @@ import path from 'node:path';
 import { strToU8, zipSync } from 'fflate';
 import { assistantMessages, composer, connect, expect, header, newThread, openThread, rememberServer, send, sendButton, sidebar, stopButton, test, threadRow, userMessages } from './support';
 import { FALLBACK_LINE } from '../fake-server/fixtures.ts';
+import { defaultWorld } from '../fake-server/server.ts';
 
 test('connect: add a server with its address and device key', async ({ page, fake }) => {
   await page.goto('/');
@@ -412,3 +413,27 @@ test.describe('import against an older server', () => {
     expect(fake.unknown).toEqual([]);
   });
 });
+
+test.describe('client projects', () => {
+  const world = defaultWorld();
+  world.projects.push({ slug: 'acme-site', name: 'Acme site', cwd: '/workspace/acme-site', client: 'Acme' });
+  world.threads.push({ id: 'main-acme', title: 'Main thread', project: 'acme-site', kind: 'main', updatedAt: new Date(Date.now() - 30 * 60_000).toISOString(), history: [] });
+  test.use({ fakeOptions: { world } });
+
+  test('model picker: a client thread only offers providers OK for client work; other threads offer them all', async ({ page, fake }, info) => {
+    await connect(page, fake);
+    await newThread(page, 'Acme site');
+    await page.getByRole('button', { name: /^Model:/ }).click();
+    await expect(page.getByRole('menuitem', { name: /^claude/ })).toBeVisible();
+    await page.screenshot({ path: info.outputPath('client-thread-picker.png') });
+    await expect(page.getByRole('menuitem', { name: /gemini/ })).toHaveCount(0);
+    expect(fake.callsOf('_hearth/providers').at(-1)?.params).toEqual({ project: 'acme-site' });
+    await page.keyboard.press('Escape');
+    await newThread(page, 'Todo API');
+    await page.getByRole('button', { name: /^Model:/ }).click();
+    await expect(page.getByRole('menuitem', { name: 'gemini Any model (OpenCode)' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: /^claude/ })).toBeVisible();
+    await page.screenshot({ path: info.outputPath('personal-thread-picker.png') });
+  });
+});
+
