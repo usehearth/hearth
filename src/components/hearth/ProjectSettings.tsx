@@ -247,7 +247,7 @@ export function ProjectSettings({ project, request, extensions = [], clients = [
                     </button>
                   ))}
                 </div>
-                {!view.client && (
+                {(!view.client || view.clientMode === 'simple') && (
                   <label className="mt-3 flex items-start gap-2 text-sm">
                     <input type="checkbox" checked={d.allowAuto} onChange={(e) => set('allowAuto', e.target.checked)} className="mt-0.5 size-4 accent-primary" />
                     <span>Allow auto mode<span className="block text-xs text-muted-foreground">Threads may then go ahead without asking, except for risky things: the network, deleting, secrets and git history. Every call is still checked on the machine.</span></span>
