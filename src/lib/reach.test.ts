@@ -7,7 +7,7 @@ beforeEach(() => resetReach());
 describe('refusalOf', () => {
   it('reads a refused key and a lockout from the close code', () => {
     expect(refusalOf(URL, { opened: true, code: 4401, reason: 'key refused' })).toEqual({ kind: 'refused' });
-    expect(refusalOf(URL, { opened: true, code: 4429, reason: 'retry in 600 s' }, 1000)).toEqual({ kind: 'locked', until: 601_500 });
+    expect(refusalOf(URL, { opened: true, code: 4429, reason: 'retry in 600' }, 1000)).toEqual({ kind: 'locked', until: 601_500 });
   });
 
   it('a lockout with no time given lasts the default 15 minutes', () => {
@@ -35,7 +35,7 @@ describe('waitAllowed', () => {
 
   it('waits out a lockout, even on a server that says why', () => {
     noteServer(URL, { hearth: { refusals: 'close' } });
-    refusalOf(URL, { opened: true, code: 4429, reason: 'retry in 60 s' }, 0);
+    refusalOf(URL, { opened: true, code: 4429, reason: 'retry in 60' }, 0);
     expect(waitAllowed(URL, 10_000)).toBe(50_500);
     expect(waitAllowed(URL, 61_000)).toBe(0);
   });

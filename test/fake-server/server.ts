@@ -51,7 +51,7 @@ export interface FakeServerOptions {
   title?: string;
   /**
    * How a socket is refused. 'http' (default): at the upgrade with 401 or 429, as core does today (a browser sees only
-   * a failed connection). 'close': the socket opens and closes with 4401 (key refused) or 4429 ("retry in N s"), and
+   * a failed connection). 'close': the socket opens and closes with 4401 (key refused) or 4429 ("retry in <seconds>"), and
    * initialize says so (`_meta.hearth.refusals: "close"`), as proposed for core.
    */
   refusals?: 'http' | 'close';
@@ -474,7 +474,7 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
    * a code a browser can read (refusals: 'close'). */
   const refuse = (req: http.IncomingMessage, socket: Socket, head: Buffer, status: 401 | 429, retrySeconds?: number) => {
     if (refusals === 'close') {
-      wss.handleUpgrade(req, socket, head, (ws) => ws.close(status === 401 ? 4401 : 4429, status === 401 ? 'key refused' : `retry in ${retrySeconds} s`));
+      wss.handleUpgrade(req, socket, head, (ws) => ws.close(status === 401 ? 4401 : 4429, status === 401 ? 'key refused' : `retry in ${retrySeconds}`));
       return;
     }
     socket.write(`HTTP/1.1 ${status === 401 ? '401 Unauthorized' : '429 Too Many Requests'}\r\nConnection: close\r\n\r\n`);

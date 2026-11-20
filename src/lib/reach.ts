@@ -43,7 +43,7 @@ export const tellsRefusals = (url: string) => telling.has(url);
 export function refusalOf(url: string, close: CloseInfo | undefined, now = Date.now()): Refusal {
   if (close?.code === 4401) return { kind: 'refused' };
   if (close?.code === 4429) {
-    const seconds = /(\d+)\s*s/.exec(close.reason ?? '')?.[1];
+    const seconds = /retry in (\d+)/.exec(close.reason ?? '')?.[1]; // core says "retry in 540" (seconds)
     const until = now + (seconds ? Number(seconds) * 1000 : LOCK_DEFAULT_MS) + 500; // a little after it lifts
     locks.set(url, Math.max(locks.get(url) ?? 0, until));
     return { kind: 'locked', until };
