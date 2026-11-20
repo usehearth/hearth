@@ -207,8 +207,12 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
       if (turn.cancelled) { stopReason = 'cancelled'; break; }
       if (s.kind === 'update') {
         const text = (s.update as any).content?.text;
-        // "[From now on: …]" is the server's own line after an "always" answer: only when one was given.
-        if (typeof text === 'string' && text.includes('[From now on:')) { if (always) update(t, { ...s.update, content: { type: 'text', text: `\n[From now on: ${always}]\n` } }); continue; }
+        // "From now on: …" is the server's own line after an "always" answer, only when one was given: a notice, as
+        // hearth-server sends its status lines (its own paragraph, `_meta.hearth.notice`).
+        if (typeof text === 'string' && text.includes('[From now on:')) {
+          if (always) update(t, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `\n\nFrom now on: ${always}\n\n` }, _meta: { hearth: { notice: true } } });
+          continue;
+        }
         update(t, s.update);
       } else if (s.kind === 'ext') {
         notifyAll(s.method, { sessionId: t.id });

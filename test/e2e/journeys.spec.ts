@@ -111,6 +111,8 @@ for (const [choice, outcome, after] of [
     await send(page, 'Run the tests #permission');
     await page.getByRole('button', { name: choice, exact: true }).click();
     await expect(assistantMessages(page).last()).toContainText(after, { timeout: 15_000 });
+    // The server's "From now on" line is a notice, drawn as a quiet line.
+    if (choice.startsWith('Always')) await expect(assistantMessages(page).last().getByRole('note')).toContainText('From now on:');
     const thread = fake.threads.get(fake.callsOf('session/prompt')[0].params.sessionId)!;
     expect(thread.cards.at(-1)).toMatchObject({ status: outcome, decidedBy: 'this window' });
   });
