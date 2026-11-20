@@ -134,6 +134,8 @@ const createRegistry = (
   };
 };
 
+const NO_QUEUED: readonly { readonly id: string; readonly text: string }[] = [];
+
 const toError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
@@ -256,8 +258,11 @@ export function useAcpRuntime(options: UseAcpRuntimeOptions): AssistantRuntime {
         availableCommands: state.availableCommands,
         configOptions: state.configOptions,
         usage: state.usage,
+        queued: state.queued ?? NO_QUEUED,
+        queueMessage: (text: string) => controller.queue(text),
+        withdrawQueued: (id: string) => controller.withdraw(id),
       }),
-    [state],
+    [state, controller],
   );
 
   const shared = useExternalStoreSharedOptions(options);

@@ -8,7 +8,7 @@ import { AssistantRuntimeProvider, useAuiState, WebSpeechDictationAdapter, WebSp
 import { Bot, ChevronDown, Circle, FolderOpen, CircleCheck, CircleDot, ListChecks, Loader2, NotebookPen, PanelRightClose, PanelRightOpen, RefreshCw, ShieldAlert } from 'lucide-react';
 import { AdminAudit, AdminStrip, FinishAdmin, useAdminTimeline } from '@/components/hearth/Admin';
 import { adminAnswerSig, adminPromptMeta } from '@/lib/admin';
-import { AcpClient, useAcpPlan, useAcpRuntime, useAcpSessionTitle, type AcpPlanEntry } from '@/vendor/acp';
+import { AcpClient, useAcpPlan, useAcpQueue, useAcpRuntime, useAcpSessionTitle, type AcpPlanEntry } from '@/vendor/acp';
 import type { AcpWebSocketLike } from '@/vendor/acp/AcpClient';
 import { Thread, type ThreadComponents } from '@/components/assistant-ui/elements/thread.aui';
 import { CardView } from '@/components/hearth/CardView';
@@ -91,8 +91,6 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
   // server gives it one.
   const newDraft = useRef(`new:${Math.random().toString(36).slice(2)}`);
   const draftKey = useCallback(() => known.current ?? newDraft.current, []);
-  // Messages typed while the agent works (see Runtime): kept here, so a reconnect does not lose them.
-  const [queue, setQueue] = useState<string[]>([]);
   // Read live by the signing hook: the admin key's state arrives after the thread opens.
   const adminRef = useRef(admin);
   adminRef.current = admin;
@@ -168,7 +166,7 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
             : <><Loader2 className="size-3 animate-spin" />Reconnecting…</>}
         </div>
       )}
-      <Runtime newProject={target.kind === 'new' ? (target.meta as { hearth?: { project?: string } } | undefined)?.hearth?.project : undefined} key={gen} client={client} draftKey={draftKey} queue={queue} setQueue={setQueue} events={events} actionsEl={actionsEl} first={gen === 0 ? first : undefined} insert={insert} admin={admin} onOpenAdmin={onOpenAdmin} />
+      <Runtime newProject={target.kind === 'new' ? (target.meta as { hearth?: { project?: string } } | undefined)?.hearth?.project : undefined} key={gen} client={client} draftKey={draftKey} events={events} actionsEl={actionsEl} first={gen === 0 ? first : undefined} insert={insert} admin={admin} onOpenAdmin={onOpenAdmin} />
     </div>
   );
 }
@@ -282,7 +280,7 @@ function ComposerExtra() {
   return <ComposerBar client={x.client} onError={x.onError} />;
 }
 
-function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin, newProject, draftKey, queue, setQueue }: { client: AcpClient; newProject?: string; draftKey: () => string; queue: string[]; setQueue: React.Dispatch<React.SetStateAction<string[]>>; events: ThreadEvents; actionsEl?: HTMLElement | null; first?: FirstMessage; insert?: { text: string; n: number } | null; admin?: AdminThread; onOpenAdmin?: (blocked?: Blocked) => void }) {
+function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin, newProject, draftKey }: { client: AcpClient; newProject?: string; draftKey: () => string; events: ThreadEvents; actionsEl?: HTMLElement | null; first?: FirstMessage; insert?: { text: string; n: number } | null; admin?: AdminThread; onOpenAdmin?: (blocked?: Blocked) => void }) {
   const ev = useRef(events);
   ev.current = events;
   // Images and text files, as this server takes them (its promptCapabilities); a refused file says why.
@@ -358,35 +356,8 @@ function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin,
     if (!Array.isArray(ext) || !ext.includes('mentions')) return null;
     return async (query: string) => (client.sessionId ? (await client.extRequest<{ files: string[] }>('_hearth/files/find', { sessionId: client.sessionId, query })).files : []);
   }, [client, client.initializeMeta]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Messages typed while the agent works, sent in order when it finishes. The list belongs to the pane, not to this
-  // runtime, so a reconnect (which makes a new runtime) keeps it.
-  const queueApi = useMemo(() => ({ items: queue, add: (t: string) => setQueue((q) => [...q, t]), remove: (i: number) => setQueue((q) => q.filter((_, j) => j !== i)) }), [queue, setQueue]);
   const runtime = useAcpRuntime({ client, permissions: 'ask', onError: (e) => ev.current.onError(e.message), adapters: { attachments, ...speech }, onEdit, onReload });
   runtimeRef.current = runtime;
-  // When the agent finishes, the next queued message goes (once: a send in flight waits until the run has started).
-  // Never into a running turn: not while the connection is down (a drop ends this window's run, but not the server's
-  // turn), and not while the thread is still opening; after a reconnect the thread shows the server's turn as running.
-  const queueRef = useRef(queue);
-  queueRef.current = queue;
-  const sending = useRef(false);
-  useEffect(() => {
-    const tick = () => {
-      const st = runtime.thread.getState();
-      if (st.isRunning) { sending.current = false; return; }
-      if (client.connectionState !== 'connected' || !client.sessionId) return;
-      if (st.isLoading || sending.current || !queueRef.current.length) return;
-      const [next, ...rest] = queueRef.current;
-      queueRef.current = rest;
-      setQueue(rest);
-      sending.current = true;
-      void runtime.thread.append({ role: 'user', content: [{ type: 'text', text: next }] });
-      setTimeout(() => { sending.current = false; }, 3000); // a send that never started a run does not block the queue
-    };
-    tick();
-    const offConn = client.subscribeConnectionChange(tick);
-    const offRun = runtime.thread.subscribe(tick);
-    return () => { offConn(); offRun(); };
-  }, [runtime, client, queue.length]); // eslint-disable-line react-hooks/exhaustive-deps
   // A reply that never comes: while a turn runs, nothing at all about this thread for STALL_MS. Say so plainly and
   // offer Stop. (Not stopped by itself: a long command can be silent that long and still be fine.)
   const [stalled, setStalled] = useState(false);
@@ -455,7 +426,7 @@ function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin,
         <ShellContext.Provider value={shell}>
         <MentionContext.Provider value={findFiles}>
         <CommandsContext.Provider value={startCommands}>
-        <QueueContext.Provider value={queueApi}>
+        <ServerQueue>
         <div className="flex h-full">
           <div className="relative flex min-w-0 flex-1 flex-col">
             {stalled && (
@@ -474,7 +445,7 @@ function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin,
           {planOpen && <SidePanel extras={extras} tab={!extras.filesSupported && tab === 'files' ? 'plan' : tab} onTab={setTab} onClose={() => setOpen('closed')}
             audit={admin ? <AdminAudit timeline={audit.timeline} loading={audit.loading} /> : undefined} onRefreshAudit={admin ? audit.reload : undefined} />}
         </div>
-        </QueueContext.Provider>
+        </ServerQueue>
         </CommandsContext.Provider>
         </MentionContext.Provider>
         </ShellContext.Provider>
@@ -576,6 +547,16 @@ function TabBtn({ on, onClick, children }: { on: boolean; onClick: () => void; c
       {children}
     </button>
   );
+}
+
+/**
+ * Messages typed while the agent works go to the server at once and wait in its queue (they survive a reconnect and a
+ * server restart), shown above the composer until their turn, each with a way to take it back.
+ */
+function ServerQueue({ children }: { children: React.ReactNode }) {
+  const { queued, queueMessage, withdrawQueued } = useAcpQueue();
+  const value = useMemo(() => ({ items: queued.map((m) => m.text), add: queueMessage, remove: (i: number) => { const m = queued[i]; if (m) withdrawQueued(m.id); } }), [queued, queueMessage, withdrawQueued]);
+  return <QueueContext.Provider value={value}>{children}</QueueContext.Provider>;
 }
 
 /** Above the composer: the thread's open cards, then this turn's checklist. */

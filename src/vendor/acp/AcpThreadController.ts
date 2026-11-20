@@ -61,6 +61,8 @@ type InflightPrompt = {
 
 type ClaimedRun = InflightPrompt & { readonly token: number };
 
+type QueuedSend = { readonly id: string; readonly user: AcpUserMessage; readonly result: Promise<AcpStopReason>; readonly withdraw: () => void };
+
 /**
  * What a start belongs to. Stop, detach and a new thread end the current
  * generation, which withholds every start that has not sent its prompt yet.
@@ -98,12 +100,17 @@ export class AcpThreadController {
   private startLock: Promise<void> = Promise.resolve();
   private generation = createGeneration();
   private detachFromClient: (() => void) | undefined;
+  /** Hearth: messages waiting in the server's queue, oldest first, and the running turn that was one (its result). */
+  private readonly queuedSends: QueuedSend[] = [];
+  private adopted: Promise<AcpStopReason> | undefined;
 
   private readonly boundOnSessionUpdate = (
     _sessionId: string,
     update: AcpSessionUpdate,
   ) => {
+    const wasRemote = !!this.state.remoteRunning;
     this.dispatch({ type: "session-update", update });
+    if (wasRemote && !this.state.remoteRunning) this.promote();
   };
 
   private readonly boundOnConnectionChange = (
@@ -200,6 +207,75 @@ export class AcpThreadController {
         // an unsendable cancel must not reject the stop
       }
     }
+  }
+
+  /**
+   * Hearth: a message sent while a turn runs waits in the server's queue (AcpClient.promptQueued; it survives a
+   * restart there). It shows as queued, and when the turn before it ends it becomes this window's running turn: the
+   * server sends it then, and does not echo it back to the window that sent it, so the thread adds it here.
+   */
+  queue(text: string): void {
+    if (!text.trim()) return;
+    const user = this.toUserMessage({ role: "user", content: [{ type: "text", text }], parentId: this.state.headId, sourceId: null, runConfig: undefined, attachments: [], metadata: { custom: {} }, createdAt: new Date() } as unknown as AppendMessage);
+    const { result, withdraw } = this.client.promptQueued(threadContentToAcpBlocks(user.content));
+    const item: QueuedSend = { id: user.id, user, result, withdraw };
+    this.queuedSends.push(item);
+    this.dispatch({ type: "queue-add", message: { id: user.id, text } });
+    result.then(
+      () => this.settledWhileWaiting(item),
+      (error: unknown) => this.settledWhileWaiting(item, error),
+    );
+  }
+
+  /** Hearth: take a queued message back while it still waits (once it runs, this stops its turn). */
+  withdraw(id: string): void {
+    this.queuedSends.find((q) => q.id === id)?.withdraw();
+  }
+
+  /** Taken back, refused, or the connection went while it waited (the server still has it then, and sends it). */
+  private settledWhileWaiting(item: QueuedSend, error?: unknown): void {
+    const i = this.queuedSends.indexOf(item);
+    if (i === -1) return; // it became the running turn: that run handles its result
+    this.queuedSends.splice(i, 1);
+    this.dispatch({ type: "queue-remove", id: item.id });
+    if (error !== undefined && !/connection closed|disposed/i.test(toError(error).message)) this.reportError(error);
+  }
+
+  /** The turn before ended: the oldest queued message is the running turn now (the server sends it in that order). */
+  private promote(): void {
+    if (this.state.run.type === "running" || this.state.remoteRunning || this.state.settlingAssistantId !== undefined) return;
+    const item = this.queuedSends.shift();
+    if (!item) return;
+    this.dispatch({ type: "queue-remove", id: item.id });
+    void this.adopt(item);
+  }
+
+  private async adopt(item: QueuedSend): Promise<void> {
+    this.dispatch({ type: "append-message", message: { ...item.user, parentId: this.state.headId } });
+    const assistant: AcpAssistantMessage = { role: "assistant", id: generateId(), parentId: item.user.id, createdAt: Date.now(), status: { type: "running" }, content: [] };
+    this.runToken += 1;
+    const token = this.runToken;
+    this.adopted = item.result;
+    this.runAbort = undefined;
+    this.dispatch({ type: "run-start", message: assistant });
+    this.inflight = { assistantId: assistant.id, prompt: item.result };
+    let status: MessageStatus;
+    try {
+      status = stopReasonToMessageStatus(await item.result);
+    } catch (error) {
+      const err = toError(error);
+      status = { type: "incomplete", reason: "error", error: err.message };
+      if (token === this.runToken) this.reportError(err);
+    } finally {
+      if (this.inflight?.prompt === item.result) this.inflight = undefined;
+      if (this.adopted === item.result) this.adopted = undefined;
+      this.dispatch({ type: "run-settled", assistantId: assistant.id });
+    }
+    if (token === this.runToken) {
+      this.settlePermissions();
+      this.dispatch({ type: "run-end", assistantId: assistant.id, status });
+    }
+    this.promote();
   }
 
   async respondToApproval(
@@ -330,7 +406,8 @@ export class AcpThreadController {
       settling: this.inflight?.assistantId === assistantId,
     });
     try {
-      await this.client.cancel();
+      if (this.adopted) this.client.cancelRemote();
+      else await this.client.cancel();
     } catch {
       // an unsendable cancel must not reject the stop
     }
@@ -394,10 +471,12 @@ export class AcpThreadController {
       if (this.inflight?.prompt === prompt) this.inflight = undefined;
       this.dispatch({ type: "run-settled", assistantId });
     }
-    if (token !== this.runToken) return;
-
-    this.settlePermissions();
-    this.dispatch({ type: "run-end", assistantId, status });
+    if (token === this.runToken) {
+      this.settlePermissions();
+      this.dispatch({ type: "run-end", assistantId, status });
+    }
+    // Hearth: stopped or ended, the server now sends the oldest queued message: it is the running turn here too.
+    this.promote();
   }
 
   /**

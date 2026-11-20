@@ -69,4 +69,10 @@ export type AcpExtras = {
   readonly availableCommands: readonly AcpAvailableCommand[] | undefined;
   readonly configOptions: readonly AcpSessionConfigOption[] | undefined;
   readonly usage: AcpUsage | undefined;
+  /** Hearth: messages sent during a turn, waiting in the server's queue (oldest first). */
+  readonly queued: readonly { readonly id: string; readonly text: string }[];
+  /** Hearth: send a message during a turn (it waits in the server's queue). */
+  readonly queueMessage: (text: string) => void;
+  /** Hearth: take a queued message back before it is sent. */
+  readonly withdrawQueued: (id: string) => void;
 };

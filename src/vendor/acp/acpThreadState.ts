@@ -98,7 +98,11 @@ export type AcpThreadState = {
    * `session_info_update`. The thread shows it as running, with Stop, and nothing is sent over it.
    */
   readonly remoteRunning?: boolean | undefined;
+  /** Hearth: messages this window sent while a turn ran, waiting in the server's queue for their turn, oldest first. */
+  readonly queued?: readonly AcpQueuedMessage[] | undefined;
 };
+
+export type AcpQueuedMessage = { readonly id: string; readonly text: string };
 
 /** Hearth: the server statuses that mean a turn is under way. */
 const RUNNING_STATUSES = new Set(["starting", "running", "needs_permission"]);
@@ -144,6 +148,8 @@ export type AcpThreadEvent =
       readonly settling?: boolean | undefined;
     }
   | { readonly type: "run-settled"; readonly assistantId: string }
+  | { readonly type: "queue-add"; readonly message: AcpQueuedMessage }
+  | { readonly type: "queue-remove"; readonly id: string }
   | { readonly type: "reset"; readonly threadId: string };
 
 export const EMPTY_ACP_THREAD_STATE: AcpThreadState = {
@@ -579,6 +585,14 @@ export const reduceAcpThreadState = (
     case "run-settled":
       return state.settlingAssistantId === event.assistantId
         ? { ...state, settlingAssistantId: undefined }
+        : state;
+
+    case "queue-add":
+      return { ...state, queued: [...(state.queued ?? []), event.message] };
+
+    case "queue-remove":
+      return state.queued?.some((m) => m.id === event.id)
+        ? { ...state, queued: state.queued.filter((m) => m.id !== event.id) }
         : state;
 
     case "reset":

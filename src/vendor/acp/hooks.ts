@@ -39,3 +39,14 @@ export const useAcpConfigOptions = () =>
 
 /** Context-window and cost usage, when the agent reports it. */
 export const useAcpUsage = () => acpExtras.use((e) => e.usage, undefined);
+
+/** Hearth: the messages waiting in the server's queue, and how to add or take one back (one selector per field: a
+ *  selector that builds a new object on each read makes the store re-render for ever). */
+const NO_QUEUED: readonly { readonly id: string; readonly text: string }[] = [];
+const noop = () => {};
+export const useAcpQueue = () => {
+  const queued = acpExtras.use((e) => e.queued, NO_QUEUED);
+  const queueMessage = acpExtras.use((e) => e.queueMessage, noop);
+  const withdrawQueued = acpExtras.use((e) => e.withdrawQueued, noop);
+  return { queued, queueMessage, withdrawQueued };
+};

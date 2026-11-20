@@ -2,7 +2,7 @@
 // code (19 Nov). Those that fail today are marked `test.fail()` with the reason, so CI stays green while they are
 // tracked; when one is fixed its test passes, Playwright reports that as a failure, and the mark comes off.
 import type { Page } from '@playwright/test';
-import { assistantMessages, composer, connect, errorBanner, expect, knownFailure, newThread, openThread, reconnectPill, send, sendButton, sidebar, stopButton, test, threadRow, type FakeServer } from './support';
+import { assistantMessages, composer, connect, errorBanner, expect, knownFailure, newThread, openThread, reconnectPill, send, sendButton, sidebar, stopButton, test, threadRow, userMessages, type FakeServer } from './support';
 
 /** The session the first prompt went to. */
 const promptedSession = (fake: FakeServer) => String(fake.callsOf('session/prompt')[0]?.params.sessionId);
@@ -143,9 +143,39 @@ test.describe('socket drop in the middle of a turn', () => {
     await expect(page.getByText('Step 10 of 40')).toBeVisible();
     expect(fake.running(promptedSession(fake))).toBe(true);
     await send(page, 'And another thing');
-    await page.waitForTimeout(1000);
-    // Either queued until the turn ends, or refused in the app: never sent over the running turn.
-    expect(fake.callsOf('session/prompt').filter((c) => JSON.stringify(c.params.prompt).includes('And another thing')).length).toBe(0);
+    // Queued on the server (hearth-server #25), shown as queued, never run over the turn: it runs after it.
+    await expect(page.getByText('Queued').first()).toBeVisible();
+    expect(fake.errors.filter((e) => e.method === 'session/prompt')).toEqual([]);
+    await expect(page.getByText('You said: And another thing')).toBeVisible({ timeout: 20_000 });
+  });
+});
+
+test.describe('messages sent during a turn wait in the server queue', () => {
+  test("one sent during this window's turn becomes the next turn, in its place", async ({ page, fake }) => {
+    await connect(page, fake);
+    await newThread(page, 'Scratch');
+    await send(page, 'Count a little #slow'); // 16 chunks, 4 s
+    await expect(assistantMessages(page).last()).toContainText('Step 2 of 16');
+    await send(page, 'Then say goodbye');
+    await expect(page.getByText('Then say goodbye').first()).toBeVisible(); // the queued chip
+    await expect(userMessages(page).last()).toContainText('Then say goodbye', { timeout: 15_000 }); // its turn began
+    await expect(assistantMessages(page).last()).toContainText('You said: Then say goodbye');
+    await expect(sendButton(page)).toBeVisible();
+    await expect(userMessages(page)).toHaveCount(2);
+  });
+
+  test('one can be taken back before it is sent', async ({ page, fake }) => {
+    await connect(page, fake);
+    await newThread(page, 'Scratch');
+    await send(page, 'Count a little #slow');
+    await expect(assistantMessages(page).last()).toContainText('Step 2 of 16');
+    await send(page, 'Never mind this');
+    await page.getByRole('button', { name: 'Remove from the queue' }).click();
+    await expect(page.getByRole('button', { name: 'Remove from the queue' })).toBeHidden();
+    await expect(sendButton(page)).toBeVisible({ timeout: 15_000 }); // the turn ended
+    await page.waitForTimeout(1500);
+    await expect(page.getByText('You said: Never mind this')).toBeHidden();
+    expect(fake.callsOf('$/cancel_request')).toHaveLength(1);
   });
 });
 
@@ -166,7 +196,7 @@ test.describe('what is typed survives', () => {
     await send(page, 'Count a little #slow'); // 16 chunks, 4 s
     await expect(assistantMessages(page).last()).toContainText('Step 2 of 16');
     await send(page, 'Then say goodbye');
-    await expect(page.getByText('Queued')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Remove from the queue' })).toBeVisible();
     const loads = fake.callsOf('session/load').length;
     fake.dropAll();
     await reloaded(fake, loads);

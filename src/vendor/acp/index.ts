@@ -10,6 +10,7 @@ export {
   useAcpConnectionState,
   useAcpCurrentModeId,
   useAcpPlan,
+  useAcpQueue,
   useAcpSessionId,
   useAcpSessionTitle,
   useAcpUsage,

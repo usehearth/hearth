@@ -311,6 +311,72 @@ describe('permissions', () => {
   });
 });
 
+describe('messages sent during a turn (the server queue)', () => {
+  /** A controller running its own turn on session s1. */
+  async function running() {
+    const t = setup();
+    const errors: string[] = [];
+    const controller = new AcpThreadController({ client: t.client, onError: (e) => errors.push(e.message) });
+    controller.attach();
+    const loading = controller.load();
+    t.ws.onopen!();
+    await flush();
+    t.ws.reply('initialize', INIT);
+    await loading;
+    void controller.append({ role: 'user', content: [{ type: 'text', text: 'Count' }], parentId: null, sourceId: null, runConfig: undefined, attachments: [], metadata: { custom: {} }, createdAt: new Date() } as never);
+    await flush();
+    t.ws.reply('session/new', { sessionId: 's1', modes: MODES });
+    await flush();
+    return { t, controller, errors };
+  }
+  const prompts = (t: Rig) => t.ws.sent.filter((f) => f.method === 'session/prompt');
+
+  it('goes to the server at once, shows as queued, and becomes the next turn in its place when this one ends', async () => {
+    const { t, controller } = await running();
+    controller.queue('Then say goodbye');
+    await flush();
+    const [first, second] = prompts(t);
+    expect(second!.params.prompt).toEqual([{ type: 'text', text: 'Then say goodbye' }]);
+    expect(controller.getState().queued).toEqual([{ id: expect.any(String), text: 'Then say goodbye' }]);
+    expect(t.ws.sent.some((f) => f.method === 'session/cancel')).toBe(false); // the running turn is not superseded
+    t.ws.receive({ id: first!.id, result: { stopReason: 'end_turn' } });
+    await flush();
+    await flush();
+    const s = controller.getState();
+    expect(s.queued).toEqual([]);
+    expect(s.run.type).toBe('running');
+    const users = s.messageOrder.map((id) => s.messagesById[id]!).filter((m) => m.role === 'user');
+    expect(users.map((m) => (m.content[0] as { text: string }).text)).toEqual(['Count', 'Then say goodbye']);
+    t.ws.update('s1', { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Goodbye' } });
+    t.ws.receive({ id: second!.id, result: { stopReason: 'end_turn', _meta: { hearth: { queued: true } } } });
+    await flush();
+    await flush();
+    expect(controller.getState().run.type).toBe('idle');
+  });
+
+  it('can be taken back while it waits ($/cancel_request), and leaves the queue', async () => {
+    const { t, controller } = await running();
+    controller.queue('Never mind');
+    await flush();
+    const queued = prompts(t)[1]!;
+    controller.withdraw(controller.getState().queued![0]!.id);
+    expect(t.ws.sent.at(-1)).toEqual({ jsonrpc: '2.0', method: '$/cancel_request', params: { requestId: queued.id } });
+    t.ws.receive({ id: queued.id, result: { stopReason: 'cancelled', _meta: { hearth: { queued: true } } } });
+    await flush();
+    expect(controller.getState().queued).toEqual([]);
+  });
+
+  it('a server that refuses it (from before the queue) says so, and it leaves the queue', async () => {
+    const { t, controller, errors } = await running();
+    controller.queue('Too early');
+    await flush();
+    t.ws.receive({ id: prompts(t)[1]!.id, error: { code: -32600, message: 'A turn is already running in this thread. Wait for it or cancel it.' } });
+    await flush();
+    expect(controller.getState().queued).toEqual([]);
+    expect(errors).toEqual(['A turn is already running in this thread. Wait for it or cancel it.']);
+  });
+});
+
 describe('a thread left while it opens (N2)', () => {
   it('reports nothing once the controller is detached, "AcpClient disposed" included', async () => {
     const t = setup({ sessionId: 'old' });
