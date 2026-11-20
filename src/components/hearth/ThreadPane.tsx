@@ -40,6 +40,7 @@ import { Markdown } from '@/components/hearth/Markdown';
 import { FilesList, FileView, type FileContent, type FileItem } from '@/components/hearth/FilesPanel';
 import { openSocket } from '@/lib/servers';
 import { HEARTBEAT_MS, HEARTBEAT_TIMEOUT_MS, noteServer, noteUp, onUp, reconnectDelay, refusalOf, refusalText, waitAllowed } from '@/lib/reach';
+import { draftOf, keepDraft, moveDraft } from '@/lib/drafts';
 import { HearthAttachments } from '@/lib/attachments';
 import { type Card, type CardAnswer, type CardEntry, type Plan, cardOf, mergeCard, planPref, setPlanPref } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
@@ -86,6 +87,10 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
   const [reconnecting, setReconnecting] = useState<false | { note?: string; stopped?: boolean }>(false);
   const known = useRef<string | undefined>(target.kind === 'open' ? target.sessionId : undefined);
   const fails = useRef(0);
+  // Where this thread's draft is kept (lib/drafts.ts): its session id, or, for a new thread, this pane until the
+  // server gives it one.
+  const newDraft = useRef(`new:${Math.random().toString(36).slice(2)}`);
+  const draftKey = useCallback(() => known.current ?? newDraft.current, []);
   // Read live by the signing hook: the admin key's state arrives after the thread opens.
   const adminRef = useRef(admin);
   adminRef.current = admin;
@@ -123,6 +128,7 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
     const retryIn = (wait: number) => { timer = setTimeout(() => { timer = null; if (live) setGen((g) => g + 1); }, wait); };
     const off = client.subscribeConnectionChange((s) => {
       if (!live) return;
+      if (client.sessionId && !known.current) moveDraft(newDraft.current, client.sessionId);
       if (client.sessionId) known.current = client.sessionId;
       if (s === 'connected' && client.sessionId) { wasUp = true; fails.current = 0; noteServer(url, client.initializeMeta); noteUp(url); setReconnecting(false); }
       if (s === 'disconnected' && known.current && !waiting && (wasUp || fails.current > 0)) {
@@ -160,7 +166,7 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
             : <><Loader2 className="size-3 animate-spin" />Reconnecting…</>}
         </div>
       )}
-      <Runtime newProject={target.kind === 'new' ? (target.meta as { hearth?: { project?: string } } | undefined)?.hearth?.project : undefined} key={gen} client={client} events={events} actionsEl={actionsEl} first={gen === 0 ? first : undefined} insert={insert} admin={admin} onOpenAdmin={onOpenAdmin} />
+      <Runtime newProject={target.kind === 'new' ? (target.meta as { hearth?: { project?: string } } | undefined)?.hearth?.project : undefined} key={gen} client={client} draftKey={draftKey} events={events} actionsEl={actionsEl} first={gen === 0 ? first : undefined} insert={insert} admin={admin} onOpenAdmin={onOpenAdmin} />
     </div>
   );
 }
@@ -271,7 +277,7 @@ function ComposerExtra() {
   return <ComposerBar client={x.client} onError={x.onError} />;
 }
 
-function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin, newProject }: { client: AcpClient; newProject?: string; events: ThreadEvents; actionsEl?: HTMLElement | null; first?: FirstMessage; insert?: { text: string; n: number } | null; admin?: AdminThread; onOpenAdmin?: (blocked?: Blocked) => void }) {
+function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin, newProject, draftKey }: { client: AcpClient; newProject?: string; draftKey: () => string; events: ThreadEvents; actionsEl?: HTMLElement | null; first?: FirstMessage; insert?: { text: string; n: number } | null; admin?: AdminThread; onOpenAdmin?: (blocked?: Blocked) => void }) {
   const ev = useRef(events);
   ev.current = events;
   // Images and text files, as this server takes them (its promptCapabilities); a refused file says why.
@@ -373,6 +379,12 @@ function Runtime({ client, events, actionsEl, first, insert, admin, onOpenAdmin,
   }, [runtime, queue.length]);
   // A fork opens with its first message: sent (Edit, Regenerate) or ready in the composer (Rewind).
   // Text from the editor goes at the end of whatever is being typed.
+  // What is being typed survives a reconnect (a new runtime) and a switch to another thread and back.
+  useEffect(() => {
+    const saved = draftOf(draftKey());
+    if (saved && !runtime.thread.composer.getState().text) runtime.thread.composer.setText(saved);
+    return runtime.thread.composer.subscribe(() => keepDraft(draftKey(), runtime.thread.composer.getState().text));
+  }, [runtime, draftKey]);
   useEffect(() => {
     if (!insert) return;
     const cur = runtime.thread.composer.getState().text;
