@@ -304,7 +304,7 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
               </div>
             )}
             {receipt ? <ImportReceipt receipt={receipt} serverName={serverName} /> : <p role="status" className="rounded-xl border bg-card px-4 py-3 text-sm">{plain}</p>}
-            <p className="text-sm text-muted-foreground">Each project's history is in the sidebar, under the project. Search history finds anything you said or were told. Run this again any time: only what is new or changed will move.</p>
+            <p className="text-sm text-muted-foreground">Each project's history is in the sidebar, under the project. The search box at the top of the sidebar finds anything you said or were told. Run this again any time: only what is new or changed will move.</p>
             {!setup && <Button onClick={() => { const slug = created[0]; const c = Object.values(choices).find((x) => x.action === 'new' && x.slug === slug) as { name?: string } | undefined; onDone(slug ? { slug, name: c?.name || slug } : undefined); }}>Open Hearth</Button>}
           </div>
         )}
