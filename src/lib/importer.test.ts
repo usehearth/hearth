@@ -154,6 +154,19 @@ describe('what was offered and not taken', () => {
   });
 });
 
+describe('copies in several homes', () => {
+  it('leaving out the home that owns a copy keeps the copy in a home that is kept: sent once, owned there', () => {
+    const H3 = 'C:/Users/sam/.claude-tests/projects';
+    const sources = [home(), home({ path: H2, account: 'work' }), home({ path: H3, account: 'tests' })];
+    const scan = { units: [unit('a', H3, { also: [H1, H2] }), unit('b', H3)] };
+    const g = gather({ sources, scan, config: [], exports: [], leftOut: { sources: new Set([H3]) } });
+    const a = g.inventory.items.filter((i) => i.id === 'a');
+    expect(a.map((i) => `${i.source === H1 ? 'H1' : i.source === H2 ? 'H2' : 'H3'}:${i.reason ?? (i.dupOf ? 'same as H1' : 'send')}`)).toEqual(['H1:send', 'H3:skipped', 'H2:same as H1']);
+    expect([...g.units.keys()]).toEqual(['a']);
+    expect(g.inventory.items.find((i) => i.id === 'b')?.reason).toBe('skipped');
+  });
+});
+
 describe('a run the server lost (it restarted mid-import)', () => {
   it('is recognised by the server\'s code, or its words from an older server', () => {
     expect(isRunGone({ data: { code: 'run_gone' }, message: 'x' })).toBe(true);

@@ -81,6 +81,8 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
   /** "Run it again": look again (a new plan), then bring everything across as soon as the plan is ready. */
   const [rerun, setRerun] = useState(0);
   const [againPending, setAgainPending] = useState(false);
+  /** Claude Code on this computer could not be read: why (the run is blocked until a look again succeeds). */
+  const [scanFailed, setScanFailed] = useState<string | null>(null);
   const [drag, setDrag] = useState(false);
   const stopped = useRef(false);
   const zipIn = useRef<HTMLInputElement>(null);
@@ -112,7 +114,10 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
         const cfg = await readConfig(src.filter((s) => s.kind === 'claude-code' && s.homePath).map((s) => s.homePath!), repos);
         if (!live) return;
         setScan(sc); setConfig(cfg);
-      } catch (e) { if (live) { setErr(errorText(e)); setScan({ home: '', units: [], odd: [] }); } } finally { if (live) setScanning(null); }
+      } catch (e) {
+        // Nothing from this computer could be read: the run stays blocked, or its receipt would say everything was kept.
+        if (live) { setScanFailed(errorText(e)); setScan({ home: '', units: [], odd: [] }); }
+      } finally { if (live) setScanning(null); }
     })();
     return () => { live = false; };
   }, [request, admin]);
@@ -251,7 +256,13 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
               <SkillsSummary gathered={gathered} config={config} scanning={!!scanning} />
             </section>
 
-            <Summary gathered={gathered} preview={preview} choices={choices} info={info} planning={planning} busy={!gathered || planning || !!scanning || reading}
+            {scanFailed && (
+              <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
+                <p className="font-medium">Claude Code on this computer could not be read, so nothing can be brought across yet.</p>
+                <p className="mt-1 text-muted-foreground">{scanFailed}. Nothing has been sent. Close this screen and open it again to look once more.</p>
+              </div>
+            )}
+            <Summary gathered={gathered} preview={preview} choices={choices} info={info} planning={planning} busy={!gathered || planning || !!scanning || reading || !!scanFailed}
               lastTime={Object.entries(info?.decisions ?? {}).filter(([, v]) => v.decision === 'leave-out').length}
               onGo={() => void go()} onReview={() => setPhase('review')} />
           </div>

@@ -185,13 +185,18 @@ export function gather(o: {
   }
   const leave = (src: string) => (skipped.has(src) ? { reason: 'skipped' as const, detail: `you left out ${labelOf.get(src) ?? 'this source'}${since(`import:source:${src}`)}` } : null);
   for (const u of o.scan?.units ?? []) {
-    const out = leave(u.from);
-    const reason = out ?? (u.unreadable ? { reason: 'unreadable' as const, detail: u.unreadable } : u.empty ? { reason: 'empty' as const, detail: 'the transcript file is empty' } : null);
-    items.push({ source: u.from, kind: 'conversation', id: u.id, title: u.title, profile: u.profile ?? 'terminal', ...(reason ?? {}) });
-    for (const a of u.also ?? []) {
-      // The same conversation in another home: counted there too, as the same as this copy.
+    // The same conversation can sit in several homes. It is sent once, owned by the first home that is not left out:
+    // leaving out one home must never drop a copy that lives in a home that was kept.
+    const homes = [u.from, ...(u.also ?? [])];
+    const owner = homes.find((h) => !skipped.has(h)) ?? null;
+    const own = owner ?? u.from;
+    const reason = (owner ? null : leave(u.from)) ?? (u.unreadable ? { reason: 'unreadable' as const, detail: u.unreadable } : u.empty ? { reason: 'empty' as const, detail: 'the transcript file is empty' } : null);
+    items.push({ source: own, kind: 'conversation', id: u.id, title: u.title, profile: u.profile ?? 'terminal', ...(reason ?? {}) });
+    for (const a of homes) {
+      if (a === own) continue;
+      // The same conversation in another home: counted there too, as the same as the copy that is sent.
       const r2 = leave(a) ?? (reason ? reason : null);
-      items.push({ source: a, kind: 'conversation', id: u.id, title: u.title, ...(r2 ? r2 : { dupOf: u.from }) });
+      items.push({ source: a, kind: 'conversation', id: u.id, title: u.title, ...(r2 ? r2 : { dupOf: own }) });
     }
     if (!reason) units.set(u.id, { unit: u, reader: o.reader ?? localReader });
   }
