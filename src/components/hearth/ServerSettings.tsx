@@ -9,6 +9,8 @@ import { field, fieldArea } from '@/components/ui/field';
 import { ConfirmLine } from '@/components/hearth/ConfirmLine';
 import { Switch } from '@/components/ui/switch';
 import { connectorState, type ConnectorTone, type TestResult } from '@/lib/connectors';
+import { auditDetail, auditLine, type AuditEntry } from '@/lib/audit';
+import { fullWhen, shortWhen } from '@/lib/dates';
 
 export type Request = <T = unknown>(method: string, params?: unknown) => Promise<T>;
 
@@ -529,12 +531,10 @@ function PluginImport({ request, onDone, onError }: { request: Request; onDone: 
   );
 }
 
-interface AuditEntry { id: string; at: string; actor: string; action: string; target: string | null; detail: Record<string, unknown> | null }
-
-const when = (s: string) => new Date(s).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
 /** The audit log: every change on the server and who made it, newest first. */
-export function AuditLog({ request }: { request: Request }) {
+export function AuditLog({ request, projects = [] }: { request: Request; /** To show project names instead of slugs. */ projects?: ProjectChoice[] }) {
+  const names = useMemo(() => Object.fromEntries(projects.map((p) => [p.slug, p.name])), [projects]);
   const [entries, setEntries] = useState<AuditEntry[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -555,7 +555,7 @@ export function AuditLog({ request }: { request: Request }) {
     <div>
       <SectionHead title="Audit log" sub="Every change on the server, with who made it. Newest first."
         action={<RefreshButton onClick={() => void load()} busy={busy} />} />
-      <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter: an action (chat.) or who (device:…)" aria-label="Filter the audit log"
+      <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter: who (zed-laptop) or a kind of change (chat., provider.)" aria-label="Filter the audit log"
         className={cn(field, 'mb-3')} />
       {error && <p role="alert" className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
       {!entries && !error && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Reading…</div>}
@@ -563,12 +563,16 @@ export function AuditLog({ request }: { request: Request }) {
       {entries && entries.length > 0 && (
         <ul className="divide-y rounded-xl border bg-card text-sm">
           {entries.map((e) => (
-            <li key={e.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 px-3 py-2">
-              <span className="truncate font-mono text-xs">{e.action}</span>
-              <time className="text-xs whitespace-nowrap text-muted-foreground" dateTime={e.at}>{when(e.at)}</time>
-              <span className="col-span-2 truncate text-xs text-muted-foreground">
-                {e.actor}{e.target ? ` · ${e.target}` : ''}{e.detail && Object.keys(e.detail).length ? ` · ${Object.entries(e.detail).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join(', ')}` : ''}
-              </span>
+            <li key={e.id}>
+              {/* The row opens to the raw entry (action code, target, details). */}
+              <details className="group px-3 py-2">
+                <summary className="flex cursor-pointer list-none items-baseline gap-2 [&::-webkit-details-marker]:hidden" title="Show the raw entry">
+                  <ChevronRight className="size-3 shrink-0 self-center text-muted-foreground transition-transform group-open:rotate-90" />
+                  <span className="min-w-0 flex-1">{auditLine(e, names)}</span>
+                  <time className="shrink-0 text-xs whitespace-nowrap text-muted-foreground tabular-nums" dateTime={e.at} title={fullWhen(e.at)}>{shortWhen(e.at)}</time>
+                </summary>
+                <p className="mt-1 pl-5 font-mono text-xs break-all text-muted-foreground">{auditDetail(e)}</p>
+              </details>
             </li>
           ))}
         </ul>

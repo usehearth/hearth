@@ -2,6 +2,7 @@
 // from the project folder through the server (`_hearth/files`, `_hearth/file`); Hearth keeps nothing on disk.
 // Pages run in a sandboxed frame with no access to Hearth (scripts allowed, so decks and small apps work).
 import { useEffect, useMemo, useState } from 'react';
+import { shortWhen } from '@/lib/dates';
 import { ArrowLeft, Check, Copy, Download, FileCode, FileImage, FileText, FileType, Globe, Loader2, Maximize2, RefreshCw } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Markdown } from '@/components/hearth/Markdown';
@@ -141,5 +142,5 @@ function size(n: number) { return n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n 
 function ago(iso: string) {
   const s = (Date.now() - Date.parse(iso)) / 1000;
   if (s < 60) return 'just now'; if (s < 3600) return `${Math.floor(s / 60)} min ago`; if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-  return new Date(iso).toLocaleDateString();
+  return shortWhen(iso) ?? '';
 }

@@ -12,7 +12,6 @@ export interface Trigger {
 export interface Run { schedule_id?: number; trigger_id?: number; title?: string; name?: string; started_at: string; ended_at?: string | null; status?: string | null; session_id?: string | null }
 
 const DAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const pad = (n: number) => String(n).padStart(2, '0');
 const hm = (h: number, m: number) => `${pad(h)}:${pad(m)}`;
@@ -115,21 +114,8 @@ export function statusOf(s: Pick<Schedule, 'cron' | 'enabled' | 'last_run_at'>, 
   return 'on';
 }
 
-const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-
-/** A short local time near now: "today 18:15", "tomorrow 07:30", "Mon 08:30", "31 Jan 2027". */
-export function shortWhen(iso: string | null | undefined, now: Date = new Date()): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  const days = Math.round((startOfDay(d) - startOfDay(now)) / 86_400_000);
-  const t = hm(d.getHours(), d.getMinutes());
-  if (days === 0) return `today ${t}`;
-  if (days === 1) return `tomorrow ${t}`;
-  if (days === -1) return `yesterday ${t}`;
-  if (Math.abs(days) < 7) return `${DAY_SHORT[d.getDay()]} ${t}`;
-  return `${d.getDate()} ${MONTH[d.getMonth()]}${d.getFullYear() !== now.getFullYear() ? ` ${d.getFullYear()}` : ''}`;
-}
+/** A short local time near now (lib/dates.ts, shared by every screen). */
+export { shortWhen } from './dates';
 
 /** What a trigger listens to, in words. */
 export function describeTrigger(t: Pick<Trigger, 'source' | 'every_sec' | 'config' | 'hookUrl'>): string {
