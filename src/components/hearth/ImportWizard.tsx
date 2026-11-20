@@ -12,7 +12,7 @@ import { ImportReceipt } from '@/components/hearth/ImportReceipt';
 import { errorText } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
 import { type ChatExport, type ExportFile } from '@/lib/claudeai';
-import { readExportsInBackground } from '@/lib/exportReader';
+import { readExportsInBackground, stopExportReader } from '@/lib/exportReader';
 import { filesFromDrop, filesFromInput } from '@/lib/dropfiles';
 import {
   applyPlaceDecisions, bringAcross, canScanThisMachine, configGroup, copyIn, dateRange, defaultChoices, gather, homeStats, homeWords, leftOutFrom, localSources, previewOf, readConfig, rememberOf, scanLocal,
@@ -192,6 +192,8 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
     setImportSnapshot(s);
   }, [phase, homes, exports, gathered, preview, choices, err, admin, info, leftOutSources]);
   useEffect(() => () => setImportSnapshot(null), []);
+  // The export reader keeps what it read for the next part added (a 287 MB export: about 2 GB); leaving the screen lets it go.
+  useEffect(() => () => stopExportReader(), []);
 
   const step = phase === 'done' ? 2 : phase === 'importing' ? 1 : 0;
   return (
@@ -254,7 +256,7 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
                   {exports.map((x) => <ExportRow key={x.account} x={x} />)}
                 </ul>
               )}
-              {files.length > 0 && <Button size="sm" variant="ghost" className="mt-1" onClick={() => { setFiles([]); setExports([]); }}>Clear the exports</Button>}
+              {files.length > 0 && <Button size="sm" variant="ghost" className="mt-1" onClick={() => { setFiles([]); setExports([]); stopExportReader(); }}>Clear the exports</Button>}
             </section>
 
             <section aria-labelledby="h-skills" ref={skillsRef} className={cn(part === 'skills' && 'rounded-xl ring-2 ring-primary/40 ring-offset-4 ring-offset-background')}>
@@ -366,7 +368,9 @@ function SkillsSummary({ gathered, config, scanning }: { gathered: Gathered | nu
   if (!canScanThisMachine) return <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-muted-foreground">These live with Claude Code on your computer: the Hearth desktop app brings them across.</p>;
   if (scanning || !gathered) return <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Looking…</p>;
   if (!config.length) return <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-muted-foreground">No skills, subagents, slash commands or plugins found in Claude Code on this computer.</p>;
-  const items = gathered.inventory.items.filter((i) => config.some((c) => c.key === i.id) || gathered.config.some((c) => c.key === i.id));
+  // A set, not a search per item: with a big claude.ai export there are tens of thousands of items (36,000 took 0.36 s a render).
+  const keys = new Set([...config.map((c) => c.key), ...gathered.config.map((c) => c.key)]);
+  const items = gathered.inventory.items.filter((i) => keys.has(i.id));
   const byKind = (k: string) => gathered.config.filter((c) => c.kind === k).length;
   const held = items.filter((i) => i.reason === 'secret' || i.reason === 'client');
   const odd = items.filter((i) => i.reason === 'unreadable');
