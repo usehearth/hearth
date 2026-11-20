@@ -258,6 +258,9 @@ export class AcpThreadController {
   }
 
   private reportError(error: unknown): void {
+    // Hearth: once detached (the thread was closed or switched away from), what its client still rejects, "AcpClient
+    // disposed" above all, is nobody's error: the window has moved on.
+    if (!this.attached) return;
     invokeUserCallback("acp", "onError", this.onError, toError(error));
   }
 

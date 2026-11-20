@@ -8,6 +8,7 @@ import { createWebSocketStream } from '@agentclientprotocol/sdk/experimental/ws-
 import { keyFor, type Server } from './servers';
 import type { CardAnswer, CardEntry } from './hearth';
 import { adminAnswerSig } from './admin';
+import { HEARTBEAT_MS, HEARTBEAT_TIMEOUT_MS, noteServer, noteUp, reconnectDelay, refusalOf, refusalText, waitAllowed, type CloseInfo } from './reach';
 
 export interface ThreadItem {
   sessionId: string;
@@ -56,6 +57,10 @@ export type DirectoryState =
   | { state: 'no-key' }
   | { state: 'connecting' }
   | { state: 'ready'; agent: string; groups: ProjectGroup[]; refresh: () => void; reconnecting?: boolean;
+      /** While reconnecting: what is happening, when it is more than "Reconnecting…" (a long wait, a lockout). */
+      note?: string;
+      /** While reconnecting: try now instead of waiting. */
+      tryNow?: () => void;
       /** Every open card this device may see (`_hearth/cards`); empty on servers without it. */
       cards: CardEntry[];
       answer: (e: CardEntry, a: CardAnswer) => Promise<unknown>;
@@ -70,7 +75,11 @@ export type DirectoryState =
       importedGroups: ImportedGroup[];
       /** A request on the list connection (settings use it). */
       request: <T = unknown>(method: string, params?: unknown) => Promise<T> }
-  | { state: 'error'; message: string; retry: () => void };
+  | { state: 'error'; message: string; retry: () => void;
+      /** The server refused this device's key: ask for a key (no more tries on our own, they count toward its lockout). */
+      refused: boolean;
+      /** Hearth keeps trying by itself (Retry tries now). */
+      retrying: boolean };
 
 const folderName = (cwd: string) => cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || cwd;
 
@@ -107,16 +116,14 @@ export function group(items: ThreadItem[]): ProjectGroup[] {
 
 const RELIST_MS = 200;
 const MAX_PAGES = 5;
-const RECONNECT_MS = [1000, 2000, 5000, 10000, 30000];
-/** Failed reconnects before the list gives way to the error (and the key prompt: the key may have been revoked). */
-const GIVE_UP_AFTER = 2; // each refused try counts toward the server's bad-key lockout (5 per 15 min), so stay well under
 
 /** Lists the server's threads and keeps the list live. Reconnects when the key changes or the socket drops. */
 export function useDirectory(server: Server | undefined, keyVersion: number): DirectoryState {
   const [st, setSt] = useState<DirectoryState>({ state: 'connecting' });
   const [nonce, setNonce] = useState(0);
   // Each bump reconnects. `fails` picks the backoff and resets after a good connect; `wasReady` says a drop
-  // should reconnect quietly (keep the list on screen) rather than show an error.
+  // should reconnect quietly (keep the list on screen) rather than show an error. When to try again, and when to stop
+  // and ask for the key, comes from how the socket was refused (reach.ts), so an outage never becomes a lockout.
   const [attempt, setAttempt] = useState(0);
   const fails = useRef(0);
   const wasReady = useRef(false);
@@ -131,10 +138,13 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
     let relist: ReturnType<typeof setTimeout> | null = null;
     let retry: ReturnType<typeof setTimeout> | null = null;
     let refresh = () => {};
+    let beat: ReturnType<typeof setInterval> | null = null;
+    const url = server.url;
+    /** Try again after the backoff, or later if a lockout or the shared budget says so; returns the wait. */
     const reconnectLater = () => {
-      if (!live || retry) return;
-      const wait = RECONNECT_MS[Math.min(fails.current++, RECONNECT_MS.length - 1)];
-      retry = setTimeout(() => setAttempt((n) => n + 1), wait);
+      const wait = Math.max(reconnectDelay(fails.current++), waitAllowed(url));
+      if (live && !retry) retry = setTimeout(() => setAttempt((n) => n + 1), wait);
+      return wait;
     };
     if (!wasReady.current) setSt({ state: 'connecting' });
     const app = new ClientApp({ name: 'hearth-directory' })
@@ -144,7 +154,16 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
       .onNotification('_hearth/cards_changed', (p: unknown) => p, () => {
         relist ??= setTimeout(() => { relist = null; refresh(); }, RELIST_MS);
       });
-    const conn = app.connect(createWebSocketStream(server.url, { protocols: ['acp', `bearer.${key}`] }));
+    // How this socket ended (opened? which close code?), to tell a refused key and a lockout from an outage.
+    const seen: CloseInfo = { opened: false };
+    class Watched extends WebSocket {
+      constructor(u: string | URL, protocols?: string | string[]) {
+        super(u, protocols);
+        this.addEventListener('open', () => { seen.opened = true; });
+        this.addEventListener('close', (e) => { seen.code = e.code; seen.reason = e.reason; });
+      }
+    }
+    const conn = app.connect(createWebSocketStream(url, { protocols: ['acp', `bearer.${key}`], WebSocket: Watched as never }));
     let hasCards = true;
     // Every page (servers that page send nextCursor), up to MAX_PAGES so a huge server can't stall the sidebar.
     const listAll = async () => {
@@ -182,11 +201,16 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
       refresh();
       return r;
     };
-    void conn.closed.finally(() => {
+    /** The connection is gone (closed, or silent past the heartbeat): keep the list on screen and reconnect. */
+    const lost = () => {
       if (!ready || !live) return;
-      setSt((prev) => (prev.state === 'ready' ? { ...prev, reconnecting: true } : prev));
+      ready = false;
+      setSt((prev) => (prev.state === 'ready' ? { ...prev, reconnecting: true, note: undefined, tryNow: undefined } : prev));
+      try { conn.close(); } catch { /* */ }
       reconnectLater();
-    }).catch(() => {});
+    };
+    void conn.closed.finally(lost).catch(() => {});
+    const tryNow = () => { if (retry) { clearTimeout(retry); retry = null; } setAttempt((n) => n + 1); };
     (async () => {
       try {
         const init: any = await conn.agent.request('initialize', {
@@ -194,7 +218,7 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
           clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
           clientInfo: { name: 'hearth', version: '0.1.0' },
         });
-        if (!init?.agentCapabilities?.sessionCapabilities?.list) throw new Error('This server does not list its chats (no session/list).');
+        if (!init?.agentCapabilities?.sessionCapabilities?.list) throw Object.assign(new Error('This server does not list its chats (no session/list).'), { final: true });
         const ext: string[] = Array.isArray(init?._meta?.hearth?.extensions) ? init._meta.hearth.extensions : [];
         hasClients = ext.includes('clients');
         hasHistory = ext.includes('history');
@@ -208,22 +232,53 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
         ready = true;
         wasReady.current = true;
         fails.current = 0;
+        noteServer(url, init?._meta);
+        noteUp(url);
         setSt({ state: 'ready', agent, ...first, refresh, answer, extensions, request });
+        // Heartbeat: a socket can stay open and say nothing (a half-open connection after sleep or a network change);
+        // the browser won't notice. Any answer to a ping proves it is alive, "method not found" included.
+        beat = setInterval(() => {
+          if (!ready || !live) return;
+          let answered = false;
+          const deadline = setTimeout(() => { if (!answered) lost(); }, HEARTBEAT_TIMEOUT_MS);
+          void (conn.agent.request('_hearth/ping' as any, {}) as Promise<unknown>).catch(() => {}).finally(() => { answered = true; clearTimeout(deadline); });
+        }, HEARTBEAT_MS);
       } catch (e) {
         if (!live) return;
-        if (wasReady.current && fails.current < GIVE_UP_AFTER) { reconnectLater(); return; } // keep the list, keep trying
-        wasReady.current = false;
-        setSt({ state: 'error', message: friendly(e), retry: () => setNonce((n) => n + 1) });
+        if ((e as { final?: boolean })?.final) {
+          wasReady.current = false;
+          setSt({ state: 'error', message: (e as Error).message, retry: () => setNonce((n) => n + 1), refused: false, retrying: false });
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 0)); // the close event may land just after the failure
+        if (!live) return;
+        const why = refusalOf(url, seen);
+        if (why.kind === 'refused') {
+          // The key: stop (every further try counts toward the server's lockout) and ask for one.
+          wasReady.current = false;
+          setSt({ state: 'error', message: refusalText(why, 0), retry: () => setNonce((n) => n + 1), refused: true, retrying: false });
+          return;
+        }
+        // Away, locked out for a while, or unclear: try again when allowed, the list (if there was one) still shown.
+        const wait = reconnectLater();
+        const message = refusalText(why, wait);
+        const long = why.kind === 'locked' || wait > 60_000;
+        if (wasReady.current) setSt((prev) => (prev.state === 'ready' ? { ...prev, reconnecting: true, note: long ? message : undefined, tryNow: long ? tryNow : undefined } : prev));
+        else setSt({ state: 'error', message, retry: tryNow, refused: false, retrying: true });
       }
     })();
-    // Back to the window: catch anything missed while asleep.
-    const onFocus = () => { if (ready) refresh(); };
-    window.addEventListener('focus', onFocus);
+    // Back to the window or back online: catch anything missed, or try again now rather than wait out the backoff
+    // (never past a lockout or the shared budget: those protect the key).
+    const now = () => { if (ready) refresh(); else if (retry && waitAllowed(url) === 0) tryNow(); };
+    window.addEventListener('focus', now);
+    window.addEventListener('online', now);
     return () => {
       live = false;
-      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('focus', now);
+      window.removeEventListener('online', now);
       if (relist) clearTimeout(relist);
       if (retry) clearTimeout(retry);
+      if (beat) clearInterval(beat);
       try { conn.close(); } catch { /* */ }
     };
   }, [server?.id, server?.url, keyVersion, nonce, attempt]);

@@ -39,6 +39,7 @@ function useAuiStateOf(runtime: { thread: { getState: () => { isLoading: boolean
 import { Markdown } from '@/components/hearth/Markdown';
 import { FilesList, FileView, type FileContent, type FileItem } from '@/components/hearth/FilesPanel';
 import { openSocket } from '@/lib/servers';
+import { HEARTBEAT_MS, HEARTBEAT_TIMEOUT_MS, noteServer, noteUp, onUp, reconnectDelay, refusalOf, refusalText, waitAllowed } from '@/lib/reach';
 import { HearthAttachments } from '@/lib/attachments';
 import { type Card, type CardAnswer, type CardEntry, type Plan, cardOf, mergeCard, planPref, setPlanPref } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
@@ -81,7 +82,8 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
   // A dropped socket reconnects by itself: a fresh connection opens the thread again with session/load, so everything
   // said meanwhile (another window, a turn that kept running on the server) shows up. `gen` makes that new connection.
   const [gen, setGen] = useState(0);
-  const [reconnecting, setReconnecting] = useState<boolean | 'stopped'>(false);
+  // While reconnecting: a note for a long wait, a lockout or a refused key ('stopped': no more tries on its own).
+  const [reconnecting, setReconnecting] = useState<false | { note?: string; stopped?: boolean }>(false);
   const known = useRef<string | undefined>(target.kind === 'open' ? target.sessionId : undefined);
   const fails = useRef(0);
   // Read live by the signing hook: the admin key's state arrives after the thread opens.
@@ -94,6 +96,9 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
       cwd: target.cwd || '/',
       clientInfo: { name: 'hearth', version: '0.1.0' },
       webSocketFactory: (u) => openSocket(u, serverKey) as unknown as AcpWebSocketLike,
+      // A socket that stays open but silent (half-open) is noticed and dropped, so the reconnect below takes over.
+      heartbeatMs: HEARTBEAT_MS,
+      heartbeatTimeoutMs: HEARTBEAT_TIMEOUT_MS,
       ...(sid ? { sessionId: sid } : target.kind === 'new' ? { newSessionMeta: target.meta } : {}),
       // Admin threads: every prompt and every admin card answer carries this install's signature (the runner checks it).
       ...(admin ? {
@@ -112,35 +117,46 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
   useEffect(() => {
     let live = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let offUp: (() => void) | null = null;
+    let waiting = false;
     let wasUp = false;
+    const retryIn = (wait: number) => { timer = setTimeout(() => { timer = null; if (live) setGen((g) => g + 1); }, wait); };
     const off = client.subscribeConnectionChange((s) => {
       if (!live) return;
       if (client.sessionId) known.current = client.sessionId;
-      if (s === 'connected' && client.sessionId) { wasUp = true; fails.current = 0; setReconnecting(false); }
-      if (s === 'disconnected' && known.current && !timer && (wasUp || fails.current > 0)) {
-        // Each refused try counts toward the server's bad-key lockout, so stop after a few and offer a button.
-        if (fails.current >= GIVE_UP_AFTER) { setReconnecting('stopped'); return; }
-        setReconnecting(true);
-        const wait = RECONNECT_MS[Math.min(fails.current++, RECONNECT_MS.length - 1)];
-        timer = setTimeout(() => { if (live) setGen((g) => g + 1); }, wait);
+      if (s === 'connected' && client.sessionId) { wasUp = true; fails.current = 0; noteServer(url, client.initializeMeta); noteUp(url); setReconnecting(false); }
+      if (s === 'disconnected' && known.current && !waiting && (wasUp || fails.current > 0)) {
+        waiting = true;
+        if (wasUp) { setReconnecting({}); retryIn(Math.max(reconnectDelay(fails.current++), waitAllowed(url))); return; }
+        // A reconnect failed: why (reach.ts)? A refused key stops here (the sidebar asks for one); a lockout is waited
+        // out; an outage on a server that says so is retried for as long as it takes. On a server that doesn't say, the
+        // page's connections share a few tries per 15 minutes, so this thread leaves them to the sidebar and follows it.
+        const why = refusalOf(url, client.lastClose);
+        if (why.kind === 'refused') { setReconnecting({ note: refusalText(why, 0), stopped: true }); return; }
+        const wait = why.kind === 'unclear' ? Math.max(30_000, waitAllowed(url)) : Math.max(reconnectDelay(fails.current++), waitAllowed(url));
+        setReconnecting(why.kind === 'locked' || wait > 60_000 ? { note: refusalText(why, wait) } : {});
+        retryIn(wait);
+        // As soon as any connection to this server gets through (the sidebar's, usually), try at once.
+        offUp = onUp(url, () => { if (live && timer) { clearTimeout(timer); timer = null; setGen((g) => g + 1); } });
       }
     });
-    return () => { live = false; off(); if (timer) clearTimeout(timer); };
-  }, [client]);
-  // Back online or back to the window: try now rather than wait out the backoff.
+    return () => { live = false; off(); offUp?.(); if (timer) clearTimeout(timer); };
+  }, [client]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Back online or back to the window: try now rather than wait out the backoff (never past a lockout or the budget).
   useEffect(() => {
-    if (reconnecting !== true) return;
-    const now = () => setGen((g) => g + 1);
+    if (!reconnecting || reconnecting.stopped) return;
+    const now = () => { if (waitAllowed(url) === 0) setGen((g) => g + 1); };
     window.addEventListener('online', now);
     window.addEventListener('focus', now);
     return () => { window.removeEventListener('online', now); window.removeEventListener('focus', now); };
-  }, [reconnecting]);
+  }, [reconnecting, url]);
+  const tryAgain = () => { fails.current = 0; setReconnecting({}); setGen((g) => g + 1); };
   return (
     <div className="relative h-full">
       {reconnecting && (
-        <div role="status" className="absolute top-2 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border bg-background/95 px-3 py-1 text-xs text-muted-foreground shadow-sm">
-          {reconnecting === 'stopped'
-            ? <>Disconnected.<button onClick={() => { fails.current = 0; setReconnecting(true); setGen((g) => g + 1); }} className="font-medium text-foreground underline-offset-2 hover:underline">Reconnect</button></>
+        <div role="status" className="absolute top-2 left-1/2 z-20 flex max-w-[90%] -translate-x-1/2 items-center gap-1.5 rounded-full border bg-background/95 px-3 py-1 text-xs text-muted-foreground shadow-sm">
+          {reconnecting.note
+            ? <>{reconnecting.note}<button onClick={tryAgain} className="shrink-0 font-medium text-foreground underline-offset-2 hover:underline">{reconnecting.stopped ? 'Try again' : 'Try now'}</button></>
             : <><Loader2 className="size-3 animate-spin" />Reconnecting…</>}
         </div>
       )}
@@ -149,8 +165,6 @@ export function ThreadPane({ url, serverKey, target, events, actionsEl, first, i
   );
 }
 
-const RECONNECT_MS = [1000, 2000, 5000, 10000, 30000];
-const GIVE_UP_AFTER = 6;
 
 /** How long an answered card stays on screen (greyed, with who answered) before it goes. */
 const ANSWERED_LINGER_MS = 6000;
