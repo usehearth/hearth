@@ -35,8 +35,24 @@ test('sidebar: lists projects, their threads and what needs you', async ({ page,
   await expect(side.getByRole('button', { name: 'Todo API', exact: true })).toBeVisible();
   await expect(side.getByRole('button', { name: 'Scratch', exact: true })).toBeVisible();
   for (const title of ['Count exports with a subagent', 'Run the tests', 'Fix the completed flag', 'Deploy notes', 'Scratch notes']) await expect(threadRow(page, title)).toBeVisible();
-  await expect(threadRow(page, 'Deploy notes')).toContainText('needs you');
+  // "Needs you" on a row is a dot now (the pill wrapped onto two lines); the row says it in its name and tooltip.
+  await expect(threadRow(page, 'Deploy notes')).toHaveAccessibleName(/needs you/);
+  await expect(threadRow(page, 'Run the tests')).not.toHaveAccessibleName(/needs you/);
   await expect(side.getByRole('button', { name: /Needs you/ })).toContainText('2');
+});
+
+test('sidebar: Recent lists every thread by time, with its project', async ({ page, fake }) => {
+  await connect(page, fake);
+  const side = sidebar(page);
+  await side.getByRole('tab', { name: 'Recent' }).click();
+  await expect(side.getByRole('tab', { name: 'Recent' })).toHaveAttribute('aria-selected', 'true');
+  for (const title of ['Count exports with a subagent', 'Run the tests', 'Fix the completed flag', 'Deploy notes', 'Scratch notes']) await expect(threadRow(page, title)).toBeVisible();
+  // Each row names its project, and the rows sit under time groups instead of project headings.
+  await expect(threadRow(page, 'Scratch notes')).toHaveAccessibleName(/^Scratch notes · Scratch/);
+  await expect(side.getByText(/^(Pinned|Today|Yesterday|Previous 7 days|Older)$/).first()).toBeVisible();
+  await expect(side.getByRole('button', { name: 'Todo API', exact: true })).toBeHidden();
+  await side.getByRole('tab', { name: 'Projects' }).click();
+  await expect(side.getByRole('button', { name: 'Todo API', exact: true })).toBeVisible();
 });
 
 test('thread: opening one shows its history, tool calls included', async ({ page, fake }) => {
