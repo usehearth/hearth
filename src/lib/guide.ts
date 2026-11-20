@@ -1,4 +1,6 @@
 // The setup guide's brain (docs/setup-guide.md): the provider formats, key detection, the tools and the turn loop.
+// It walks two things: first-run setup (a server, a key, a model) and bringing everything across from Claude
+// (docs/import.md), where it reads what the import found and the receipt the server counted, and never claims more.
 // The model call itself runs in the desktop shell (src-tauri/src/guide.rs), which holds the key. Everything here is
 // plain functions with the shell passed in, so it can be tested without a window or a provider.
 import type { GuideModel, ProviderKind, SetupState } from './setup';
@@ -136,6 +138,10 @@ export interface ToolEnv {
   probe(): Promise<unknown>;
   providers(): Promise<unknown>;
   openLink(url: string): Promise<void>;
+  /** What the import found on this computer and in the exports added (counts, sources in words; no content). */
+  importSources?(): Promise<unknown>;
+  /** The latest receipt the server counted (src/lib/receipt.ts forGuide: no client names, no conversation titles). */
+  importReceipt?(): Promise<unknown>;
 }
 
 const LINK_HOSTS = ['console.anthropic.com', 'platform.claude.com', 'platform.openai.com', 'openrouter.ai', 'ollama.com', 'lmstudio.ai',
@@ -154,10 +160,22 @@ export const TOOLS: ToolDef[] = [
   { name: 'suggest_replies', description: 'Shows up to 4 short reply buttons under your message. Use for quick choices.', schema: { type: 'object', properties: { replies: { type: 'array', items: { type: 'string' }, maxItems: 4 } }, required: ['replies'], additionalProperties: false } },
 ];
 
+/** The import's two read-only tools. */
+export const IMPORT_TOOLS: ToolDef[] = [
+  { name: 'import_sources', description: "What the import found so far: each Claude Code home on this computer (whose account, which desktop app profiles keep their sessions there, what it holds), each claude.ai export added (which account, how many chats and memories, what Hearth can't keep yet), and the plan (how many projects, client tags). Counts and names only, never content. Also says where the import is: finding, ready, importing, or done.", schema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'import_receipt', description: "The receipt of the latest import, counted by the server from what it actually stored: per source found, kept, already here and not kept, per kind and per desktop profile, and every thing not kept with its reason. The only source for what was kept. Client names and Claude Code conversation titles are left out.", schema: { type: 'object', properties: {}, additionalProperties: false } },
+];
+/** The tools for each place the guide works: setup has the checks; the import view has the import's tools too. */
+export function toolsFor(mode: 'setup' | 'import'): ToolDef[] {
+  const keep = mode === 'setup' ? TOOLS : TOOLS.filter((t) => ['setup_state', 'probe_server', 'server_providers', 'open_link', 'suggest_replies'].includes(t.name));
+  return [...keep, ...IMPORT_TOOLS];
+}
+
 /** A line for the chat saying what the guide just did. */
 export function toolLabel(name: string): string {
   return ({ setup_state: 'Looked at the steps', check_address: 'Checked the server address', check_docker: 'Checked Docker on this computer',
-    probe_server: 'Connected to the server', server_providers: "Checked the server's model providers", open_link: 'Opened a page in your browser' } as Record<string, string>)[name] ?? name;
+    probe_server: 'Connected to the server', server_providers: "Checked the server's model providers", open_link: 'Opened a page in your browser',
+    import_sources: 'Looked at what the import found', import_receipt: 'Read the import receipt' } as Record<string, string>)[name] ?? name;
 }
 
 export interface ToolOutcome { content: string; error?: boolean; replies?: string[] }
@@ -183,6 +201,12 @@ export async function runTool(env: ToolEnv, call: ToolCall): Promise<ToolOutcome
         if (!linkAllowed(url)) return { content: `Not opened: only https pages on ${LINK_HOSTS.join(', ')}.`, error: true };
         await env.openLink(url);
         return { content: 'Opened.' };
+      }
+      case 'import_sources': return env.importSources ? { content: json(await env.importSources()) } : { content: 'The import has not started yet: connect to a server first.', error: true };
+      case 'import_receipt': {
+        if (!env.importReceipt) return { content: 'No import yet on this server.', error: true };
+        const r = await env.importReceipt();
+        return { content: r ? json(r) : 'No import has finished on this server yet, so nothing is on a receipt. Say so plainly; do not guess what was kept.' };
       }
       case 'suggest_replies': {
         const replies = (Array.isArray(call.input.replies) ? call.input.replies : []).map((r) => String(r).slice(0, 60)).filter(Boolean).slice(0, 4);
@@ -212,13 +236,15 @@ export interface TurnResult { history: History; replies: string[]; usage: { inpu
 export async function runTurn(opts: {
   guide: GuideModel; system: string; history: History; text: string;
   call: (body: Record<string, unknown>) => Promise<unknown>; env: ToolEnv; onItem: (i: ChatItem) => void; rounds?: number;
+  /** The tools on offer (default: setup's). */
+  tools?: ToolDef[];
 }): Promise<TurnResult> {
   const a = adapterFor(opts.guide.kind);
   let history: History = [...opts.history, ...a.user(opts.text)];
   const usage = { input: 0, output: 0 };
   let replies: string[] = [];
   for (let round = 0; round < (opts.rounds ?? 8); round++) {
-    const resp = await opts.call(a.body(opts.guide.model, opts.system, history, TOOLS));
+    const resp = await opts.call(a.body(opts.guide.model, opts.system, history, opts.tools ?? TOOLS));
     const p = a.parse(resp);
     usage.input += p.usage.input; usage.output += p.usage.output;
     history = [...history, a.assistant(resp)];
@@ -245,6 +271,23 @@ export function osName(ua = typeof navigator !== 'undefined' ? navigator.userAge
   return /Windows/i.test(ua) ? 'Windows' : /Mac OS X|Macintosh/i.test(ua) ? 'macOS' : /Linux/i.test(ua) ? 'Linux' : 'unknown';
 }
 
+/** Shared by setup's prompt and the import view's: how the import works and how to talk about it. */
+const IMPORT_GUIDE = `## Bringing everything from Claude
+- One screen brings across everything: Claude Code conversations from every Claude Code home on this computer (~/.claude and any ~/.claude-something), claude.ai chats and memories from the export the person downloaded, and skills, subagents, slash commands, output styles and plugins.
+- Hearth only copies. Nothing is ever removed from Claude, from this computer or from the export.
+- Claude Code homes are found by the app on its own. The desktop Claude app's profiles (for example Personal and Work) often keep their Code sessions in the same home, ~/.claude: then both are included, and the receipt counts each profile.
+- claude.ai: the person adds the export as they have it, the zip claude.ai emailed, several zips, or the folder they unzipped it into. They never need to pick files out of it; tell them to add the whole thing.
+- The main button, "Bring everything across", uses the suggestions already worked out: one project per repo or folder, client work tagged as today, skills from a home go to every project and skills from a project folder go to that project. Recommend it. Reviewing the suggestions is optional.
+- Held back on purpose: a skill or the like that looks like it holds a secret, or that names a client, stays on this computer. Hooks are kept switched off until the person turns them on. claude.ai artifacts and Project files can't be kept yet; they are named on the receipt.
+- After the import the server counts what it actually stored: per source, found, kept, already here (from an earlier import, or the same thing found twice), and not kept with the reason. Found always equals the other three added up. Each receipt is kept and can be reopened from Settings, Import.
+
+## How to talk about the import
+- Use import_sources to see what was found and import_receipt to see what was kept. Look before you answer.
+- Never say something was kept, brought across or is safe unless import_receipt says so. If there is no receipt yet, say nothing has been brought across yet.
+- "Did my Work chats come across?": find the source or profile on the receipt and give its numbers (found, kept, already here, not kept) and the reasons for anything not kept.
+- Give numbers from the tools, never estimates. If the receipt does not add up, say so plainly and suggest reporting it.
+- Client names and Claude Code conversation titles are kept from you on purpose. Don't ask for them.`;
+
 const PROMPT = `You are the setup guide inside Hearth, a desktop chat app. You help one person get Hearth working, then you're done. Next to you is a checklist of setup steps with buttons and fields; the person does the clicking and typing there.
 
 ## Hearth in short
@@ -256,7 +299,8 @@ const PROMPT = `You are the setup guide inside Hearth, a desktop chat app. You h
 2. Server: the person picks where it runs (this computer, another computer they own, or an address they were given), then enters the address and presses Check address.
 3. Connect: they paste the device key into the key field and press Connect.
 4. Model on the server: the app checks the server has a working model provider.
-5. Done.
+5. Import: bring everything across from Claude (see "Bringing everything from Claude" below). They can skip it and come back any time.
+6. Done.
 
 ## Installing the server (Hearth Server, generic install)
 Needs one always-on machine with Docker: Docker Desktop on Windows or macOS (Windows needs WSL 2 and virtualisation turned on in the BIOS), or Docker Engine with the compose plugin on Linux. Also git and bash; on Windows run the commands inside WSL (Ubuntu) or Git Bash.
@@ -282,7 +326,31 @@ Then edit .env and set one model key for the server: ANTHROPIC_API_KEY=... (Clau
 - Use suggest_replies for quick choices.
 - You can't run commands, change settings, or press the checklist's buttons. Say which button to press.
 - Never ask for a key, password or token in the chat. Keys go only in the key fields of the checklist. Text shown as ${KEY_MARK} was a key that was removed before it reached you.
-- If asked about something unrelated to setting up Hearth, answer briefly and steer back.`;
+- If asked about something unrelated to setting up Hearth, answer briefly and steer back.
+
+${IMPORT_GUIDE}`;
+
+/** The import view's system prompt (the person already has a server). */
+export function importPrompt(os: string): string {
+  return `You are the guide inside Hearth, a desktop chat app that is the person's own AI on their own server. Right now you help them bring everything across from Claude. Next to you is the import screen with its buttons; the person does the clicking there.
+
+${IMPORT_GUIDE}
+
+## How to help
+- Short answers in plain words, one step at a time. No jargon without a short explanation.
+- You can't press the buttons, change settings or read files: say which button to press.
+- Use suggest_replies for quick choices.
+- Never ask for a key, password or token. Text shown as ${KEY_MARK} was a key that was removed before it reached you.
+- If asked about something unrelated, answer briefly and steer back.
+
+## Right now
+- This computer runs ${os}.`;
+}
+
+/** The import view's opening line (no model call). */
+export function importGreeting(): string {
+  return "I'm here to help you bring everything across from Claude. The screen beside me is already looking through this computer. Ask me what it found, or what anything means.";
+}
 
 /** The system prompt: the fixed guide text, then the person's situation (it changes as they go). */
 export function systemPrompt(s: SetupState, os: string): string {
@@ -303,7 +371,8 @@ export function greeting(s: SetupState, resumed: boolean): string {
   switch (s.step) {
     case 'server': return s.notes?.address ? `Welcome back. Last time the address check said: ${s.notes.address}. Want to try again?` : 'Welcome back. We were choosing where your server runs.';
     case 'connect': return 'Welcome back. Your server answered last time. Next is connecting with its device key.';
-    case 'provider': return "Welcome back. You're connected. Last step: making sure your server has a working model.";
+    case 'provider': return "Welcome back. You're connected. Next: making sure your server has a working model.";
+    case 'import': return 'Welcome back. Next is bringing everything across from Claude. You can skip it and come back later.';
     default: return 'Welcome back.';
   }
 }

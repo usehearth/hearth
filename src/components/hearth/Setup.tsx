@@ -1,45 +1,23 @@
 // First-run setup with the guide (docs/setup-guide.md). A checklist that works on its own, with an optional chat
-// beside it. The guide's model calls and the key live in the desktop shell (src-tauri/src/guide.rs).
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { ArrowUp, Check, CircleAlert, Copy, ExternalLink, KeyRound, Loader2, MessageCircleQuestion, Server as ServerIcon, ShieldCheck, Sparkles, Wrench } from 'lucide-react';
+// beside it. The guide's model calls and the key live in the desktop shell (src-tauri/src/guide.rs). The Import step
+// is the app's own import view (src/components/hearth/ImportWizard.tsx), opened by App with the guide beside it.
+import { useEffect, useState } from 'react';
+import { Check, CircleAlert, Copy, ExternalLink, KeyRound, Loader2, MessageCircleQuestion, Server as ServerIcon, ShieldCheck, Sparkles, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { field, fieldArea } from '@/components/ui/field';
-import { Markdown } from '@/components/hearth/Markdown';
+import { field } from '@/components/ui/field';
 import { AddServer } from '@/components/hearth/AddServer';
+import { GuideChat } from '@/components/hearth/GuideChat';
 import { assetUrl } from '@/lib/hostBridge';
 import { addServer, hostOf, keyFor, normaliseUrl, useServers } from '@/lib/servers';
 import { friendly } from '@/lib/directory';
 import { cn } from '@/lib/utils';
 import {
-  STEPS, finishSetup, nextStep, noteSetup, providerVerdict, serverCall, setupState, stepIndex, updateSetup, useSetup,
+  STEPS, finishSetup, nextStep, noteSetup, providerVerdict, setupState, stepIndex, updateSetup, useSetup,
   type GuideModel, type ProviderKind, type ServerProvider, type SetupState, type Step, type Where,
 } from '@/lib/setup';
-import { GET_KEY_LINKS, KEY_MARK, findKeys, greeting, osName, pickModel, runTurn, systemPrompt, type ChatItem, type History, type ToolEnv } from '@/lib/guide';
-
-// ---------- the shell ----------
-
-interface AddressCheck { tried: string; result: 'ok' | 'answered' | 'refused' | 'timeout' | 'dns' | 'tls' | 'error'; status?: number | null; detail?: string | null }
-interface DockerCheck { installed: boolean; running: boolean; version?: string | null; detail?: string | null }
-
-type Shell = typeof realShell;
-const realShell = {
-  check: (kind: ProviderKind, baseUrl: string, key: string | null, model: string | null) =>
-    invoke<{ models: string[] }>('guide_check', { kind, baseUrl, key, model }),
-  status: () => invoke<{ kind: ProviderKind; base_url: string; has_key: boolean } | null>('guide_status'),
-  call: (body: Record<string, unknown>) => invoke<unknown>('guide_call', { body }),
-  forget: () => invoke<void>('guide_forget'),
-  address: (url: string) => invoke<AddressCheck>('guide_check_address', { url }),
-  docker: () => invoke<DockerCheck>('guide_check_docker'),
-  server: serverCall,
-};
-let shell: Shell = realShell;
-/** Development only (src/dev/SetupPreview.tsx): a made-up shell and server, to look at the screens without either. */
-export function previewShell(fake: Partial<Shell>) { shell = { ...realShell, ...fake }; }
-const errText = (e: unknown) => (typeof e === 'string' ? e : (e as Error)?.message ?? String(e));
-async function openLink(url: string) {
-  try { const { openUrl } = await import('@tauri-apps/plugin-opener'); await openUrl(url); } catch { window.open(url, '_blank', 'noopener'); }
-}
+import { GET_KEY_LINKS, greeting, osName, pickModel, systemPrompt, toolsFor, type ToolEnv } from '@/lib/guide';
+import { errText, openLink, shell, type AddressCheck, type DockerCheck } from '@/lib/guideShell';
+export { previewShell } from '@/lib/guideShell';
 
 /** An address check in words (docs/ux-and-brand.md: say what failed, from the user's side). */
 export function addressWords(r: AddressCheck): string {
@@ -84,7 +62,8 @@ const KINDS: { id: 'claude' | 'openai' | 'local'; label: string }[] = [
   { id: 'local', label: 'Local model' },
 ];
 
-function KeyScreen({ onHaveServer, notice }: { onHaveServer: () => void; notice?: string }) {
+/** The guide's model key: checked with real calls, then kept in the system keychain. Used by setup and the import view. */
+export function GuideKeyForm({ onChecked, notice, footer }: { onChecked: (guide: GuideModel) => void; notice?: string; footer?: React.ReactNode }) {
   const [kind, setKind] = useState<'claude' | 'openai' | 'local'>('claude');
   const [base, setBase] = useState('');
   const [key, setKey] = useState('');
@@ -103,56 +82,64 @@ function KeyScreen({ onHaveServer, notice }: { onHaveServer: () => void; notice?
       setBusy(`Trying ${model}…`);
       await shell.check(pk, baseUrl, null, model);
       const st = await shell.status();
-      const guide: GuideModel = { kind: pk, baseUrl: st?.base_url ?? baseUrl, model, models, ...(kind === 'local' ? { local: true } : {}) };
       setKey('');
-      // Back to where the person was (the guide can be turned on part way through).
-      updateSetup((cur) => ({ guide, step: cur.serverId ? 'provider' : cur.address ? 'connect' : 'server' }));
+      onChecked({ kind: pk, baseUrl: st?.base_url ?? baseUrl, model, models, ...(kind === 'local' ? { local: true } : {}) });
     } catch (e2) { setErr(errText(e2)); } finally { setBusy(null); }
   };
 
   const keyLink = kind === 'claude' ? GET_KEY_LINKS.anthropic : kind === 'openai' ? GET_KEY_LINKS.openai : GET_KEY_LINKS.ollama;
   return (
+    <form onSubmit={check} className="space-y-4">
+      <div role="radiogroup" aria-label="Model provider" className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1">
+        {KINDS.map((k) => (
+          <button key={k.id} type="button" role="radio" aria-checked={kind === k.id} onClick={() => { setKind(k.id); setErr(null); }}
+            className={cn('rounded-md px-2 py-1.5 text-xs font-medium transition-colors', kind === k.id ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
+            {k.label}
+          </button>
+        ))}
+      </div>
+      {kind !== 'claude' && (
+        <Field label="API address" hint={kind === 'local' ? 'Ollama: http://localhost:11434/v1. LM Studio: http://localhost:1234/v1.' : 'For example https://api.openai.com/v1 or https://openrouter.ai/api/v1'}>
+          <input value={base} onChange={(e) => setBase(e.target.value)} placeholder={kind === 'local' ? 'http://localhost:11434/v1' : 'https://…/v1'} className={field} required={kind === 'openai'} />
+        </Field>
+      )}
+      {kind !== 'local' && (
+        <Field label={kind === 'claude' ? 'Anthropic API key' : 'API key'} hint="Saved in your system keychain. Only sent to this provider.">
+          <input autoFocus type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder="Paste the key" className={field} autoComplete="off" required={kind === 'claude'} />
+        </Field>
+      )}
+      {kind === 'local' && <p className="text-xs text-muted-foreground">No key needed. The model runs on this computer, so it must be running now.</p>}
+      {err && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{err}</p>}
+      <div className="flex items-center justify-between gap-2 pt-1">
+        <Button type="button" variant="link" size="sm" className="px-0" onClick={() => void openLink(keyLink)}>
+          <ExternalLink className="size-3.5" />{kind === 'local' ? 'Get Ollama' : 'Get a key'}
+        </Button>
+        <Button type="submit" disabled={!!busy || (kind === 'claude' && !key.trim()) || (kind === 'openai' && !base.trim())}>
+          {busy ? <><Loader2 className="size-4 animate-spin" />{busy}</> : <><ShieldCheck className="size-4" />Check key</>}
+        </Button>
+      </div>
+      {footer}
+    </form>
+  );
+}
+
+function KeyScreen({ onHaveServer, notice }: { onHaveServer: () => void; notice?: string }) {
+  return (
     <div className="grid h-full place-items-center overflow-y-auto bg-background p-6">
-      <form onSubmit={check} className="w-full max-w-md">
+      <div className="w-full max-w-md">
         <img src={assetUrl('logo.svg')} alt="" className="mx-auto size-16 rounded-2xl shadow-md" />
         <h1 className="mt-5 text-center text-2xl font-semibold tracking-tight">Welcome to Hearth</h1>
         <p className="mt-1.5 text-center text-sm text-muted-foreground">Start with a model key. A setup guide then walks you through the rest and answers questions on the way.</p>
-        <div className="mt-7 space-y-4 rounded-2xl border bg-card p-5 shadow-sm">
-          <div role="radiogroup" aria-label="Model provider" className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1">
-            {KINDS.map((k) => (
-              <button key={k.id} type="button" role="radio" aria-checked={kind === k.id} onClick={() => { setKind(k.id); setErr(null); }}
-                className={cn('rounded-md px-2 py-1.5 text-xs font-medium transition-colors', kind === k.id ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
-                {k.label}
-              </button>
-            ))}
-          </div>
-          {kind !== 'claude' && (
-            <Field label="API address" hint={kind === 'local' ? 'Ollama: http://localhost:11434/v1. LM Studio: http://localhost:1234/v1.' : 'For example https://api.openai.com/v1 or https://openrouter.ai/api/v1'}>
-              <input value={base} onChange={(e) => setBase(e.target.value)} placeholder={kind === 'local' ? 'http://localhost:11434/v1' : 'https://…/v1'} className={field} required={kind === 'openai'} />
-            </Field>
-          )}
-          {kind !== 'local' && (
-            <Field label={kind === 'claude' ? 'Anthropic API key' : 'API key'} hint="Saved in your system keychain. Only sent to this provider.">
-              <input autoFocus type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder="Paste the key" className={field} autoComplete="off" required={kind === 'claude'} />
-            </Field>
-          )}
-          {kind === 'local' && <p className="text-xs text-muted-foreground">No key needed. The model runs on this computer, so it must be running now.</p>}
-          {err && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{err}</p>}
-          <div className="flex items-center justify-between gap-2 pt-1">
-            <Button type="button" variant="link" size="sm" className="px-0" onClick={() => void openLink(keyLink)}>
-              <ExternalLink className="size-3.5" />{kind === 'local' ? 'Get Ollama' : 'Get a key'}
-            </Button>
-            <Button type="submit" disabled={!!busy || (kind === 'claude' && !key.trim()) || (kind === 'openai' && !base.trim())}>
-              {busy ? <><Loader2 className="size-4 animate-spin" />{busy}</> : <><ShieldCheck className="size-4" />Check key</>}
-            </Button>
-          </div>
+        <div className="mt-7 rounded-2xl border bg-card p-5 shadow-sm">
+          {/* Back to where the person was (the guide can be turned on part way through). */}
+          <GuideKeyForm notice={notice} onChecked={(guide) => updateSetup((cur) => ({ guide, step: cur.serverId ? (cur.step === 'key' ? 'provider' : cur.step) : cur.address ? 'connect' : 'server' }))} />
         </div>
         <div className="mt-4 flex flex-wrap justify-center gap-x-4 gap-y-1 text-sm">
           <Button type="button" variant="link" size="sm" onClick={onHaveServer}>I already have a server</Button>
           <Button type="button" variant="link" size="sm" onClick={() => updateSetup({ guide: null, step: 'server' })}>Set up without help</Button>
         </div>
         <p className="mt-2 text-center text-xs text-muted-foreground">During setup Hearth talks only to the provider you pick here. It sends no telemetry and keeps no chat content.</p>
-      </form>
+      </div>
     </div>
   );
 }
@@ -175,7 +162,7 @@ function Workspace({ s, resumed, onDone }: { s: SetupState; resumed: boolean; on
       </aside>
       <section className="flex min-h-[80vh] min-w-0 flex-1 flex-col md:min-h-0">
         {s.guide
-          ? <GuideChat key={`${s.guide.kind}:${s.guide.baseUrl}:${s.guide.model}`} s={s} guide={s.guide} resumed={resumed} onKey={(k) => setDeviceKey(k)} />
+          ? <SetupGuide key={`${s.guide.kind}:${s.guide.baseUrl}:${s.guide.model}`} s={s} guide={s.guide} resumed={resumed} onKey={(k) => setDeviceKey(k)} />
           : (
             <div className="grid flex-1 place-items-center p-6">
               <div className="max-w-sm rounded-xl border border-dashed px-4 py-4 text-center text-sm text-muted-foreground">
@@ -211,6 +198,7 @@ function StepRow({ id, label, s, deviceKey, setDeviceKey, onDone }: { id: Step; 
           {id === 'server' && <ServerStep s={s} />}
           {id === 'connect' && <ConnectStep s={s} deviceKey={deviceKey} setDeviceKey={setDeviceKey} />}
           {id === 'provider' && <ProviderStep s={s} />}
+          {id === 'import' && <p className="text-sm text-muted-foreground">Bring your conversations, chats, memories and skills from Claude.</p>}
           {id === 'done' && <DoneStep s={s} onDone={onDone} />}
         </div>
       )}
@@ -405,6 +393,7 @@ function DoneStep({ s, onDone }: { s: SetupState; onDone: (serverId: string) => 
   return (
     <div className="space-y-3 text-sm">
       <p>You're set up{server ? <> with <b>{server.name}</b></> : null}.{s.notes?.provider ? ` ${s.notes.provider}` : ''}</p>
+      {s.notes?.import && <p className="text-muted-foreground">Your Claude history: {s.notes.import}</p>}
       {s.guide && (
         <label className="flex items-start gap-2 text-xs text-muted-foreground">
           <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} className="mt-0.5 accent-primary" />
@@ -418,22 +407,7 @@ function DoneStep({ s, onDone }: { s: SetupState; onDone: (serverId: string) => 
 
 // ---------- the guide's chat ----------
 
-const SOFT_CAP = 300_000;
-
-function GuideChat({ s, guide, resumed, onKey }: { s: SetupState; guide: GuideModel; resumed: boolean; onKey: (k: string) => void }) {
-  const [items, setItems] = useState<ChatItem[]>(() => [{ kind: 'assistant', text: greeting(s, resumed) }]);
-  const history = useRef<History>([]);
-  const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [replies, setReplies] = useState<string[]>([]);
-  const [used, setUsed] = useState(0);
-  const [capOk, setCapOk] = useState(false);
-  const [keyWarn, setKeyWarn] = useState<string[] | null>(null);
-  const endRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const os = useMemo(() => osName(), []);
-  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [items, busy]);
-
+function SetupGuide({ s, guide, resumed, onKey }: { s: SetupState; guide: GuideModel; resumed: boolean; onKey: (k: string) => void }) {
   const env: ToolEnv = {
     state: () => setupState() ?? s,
     checkAddress: async (url) => { const u = normaliseUrl(url); const r = await shell.address(u); return { ...r, meaning: addressWords(r) }; },
@@ -453,93 +427,11 @@ function GuideChat({ s, guide, resumed, onKey }: { s: SetupState; guide: GuideMo
     },
     openLink,
   };
-
-  const send = async (raw: string) => {
-    const msg = raw.trim();
-    if (!msg || busy) return;
-    const keys = findKeys(msg);
-    if (keys.length) { setKeyWarn(keys); return; }
-    if (used > SOFT_CAP && !capOk) { setItems((x) => [...x, { kind: 'error', text: `This setup has used about ${Math.round(used / 1000)}k tokens. Send again to keep going.` }]); setCapOk(true); return; }
-    setText(''); setReplies([]); setKeyWarn(null);
-    setItems((x) => [...x, { kind: 'user', text: msg }]);
-    setBusy(true);
-    try {
-      const r = await runTurn({ guide, system: systemPrompt(setupState() ?? s, os), history: history.current, text: msg, call: shell.call, env,
-        onItem: (i) => setItems((x) => [...x, i]) });
-      history.current = r.history;
-      setReplies(r.replies);
-      setUsed((u) => u + r.usage.input + r.usage.output);
-    } catch (e) {
-      setItems((x) => [...x, { kind: 'error', text: `The guide couldn't answer: ${errText(e)} The steps on the left still work without it.` }]);
-    } finally { setBusy(false); }
-  };
-
-  const moveKey = () => {
-    if (!keyWarn) return;
-    if ((setupState() ?? s).step === 'connect') onKey(keyWarn[0]);
-    let t = text;
-    for (const k of keyWarn) t = t.split(k).join(KEY_MARK);
-    setText(t); setKeyWarn(null);
-    // The button goes away with the warning: back to the message, so Enter sends it. (The message box stays mounted,
-    // so it can take focus now.)
-    inputRef.current?.focus();
-  };
-
-  const pickModelNow = (m: string) => { updateSetup({ guide: { ...guide, model: m } }); };
-
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex items-center gap-2 border-b px-4 py-2.5 text-sm">
-        <Sparkles className="size-4 text-primary" />
-        <span className="font-medium">Setup guide</span>
-        <select value={guide.model} onChange={(e) => pickModelNow(e.target.value)} aria-label="Guide model" title="Changing the model starts the chat again"
-          className={cn(field, 'ml-auto h-7 w-auto max-w-[220px] text-xs')}>
-          {(guide.models.length ? guide.models : [guide.model]).map((m) => <option key={m} value={m}>{m}</option>)}
-        </select>
-      </header>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <div className="mx-auto max-w-2xl space-y-3">
-          {items.map((it, i) => <ChatRow key={i} item={it} />)}
-          {busy && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Thinking…</p>}
-          {!busy && replies.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {replies.map((r) => <Button key={r} size="sm" variant="outline" onClick={() => void send(r)}>{r}</Button>)}
-            </div>
-          )}
-          <div ref={endRef} />
-        </div>
-      </div>
-      <form onSubmit={(e) => { e.preventDefault(); void send(text); }} className="mx-auto w-full max-w-2xl px-4 pb-4">
-        {keyWarn && (
-          <div role="alert" className="mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
-            This looks like a key, so it wasn't sent. Keys go in the fields on the left, never to the guide.
-            <div className="mt-1.5 flex gap-2">
-              <Button size="xs" type="button" onClick={moveKey}>{(setupState() ?? s).step === 'connect' ? 'Move it to the device key field' : 'Take it out of the message'}</Button>
-              <Button size="xs" type="button" variant="ghost" onClick={() => { setKeyWarn(null); inputRef.current?.focus(); }}>Keep editing</Button>
-            </div>
-          </div>
-        )}
-        <div className="flex items-end gap-2 rounded-xl border bg-card p-2 shadow-sm">
-          <textarea ref={inputRef} value={text} onChange={(e) => { setText(e.target.value); if (keyWarn) setKeyWarn(null); }} rows={1} placeholder="Ask the guide anything…"
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(text); } }}
-            className={cn(fieldArea, 'max-h-40 min-h-9 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0')} />
-          <Button type="submit" size="icon-sm" disabled={busy || !text.trim()} aria-label="Send"><ArrowUp /></Button>
-        </div>
-        <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
-          {guide.local ? 'Runs on your local model.' : `Talks to ${hostOf(guide.baseUrl || 'https://api.anthropic.com')} with your key.`} Not saved anywhere.{used > 0 ? ` About ${used < 1000 ? used : `${Math.round(used / 1000)}k`} tokens so far.` : ''}
-        </p>
-      </form>
-    </div>
+    <GuideChat guide={guide} greeting={greeting(s, resumed)} env={env} tools={toolsFor('setup').filter((t) => !t.name.startsWith('import_'))}
+      system={(os) => systemPrompt(setupState() ?? s, os)}
+      onKey={(k) => { if ((setupState() ?? s).step === 'connect') onKey(k); }} keyTarget={(setupState() ?? s).step === 'connect' ? 'Move it to the device key field' : undefined} />
   );
-}
-
-function ChatRow({ item }: { item: ChatItem }) {
-  switch (item.kind) {
-    case 'user': return <div className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap rounded-2xl bg-primary/10 px-3.5 py-2 text-sm">{item.text}</div>;
-    case 'assistant': return <Markdown text={item.text} />;
-    case 'tool': return <p className={cn('flex items-center gap-1.5 text-xs', item.error ? 'text-destructive' : 'text-muted-foreground')}><Wrench className="size-3" />{item.label}</p>;
-    case 'error': return <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{item.text}</p>;
-  }
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {

@@ -13,14 +13,14 @@ import { NeedsYou } from '@/components/hearth/NeedsYou';
 import { Settings } from '@/components/hearth/Settings';
 import { ProjectSettings } from '@/components/hearth/ProjectSettings';
 import { HistoryView, ImportedThread, type Continued, type HistoryScope, type ImportedSummary } from '@/components/hearth/History';
-import { ImportWizard } from '@/components/hearth/ImportWizard';
+import { ImportView } from '@/components/hearth/ImportView';
 import { NewProject, type Made } from '@/components/hearth/NewProject';
 import { clientNames } from '@/lib/choices';
 import { ArchivedList, SearchResults, SidebarSearch, ThreadMenu, type SearchHit } from '@/components/hearth/ThreadTools';
 import type { CardEntry } from '@/lib/hearth';
 import { useDirectory, type ClientLine, type ImportedGroup, type ProjectGroup, type ThreadItem } from '@/lib/directory';
 import { isDesktop, keyFor, keysReady, useServers } from '@/lib/servers';
-import { startSetup, useSetup } from '@/lib/setup';
+import { noteSetup, startSetup, updateSetup, useSetup } from '@/lib/setup';
 import { useTheme } from '@/lib/theme';
 import { cn } from '@/lib/utils';
 import { recentGroups, setSidebarView, sidebarView } from '@/lib/recent';
@@ -48,8 +48,11 @@ export default function App() {
   // Phones: the sidebar is a drawer, closed whenever something is picked in it.
   const [navOpen, setNavOpen] = useState(false);
   const go = useCallback((v: View) => { setView(v); setNavOpen(false); }, []);
-  // Each click on "Import Claude history" starts the wizard afresh (a finished run stays on its Done page otherwise).
+  // Each click on "Bring everything from Claude" starts the import afresh (a finished run stays on its receipt otherwise).
   const [importRun, setImportRun] = useState(0);
+  // Opened from Settings, Extensions: the import opens at its skills part.
+  const [importPart, setImportPart] = useState<'skills' | undefined>(undefined);
+  const openImport = useCallback((part?: 'skills') => { setImportPart(part); setImportRun((n) => n + 1); setView('import'); setNavOpen(false); }, []);
   const { dark, toggle } = useTheme();
   // Thread management (server extension `threads`): search, the archived list, a menu on each thread.
   const [query, setQuery] = useState('');
@@ -73,12 +76,15 @@ export default function App() {
   const setup = useSetup();
   const guided = isDesktop && !inVsCode;
   useEffect(() => { if (guided && !servers.length && !setup?.active) startSetup(); }, [guided, servers.length, setup?.active]);
+  // Setup's Import step is the app's own import view, with the guide beside it; the checklist comes back for Done.
+  const setupImport = guided && !!setup?.active && setup.step === 'import' && servers.length > 0;
+  useEffect(() => { if (setupImport) { if (setup?.serverId) setServerId(setup.serverId); setView('import'); } }, [setupImport]); // eslint-disable-line react-hooks/exhaustive-deps
   // A server just added: once connected, offer the import wizard if it can import and holds no history yet.
   const offerImport = useRef(false);
   useEffect(() => {
     if (!offerImport.current || dir.state !== 'ready') return;
     offerImport.current = false;
-    if (!dir.admin || !dir.extensions.includes('import')) return;
+    if (!dir.admin || !dir.extensions.includes('import') || setupImport) return;
     dir.request<{ available: boolean; conversations: number }>('_hearth/import/info').then((i) => { if (i.available && !i.conversations) go('import'); }, () => {});
   }, [dir]); // eslint-disable-line react-hooks/exhaustive-deps
   // A notification for each new Needs-you card (when on and this window isn't in front). The first list only seeds.
@@ -180,7 +186,7 @@ export default function App() {
   }), [refresh]);
 
   // First run on the desktop: the guided setup (docs/setup-guide.md). The web build and VS Code keep the plain form.
-  if (guided && !adding && (setup?.active || !servers.length)) {
+  if (guided && !adding && ((setup?.active && !setupImport) || !servers.length)) {
     return <Setup onDone={(id) => { offerImport.current = true; setServerId(id); setTarget(null); setKeyVersion((v) => v + 1); }} />;
   }
   if (!servers.length || adding) {
@@ -229,9 +235,9 @@ export default function App() {
             </button>
           )}
           {dir.state === 'ready' && dir.admin && dir.extensions.includes('import') && (
-            <button onClick={() => { setImportRun((n) => n + 1); go('import'); }} aria-current={view === 'import' ? 'page' : undefined}
+            <button onClick={() => openImport()} aria-current={view === 'import' ? 'page' : undefined}
               className={cn('mx-3 mb-1 flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] hover:bg-sidebar-accent', view === 'import' && 'bg-sidebar-accent font-medium')}>
-              <Download className="size-4 text-muted-foreground" /><span>Import Claude history</span>
+              <Download className="size-4 text-muted-foreground" /><span>Bring everything from Claude</span>
             </button>
           )}
           <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
@@ -334,7 +340,7 @@ export default function App() {
               <Menu className="size-5" />
               {dir.state === 'ready' && dir.cards.length > 0 && <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-primary" aria-label="Something needs you" />}
             </button>
-            {view === 'import' ? <span className="text-sm font-medium">Import Claude history</span> : view === 'newproject' ? <span className="text-sm font-medium">New project</span> : view === 'history' ? <span className="truncate text-sm font-medium">{historyOf && 'name' in historyOf ? <>{historyOf.name}<span className="text-muted-foreground"> · History</span></> : 'Imported history'}</span> : view === 'imported' && imported ? <><span className="truncate text-sm font-medium">{imported.title}</span><span className="shrink-0 text-sm text-muted-foreground">· Imported</span></> : view === 'project' && projectView ? <><span className="truncate text-sm font-medium">{projectView.name}</span><span className="text-sm text-muted-foreground">· Project settings</span></> : view === 'settings' ? <span className="text-sm font-medium">Settings</span> : view === 'needs' ? <span className="text-sm font-medium">Needs you</span> : target ? (
+            {view === 'import' ? <span className="text-sm font-medium">Bring everything from Claude</span> : view === 'newproject' ? <span className="text-sm font-medium">New project</span> : view === 'history' ? <span className="truncate text-sm font-medium">{historyOf && 'name' in historyOf ? <>{historyOf.name}<span className="text-muted-foreground"> · History</span></> : 'Imported history'}</span> : view === 'imported' && imported ? <><span className="truncate text-sm font-medium">{imported.title}</span><span className="shrink-0 text-sm text-muted-foreground">· Imported</span></> : view === 'project' && projectView ? <><span className="truncate text-sm font-medium">{projectView.name}</span><span className="text-sm text-muted-foreground">· Project settings</span></> : view === 'settings' ? <span className="text-sm font-medium">Settings</span> : view === 'needs' ? <span className="text-sm font-medium">Needs you</span> : target ? (
               <>
                 <span className="truncate text-sm font-medium">{target.title}</span>
                 {target.project && <span className="truncate text-sm text-muted-foreground">· {target.project}</span>}
@@ -361,7 +367,7 @@ export default function App() {
           )}
           {view === 'settings' && (
             <div className="min-h-0 flex-1">
-              <Settings servers={servers} server={server} dir={dir} onAdd={() => setAdding(true)}
+              <Settings servers={servers} server={server} dir={dir} onAdd={() => setAdding(true)} onImport={openImport}
                 onUse={(id) => { setServerId(id); setTarget(null); setView('thread'); }} onKeyChanged={() => setKeyVersion((v) => v + 1)} />
             </div>
           )}
@@ -375,8 +381,10 @@ export default function App() {
             <div className="min-h-0 flex-1"><ImportedThread key={imported.id} request={dir.request} summary={imported} onContinue={continued} /></div>
           )}
           {view === 'import' && dir.state === 'ready' && (
-            <div className="min-h-0 flex-1"><ImportWizard key={importRun} request={dir.request} serverName={server?.name ?? 'your server'} admin={dir.admin}
-              onDone={(p) => { dir.refresh(); if (p) openHistory({ project: p.slug, name: p.name }); else setView('thread'); }} /></div>
+            <div className="min-h-0 flex-1"><ImportView key={importRun} request={dir.request} serverName={server?.name ?? 'your server'} admin={dir.admin} part={importPart}
+              onDone={(p) => { dir.refresh(); if (p) openHistory({ project: p.slug, name: p.name }); else setView('thread'); }}
+              setup={setupImport ? { onSkip: () => { noteSetup('import', 'skipped for now; bring it across any time from the sidebar.'); updateSetup({ step: 'done' }); },
+                onContinue: (summary) => { dir.refresh(); noteSetup('import', summary); updateSetup({ step: 'done' }); } } : undefined} /></div>
           )}
           {view === 'newproject' && dir.state === 'ready' && (
             <div className="min-h-0 flex-1"><NewProject request={dir.request} clients={clientNames(dir.groups, dir.clients)} onDone={made} /></div>

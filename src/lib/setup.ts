@@ -4,12 +4,14 @@ import { useSyncExternalStore } from 'react';
 import { ClientApp, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 import { createWebSocketStream } from '@agentclientprotocol/sdk/experimental/ws-client';
 
-export type Step = 'key' | 'server' | 'connect' | 'provider' | 'done';
+export type Step = 'key' | 'server' | 'connect' | 'provider' | 'import' | 'done';
 export const STEPS: { id: Exclude<Step, 'key'> | 'key'; label: string }[] = [
   { id: 'key', label: 'Model key' },
   { id: 'server', label: 'Server' },
   { id: 'connect', label: 'Connect' },
   { id: 'provider', label: 'Model on the server' },
+  // The app's import view, opened by App with the guide beside it (docs/import.md).
+  { id: 'import', label: 'Bring everything from Claude' },
   { id: 'done', label: 'Done' },
 ];
 /** Where the server will run: this computer, another computer the person owns, or an address they were given. */
@@ -30,7 +32,7 @@ export interface SetupState {
   address?: string;
   serverId?: string;
   /** Last result of each check, in words, for the guide and for the step itself. */
-  notes?: Partial<Record<'address' | 'connect' | 'provider' | 'docker', string>>;
+  notes?: Partial<Record<'address' | 'connect' | 'provider' | 'docker' | 'import', string>>;
 }
 
 const KEY = 'hearth.setup.v1';

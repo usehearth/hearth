@@ -1,4 +1,7 @@
 // The everyday journeys, against the fake server. These should all pass.
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { strToU8, zipSync } from 'fflate';
 import { assistantMessages, composer, connect, expect, header, newThread, openThread, rememberServer, send, sendButton, sidebar, stopButton, test, threadRow, userMessages } from './support';
 import { FALLBACK_LINE } from '../fake-server/fixtures.ts';
 
@@ -8,8 +11,8 @@ test('connect: add a server with its address and device key', async ({ page, fak
   await page.getByPlaceholder('Paste the key').fill(fake.key);
   await page.getByRole('button', { name: 'Connect' }).click();
   await expect(sidebar(page)).toContainText('Connected to Fake Hearth');
-  // A new server that can import and holds no history yet offers the import wizard straight away.
-  await expect(header(page)).toContainText('Import Claude history');
+  // A new server that can import and holds no history yet offers the import straight away.
+  await expect(header(page)).toContainText('Bring everything from Claude');
   await expect(threadRow(page, 'Run the tests')).toBeVisible();
 });
 
@@ -233,20 +236,179 @@ test('settings: Connectors and Extensions list what the server has', async ({ pa
   expect(fake.unknown).toEqual([]);
 });
 
-test('import: a claude.ai export goes through review to done', async ({ page, fake }) => {
+test('composer: a file dropped on it becomes an attachment (the desktop window lets the page take drops)', async ({ page, fake }) => {
   await connect(page, fake);
-  await sidebar(page).getByRole('button', { name: 'Import Claude history' }).click();
-  await expect(page.getByText('Import your Claude history')).toBeVisible();
-  const conversations = [1, 2].map((n) => ({
-    uuid: `chat-${n}`, name: `Chat ${n}`, created_at: '2026-10-01T10:00:00Z', updated_at: '2026-10-01T11:00:00Z',
-    chat_messages: [{ uuid: `m${n}a`, sender: 'human', text: `Question ${n}`, created_at: '2026-10-01T10:00:00Z' }, { uuid: `m${n}b`, sender: 'assistant', text: `Answer ${n}`, created_at: '2026-10-01T10:01:00Z' }],
-  }));
-  await page.locator('input[type=file]').setInputFiles({ name: 'conversations.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(conversations)) });
-  await expect(page.getByText('2 chats')).toBeVisible();
-  await page.getByRole('button', { name: 'Look through them' }).click();
-  await expect(page.getByLabel('Project name')).toHaveValue('Claude chats');
-  await page.getByRole('button', { name: 'Import and make 1 project' }).click();
-  await expect(page.getByText('Imported 2 conversations, made 1 projects.')).toBeVisible();
+  const shell = page.locator('[data-slot="aui_composer-shell"]');
+  const dt = await page.evaluateHandle(() => { const d = new DataTransfer(); d.items.add(new File(['hello'], 'notes.txt', { type: 'text/plain' })); return d; });
+  await shell.dispatchEvent('dragenter', { dataTransfer: dt });
+  await shell.dispatchEvent('dragover', { dataTransfer: dt });
+  await shell.dispatchEvent('drop', { dataTransfer: dt });
+  await expect(shell).toContainText('notes.txt');
+});
+
+/** The folder a claude.ai export unzips into today: one zip per part (conversations, memories, account, artifacts). */
+function exportFolder(dir: string) {
+  const account = { uuid: 'acct-1' };
+  const chat = (n: number) => ({ uuid: `chat-${n}`, name: `Chat ${n}`, created_at: '2026-10-01T10:00:00Z', updated_at: '2026-10-01T11:00:00Z', account,
+    chat_messages: [{ uuid: `m${n}a`, sender: 'human', text: `Question ${n}`, created_at: '2026-10-01T10:00:00Z' }, { uuid: `m${n}b`, sender: 'assistant', text: `Answer ${n}`, created_at: '2026-10-01T10:01:00Z' }] });
+  const json = (v: unknown) => strToU8(JSON.stringify(v));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, 'conversations-000.zip'), zipSync({ 'conversations.json': json([chat(1), chat(2), { uuid: 'chat-3', name: 'Nothing here', account, chat_messages: [] }]) }));
+  writeFileSync(path.join(dir, 'memories-000.zip'), zipSync({ 'memories/acct-1.json': json({ account_uuid: 'acct-1', memory_files: [{ path: '/profile.md', content: 'Sam bakes bread.' }] }) }));
+  writeFileSync(path.join(dir, 'light_metadata-000.zip'), zipSync({ 'users.json': json([{ uuid: 'acct-1', email_address: 'sam@example.com' }]), 'login_history.json': json({ login_events: [] }) }));
+  writeFileSync(path.join(dir, 'frames-000.zip'), zipSync({ 'artifacts/a-1/artifact.json': json({ title: 'Budget tracker' }), 'artifacts/a-1/page.md': strToU8('# Budget') }));
+  return dir;
+}
+
+test('import: the claude.ai export folder, added whole, comes across with a receipt that adds up', async ({ page, fake }, testInfo) => {
+  const dir = exportFolder(testInfo.outputPath('claude-export-personal'));
+  await connect(page, fake);
+  await sidebar(page).getByRole('button', { name: 'Bring everything from Claude' }).click();
+  await expect(page.getByRole('heading', { name: 'Bring everything from Claude' })).toBeVisible();
+  // The web build can't read Claude Code on this computer, and says where to go for it.
+  await expect(page.getByText('Open the Hearth desktop app there')).toBeVisible();
+  // The folder exactly as it was unzipped: Hearth finds the parts, nobody picks files out of it.
+  await page.locator('input[webkitdirectory]').setInputFiles(dir);
+  await expect(page.getByText('claude.ai, sam@example.com')).toBeVisible();
+  await expect(page.getByText('2 chats · 1 memory · 1 empty')).toBeVisible();
+  await expect(page.getByText(/Hearth can't keep 1 other part of this export yet/)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Found 5 things' })).toBeVisible();
+  await expect(page.getByText(/Nothing is removed from Claude, from this computer or from your export/)).toBeVisible();
+  // One button, the suggestions as they are.
+  await page.getByRole('button', { name: 'Bring everything across' }).click();
+  await expect(page.getByRole('heading', { name: '2 of 5 were not kept: see why below.' })).toBeVisible();
+  await expect(page.getByText(/Every count adds up/)).toBeVisible();
+  const card = page.locator('div.rounded-xl', { hasText: 'claude.ai, sam@example.com' }).last();
+  await expect(card).toContainText('Found 5 · kept 3 · already here 0 · not kept 2');
+  await expect(card).toContainText('Nothing here');
+  await expect(card).toContainText('The artifact "Budget tracker" made on claude.ai');
+  await expect(page.getByRole('button', { name: 'Save the receipt' })).toBeVisible();
+  // What was sent: the two chats with messages, the memory inside the same run, and what was found (for the receipt).
   expect(fake.callsOf('_hearth/import/commit')).toHaveLength(2);
-  await expect(page.getByRole('button', { name: 'Open Hearth' })).toBeVisible();
+  expect(fake.callsOf('_hearth/import/memories').map((c) => c.params.runId)).toEqual([1]);
+  expect(fake.callsOf('_hearth/import/preview')[0].params.inventory.items).toHaveLength(5);
+  expect(fake.unknown).toEqual([]);
+  // Kept, and reopened from Settings.
+  await sidebar(page).getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Import from Claude' }).click();
+  await page.getByRole('button', { name: /Found 5 · kept 3 · already here 0 · not kept 2/ }).click();
+  await expect(page.getByRole('heading', { name: '2 of 5 were not kept: see why below.' })).toBeVisible();
+});
+
+test('import: the server restarts mid-import; the app says so plainly and running it again gives the receipt', async ({ page, fake }, testInfo) => {
+  const dir = exportFolder(testInfo.outputPath('claude-export-personal'));
+  await connect(page, fake);
+  await sidebar(page).getByRole('button', { name: 'Bring everything from Claude' }).click();
+  await page.locator('input[webkitdirectory]').setInputFiles(dir);
+  // The first chat arrives; then the server has forgotten the run (a restart: runs live in its memory).
+  let calls = 0;
+  fake.failNext('_hearth/import/file', { times: 1000, code: -32602, message: 'that import is no longer running; start again', data: { code: 'run_gone' }, match: () => ++calls > 1 });
+  await page.getByRole('button', { name: 'Bring everything across' }).click();
+  await expect(page.getByRole('status')).toContainText('Your server restarted during the import');
+  await expect(page.getByRole('status')).toContainText('Nothing already stored was lost: 1 conversation arrived and is kept.');
+  expect(fake.callsOf('_hearth/import/finish')).toHaveLength(0);
+  fake.clearFaults();
+  await page.getByRole('button', { name: 'Run it again' }).click();
+  await expect(page.getByRole('heading', { name: '2 of 5 were not kept: see why below.' })).toBeVisible();
+  expect(fake.unknown).toEqual([]);
+});
+
+test('import: run again after a first run: everything already here, nothing sent twice', async ({ page, fake }, testInfo) => {
+  const dir = exportFolder(testInfo.outputPath('claude-export-personal'));
+  await connect(page, fake);
+  await sidebar(page).getByRole('button', { name: 'Bring everything from Claude' }).click();
+  await page.locator('input[webkitdirectory]').setInputFiles(dir);
+  await page.getByRole('button', { name: 'Bring everything across' }).click();
+  await expect(page.getByRole('heading', { name: '2 of 5 were not kept: see why below.' })).toBeVisible();
+  // Again, from the sidebar: a fresh look, the same export.
+  await sidebar(page).getByRole('button', { name: 'Bring everything from Claude' }).click();
+  await page.locator('input[webkitdirectory]').setInputFiles(dir);
+  await page.getByRole('button', { name: 'Bring everything across' }).click();
+  await expect(page.getByRole('heading', { name: '2 of 5 were not kept: see why below.' })).toBeVisible();
+  await expect(page.locator('div.rounded-xl', { hasText: 'claude.ai, sam@example.com' }).last()).toContainText('Found 5 · kept 0 · already here 3 · not kept 2');
+  await expect(page.getByText('Nothing new since your last import')).toBeVisible();
+  expect(fake.callsOf('_hearth/import/commit')).toHaveLength(2);
+});
+
+test('import: Stop part way still finishes the run and shows its receipt', async ({ page, fake }, testInfo) => {
+  const dir = exportFolder(testInfo.outputPath('claude-export-personal'));
+  await connect(page, fake);
+  await sidebar(page).getByRole('button', { name: 'Bring everything from Claude' }).click();
+  await page.locator('input[webkitdirectory]').setInputFiles(dir);
+  fake.setDelay(800);
+  await page.getByRole('button', { name: 'Bring everything across' }).click();
+  await page.getByRole('button', { name: 'Stop after this one' }).click();
+  fake.setDelay(0);
+  await expect(page.getByRole('heading', { name: /were not kept: see why below/ })).toBeVisible({ timeout: 20_000 });
+  const fin = fake.callsOf('_hearth/import/finish');
+  expect(fin).toHaveLength(1);
+  expect(fin[0].params.stopped).toBe(true);
+  expect(fake.callsOf('_hearth/import/commit').length).toBeLessThan(2);
+});
+
+test('import: a call refused part way still finishes the run: the receipt shows what arrived, and run again brings the rest', async ({ page, fake }, testInfo) => {
+  const dir = exportFolder(testInfo.outputPath('claude-export-personal'));
+  await connect(page, fake);
+  await sidebar(page).getByRole('button', { name: 'Bring everything from Claude' }).click();
+  await page.locator('input[webkitdirectory]').setInputFiles(dir);
+  fake.failNext('_hearth/import/memories', { code: -32603, message: 'the knowledge hub is busy' });
+  await page.getByRole('button', { name: 'Bring everything across' }).click();
+  await expect(page.getByRole('status')).toContainText('The import was interrupted part way');
+  await expect(page.getByRole('heading', { name: '3 of 5 were not kept: see why below.' })).toBeVisible();
+  expect(fake.callsOf('_hearth/import/finish')).toHaveLength(1);
+  await page.getByRole('status').getByRole('button', { name: 'Run it again' }).click();
+  await expect(page.getByRole('heading', { name: '2 of 5 were not kept: see why below.' })).toBeVisible();
+  expect(fake.callsOf('_hearth/import/commit')).toHaveLength(2);
+});
+
+test('import: a connection that drops part way: a receipt for what arrived, or a plain line and run again', async ({ page, fake }, testInfo) => {
+  const dir = exportFolder(testInfo.outputPath('claude-export-personal'));
+  await connect(page, fake);
+  await sidebar(page).getByRole('button', { name: 'Bring everything from Claude' }).click();
+  await page.locator('input[webkitdirectory]').setInputFiles(dir);
+  // Every socket drops once the first chat has been committed.
+  let dropped = false;
+  fake.failNext('_hearth/import/commit', { times: 1, match: () => { if (!dropped) { dropped = true; setTimeout(() => fake.dropAll(), 0); } return false; } });
+  await page.getByRole('button', { name: 'Bring everything across' }).click();
+  await expect(page.getByText(/were not kept: see why below|The connection to your server dropped during the import/).first()).toBeVisible({ timeout: 30_000 });
+  // Either way the person is never left on the Find page with only an error line.
+  await expect(page.getByRole('button', { name: 'Bring everything across' })).toHaveCount(0);
+});
+
+test("import: when Claude Code on this computer can't be read, nothing can be brought across, and the screen says why", async ({ page, fake }) => {
+  // Stands in for the desktop app's shell: the key from the keychain, and a scan of this computer that fails.
+  await rememberServer(page, fake);
+  await page.addInitScript((key) => {
+    let cb = 0;
+    (window as any).__TAURI_INTERNALS__ = {
+      transformCallback: () => ++cb, unregisterCallback: () => {}, metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
+      invoke: async (cmd: string) => {
+        if (cmd === 'key_get') return key;
+        if (cmd === 'import_sources') throw 'Access is denied. (os error 5)';
+        return null;
+      },
+    };
+  }, fake.key);
+  await page.goto('/');
+  await expect(sidebar(page)).toContainText('Connected to Fake Hearth');
+  await sidebar(page).getByRole('button', { name: 'Bring everything from Claude' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'could not be read' })).toContainText('Claude Code on this computer could not be read, so nothing can be brought across yet.');
+  await expect(page.getByRole('alert').filter({ hasText: 'could not be read' })).toContainText('Access is denied');
+  await expect(page.getByRole('button', { name: 'Bring everything across' })).toBeDisabled();
+  expect(fake.callsOf('_hearth/import/begin')).toHaveLength(0);
+});
+
+test.describe('import against an older server', () => {
+  test.use({ fakeOptions: { importReceipts: false } });
+  test('it still brings the chats and says plainly that it can\'t count a receipt', async ({ page, fake }, testInfo) => {
+    const dir = exportFolder(testInfo.outputPath('claude-export-personal'));
+    await connect(page, fake);
+    await sidebar(page).getByRole('button', { name: 'Bring everything from Claude' }).click();
+    await page.locator('input[webkitdirectory]').setInputFiles(dir);
+    await page.getByRole('button', { name: 'Bring everything across' }).click();
+    await expect(page.getByRole('status')).toContainText("Imported 2 conversations. This server is older: it can't count a receipt");
+    expect(fake.callsOf('_hearth/import/extensions')).toHaveLength(0);
+    expect(fake.callsOf('_hearth/import/memories')[0].params.runId).toBeUndefined();
+    expect(fake.unknown).toEqual([]);
+  });
 });

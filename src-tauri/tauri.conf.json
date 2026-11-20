@@ -11,7 +11,7 @@
   },
   "app": {
     "windows": [
-      { "title": "Hearth", "width": 1280, "height": 820, "minWidth": 720, "minHeight": 480, "center": true }
+      { "title": "Hearth", "width": 1280, "height": 820, "minWidth": 720, "minHeight": 480, "center": true, "dragDropEnabled": false }
     ],
     "security": {
       "csp": "default-src 'self'; connect-src 'self' ws: wss: http://127.0.0.1:5178 ws://127.0.0.1:5178 ipc: http://ipc.localhost; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'"
