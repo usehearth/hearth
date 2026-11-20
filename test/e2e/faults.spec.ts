@@ -153,7 +153,6 @@ test.describe('socket drop in the middle of a turn', () => {
 
 test.describe('what is typed survives', () => {
   test('a draft survives a dropped connection', async ({ page, fake }) => {
-    knownFailure('ThreadPane.tsx: the reconnect remounts the runtime (key={gen}), which empties the composer');
     await connect(page, fake);
     await composer(page).fill('A half-written thought');
     const loads = fake.callsOf('session/load').length;
@@ -179,13 +178,22 @@ test.describe('what is typed survives', () => {
   });
 
   test('a draft survives going to another thread and back', async ({ page, fake }) => {
-    knownFailure('App.tsx: each thread pane is keyed by thread, so switching unmounts it and its composer');
     await connect(page, fake);
     await openThread(page, 'Run the tests');
     await composer(page).fill('Next: fix the open() filter');
     await openThread(page, 'Scratch notes');
     await openThread(page, 'Run the tests');
     await expect(composer(page)).toHaveValue('Next: fix the open() filter');
+  });
+
+  test('a sent message does not come back as a draft', async ({ page, fake }) => {
+    await connect(page, fake);
+    await openThread(page, 'Run the tests');
+    await send(page, 'Thanks');
+    await expect(assistantMessages(page).last()).toContainText('You said: Thanks');
+    await openThread(page, 'Scratch notes');
+    await openThread(page, 'Run the tests');
+    await expect(composer(page)).toHaveValue('');
   });
 });
 
