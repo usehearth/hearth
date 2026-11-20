@@ -110,7 +110,9 @@ export class AcpThreadController {
   ) => {
     // Hearth: the turn after this window's own may be another device's queued message (the server sends the oldest
     // first). Its first update says whose it is: a user message is someone else's; anything the agent says is ours.
-    if (this.promotePending && update.sessionUpdate !== "session_info_update" && update.sessionUpdate !== "usage_update") {
+    // Server lines (`_meta.hearth.notice`: taken back, waiting, a provider fallback) are not the turn speaking.
+    const notice = !!(update as { _meta?: { hearth?: { notice?: unknown } } })._meta?.hearth?.notice;
+    if (this.promotePending && !notice && update.sessionUpdate !== "session_info_update" && update.sessionUpdate !== "usage_update") {
       this.promotePending = false;
       if (update.sessionUpdate !== "user_message_chunk") {
         const item = this.queuedSends.shift();

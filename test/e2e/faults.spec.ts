@@ -180,6 +180,23 @@ test.describe('messages sent during a turn wait in the server queue', () => {
     expect(fake.callsOf('_hearth/queue/withdraw')).toHaveLength(1); // by its queue id (the server lists the queue)
   });
 
+  test("another device's message queued first runs first, even when a server line comes before it", async ({ page, fake }) => {
+    await connect(page, fake);
+    await newThread(page, 'Scratch');
+    await send(page, 'Count a little #slow');
+    await expect(assistantMessages(page).last()).toContainText('Step 2 of 16');
+    const sessionId = String(fake.callsOf('session/prompt')[0].params.sessionId);
+    fake.queueFromAnotherDevice(sessionId, 'From the phone'); // queued before this window's
+    fake.noticeBeforeNextTurn('The machine running the agent is busy; the next message waits for it.');
+    await send(page, 'Mine');
+    await expect(page.getByText('You said: Mine')).toBeVisible({ timeout: 20_000 });
+    await expect(userMessages(page)).toHaveText([/Count a little/, /From the phone/, /Mine/]);
+    // Each answer sits under its own message, not the phone's answer under this window's.
+    await expect(assistantMessages(page).filter({ hasText: 'You said: From the phone' })).not.toContainText('You said: Mine');
+    await expect(assistantMessages(page).last()).toContainText('You said: Mine');
+    await expect(assistantMessages(page).last()).not.toContainText('From the phone');
+  });
+
   test('one still waiting after a reconnect is listed again and can be taken back', async ({ page, fake }) => {
     await connect(page, fake);
     await newThread(page, 'Scratch');
@@ -300,6 +317,7 @@ test('a reply that never comes is reported', async ({ page, fake }) => {
   await newThread(page, 'Scratch');
   await send(page, 'Hello? #never');
   await expect(stopButton(page)).toBeVisible();
+  await page.waitForTimeout(1500); // the turn's opening updates (status, commands) have all arrived
   await page.clock.fastForward('10:00'); // ten minutes of silence
   await expect(page.getByText(/no answer|not answering|lost|timed out/i)).toBeVisible({ timeout: 5000 });
 });

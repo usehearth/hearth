@@ -141,6 +141,9 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
   /** Messages sent during a turn, waiting for it to end, per thread (core.chat_queue). */
   const queues = new Map<string, { id: string; text: string; by: string; createdAt: string; conn: Conn; reqId?: number | string; resolve: (r: unknown) => void; reject: (e: unknown) => void }[]>();
   let queueIds = 0;
+  /** Another device: a sender with no socket here (its messages are echoed to every window). */
+  const elsewhere = { id: -1, ws: null as unknown as WebSocket, attached: new Set<string>(), silent: false, nextId: 1, waiting: new Map() } as Conn;
+  let drainNotice: string | null = null;
   const calls: Call[] = [];
   const unknown: string[] = [];
   const faults = {
@@ -279,7 +282,9 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     }
     else turn.reply?.({ stopReason });
     turn.reply = null;
-    drain(t);
+    // As core: the reply to this turn goes out first; the next waiting message is sent after (core reads the queue
+    // from its database before sending it).
+    setTimeout(() => drain(t), 30);
   }
 
   /** The oldest queued message goes once the thread is free (core.chat_queue). Its sender is not sent it back. */
@@ -288,6 +293,8 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     const next = queues.get(t.id)?.shift();
     if (!next) return;
     notifyAll('_hearth/queue_changed', { sessionId: t.id });
+    // A server line before the next turn (a waiting line, a provider fallback): set by noticeBeforeNextTurn().
+    if (drainNotice) { update(t, notice(drainNotice)); drainNotice = null; }
     update(t, { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: next.text } }, { except: next.conn });
     void runTurn(t, scriptFor(next.text), next.conn, (result, error) => (error ? next.reject(error) : next.resolve({ ...(result as object), _meta: { hearth: { queued: true } } })), next.reqId);
   }
@@ -751,6 +758,15 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
     goSilent() { for (const c of conns) c.silent = true; },
     /** Answers the permission a thread waits on as if from another device. */
     answerElsewhere(sessionId: string, optionId = 'allow-once') { turns.get(sessionId)?.perm?.resolve(optionId, 'another device'); },
+    /** Queues a message in a thread as if another device sent it during the running turn (no window waits on it). */
+    queueFromAnotherDevice(sessionId: string, text: string) {
+      const list = queues.get(sessionId) ?? [];
+      list.push({ id: `q${++queueIds}`, text, by: 'phone', createdAt: new Date().toISOString(), conn: elsewhere, resolve: () => {}, reject: () => {} });
+      queues.set(sessionId, list);
+      notifyAll('_hearth/queue_changed', { sessionId });
+    },
+    /** The next queued turn starts with this server line (a notice) before anything else. */
+    noticeBeforeNextTurn(text: string) { drainNotice = text; },
     /** Makes `n` extra finished threads in a project (for paging). */
     addThreads(project: string, n: number, title = (i: number) => `Old thread ${i}`) {
       const p = projects.get(project)!;

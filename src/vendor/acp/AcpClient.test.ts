@@ -364,6 +364,10 @@ describe('messages sent during a turn (the server queue)', () => {
     t.ws.receive({ id: prompts(t)[0]!.id, result: { stopReason: 'end_turn' } });
     await flush();
     await flush();
+    // A server line may come first (a waiting line, a provider fallback): it is not the turn speaking.
+    t.ws.update('s1', { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '\n\nThe machine is busy.\n\n' }, _meta: { hearth: { notice: true } } });
+    await flush();
+    expect(controller.getState().queued).toEqual([{ id: expect.any(String), text: 'Mine' }]);
     // The server sends the other device's message (this window sees it as a user message) and its answer.
     t.ws.update('s1', { sessionUpdate: 'session_info_update', _meta: { hearth: { status: 'running' } } });
     t.ws.update('s1', { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'From the phone' } });
