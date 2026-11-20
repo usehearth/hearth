@@ -37,6 +37,7 @@ Made-up data on the desktop dev build, against a throwaway server (19 Nov):
 | A second run: everything already here | ![](images/import/08-rerun-receipt.png) |
 | Settings, Import from Claude: every receipt, reopened and saved | ![](images/import/09-settings-import-history.png) |
 | Settings, Extensions opens the same flow at its skills part | ![](images/import/10-settings-extensions.png) |
+| The end of the receipt: where to find it all again, the search box at the top of the sidebar (shots 01 to 10 were taken before the sidebar's "Search history" row went, in #32) | ![](images/import/11-done-search-box.png) |
 
 ## What stays on the computer
 
