@@ -92,7 +92,18 @@ export type AcpThreadState = {
   readonly passiveAssistantId?: string | undefined;
   /** Hearth: the last message is a user message still receiving chunks. */
   readonly passiveUserOpen?: boolean | undefined;
+  /**
+   * Hearth: the server is running a turn this window didn't start (it was running when the thread opened or
+   * reconnected, or another window started it), from `_meta.hearth.status` on `session/load` and on
+   * `session_info_update`. The thread shows it as running, with Stop, and nothing is sent over it.
+   */
+  readonly remoteRunning?: boolean | undefined;
 };
+
+/** Hearth: the server statuses that mean a turn is under way. */
+const RUNNING_STATUSES = new Set(["starting", "running", "needs_permission"]);
+export const isRunningStatus = (status: unknown): boolean =>
+  typeof status === "string" && RUNNING_STATUSES.has(status);
 
 export type AcpThreadEvent =
   | { readonly type: "load-start" }
@@ -107,6 +118,8 @@ export type AcpThreadEvent =
       readonly sessionConfigOptions?:
         | readonly AcpSessionConfigOption[]
         | undefined;
+      /** Hearth: the thread's status when it opened (`_meta.hearth.status` of the session/load answer). */
+      readonly sessionStatus?: string | null | undefined;
     }
   | { readonly type: "append-message"; readonly message: AcpThreadMessage }
   | { readonly type: "run-start"; readonly message: AcpAssistantMessage }
@@ -158,7 +171,17 @@ export const createAcpThreadState = (): AcpThreadState =>
   EMPTY_ACP_THREAD_STATE;
 
 export const isAcpStateRunning = (state: AcpThreadState): boolean =>
-  state.run.type === "running";
+  state.run.type === "running" || !!state.remoteRunning;
+
+/** Hearth: a turn this window didn't start is running or stopped: the passive answer it lands in shows that too. */
+const withRemoteRunning = (state: AcpThreadState, running: boolean): AcpThreadState => {
+  if (!!state.remoteRunning === running) return state;
+  const next = { ...state, remoteRunning: running };
+  return patchAssistant(next, state.passiveAssistantId, (message) => ({
+    ...message,
+    status: running ? RUNNING_STATUS : { type: "complete", reason: "unknown" },
+  }));
+};
 
 const RUNNING_STATUS: MessageStatus = { type: "running" };
 
@@ -333,7 +356,7 @@ const reducePassive = (
           id: `p-a-${state.messageOrder.length}`,
           parentId: state.headId,
           createdAt: Date.now(),
-          status: { type: "complete", reason: "unknown" },
+          status: state.remoteRunning ? RUNNING_STATUS : { type: "complete", reason: "unknown" },
           content: [],
         };
         next = withMessage(state, message);
@@ -400,11 +423,16 @@ const reduceSessionUpdate = (
         ? state
         : { ...state, plan: update.entries };
     case "session_info_update": {
-      if (update.title === undefined) return state;
+      // Hearth: the server's status rides here (`_meta.hearth.status`); a turn this window didn't start is running
+      // or has ended. During this window's own turn its own run says so already.
+      const status = (update as { _meta?: { hearth?: { status?: unknown } } })._meta?.hearth?.status;
+      const ownTurn = runningId(state) !== undefined || state.settlingAssistantId !== undefined;
+      const withStatus = typeof status === "string" && !ownTurn ? withRemoteRunning(state, isRunningStatus(status)) : state;
+      if (update.title === undefined) return withStatus;
       const title = update.title ?? undefined;
-      return state.sessionTitle === title
-        ? state
-        : { ...state, sessionTitle: title };
+      return withStatus.sessionTitle === title
+        ? withStatus
+        : { ...withStatus, sessionTitle: title };
     }
     case "current_mode_update":
       return state.currentModeId === update.currentModeId
@@ -450,8 +478,12 @@ export const reduceAcpThreadState = (
     case "connection": {
       const sessionOpened =
         event.sessionId !== undefined && event.sessionId !== state.sessionId;
+      // Hearth: a thread that opens (or reopens after a drop) while the server still runs a turn shows it running.
+      const opened = sessionOpened && runningId(state) === undefined
+        ? withRemoteRunning(state, isRunningStatus(event.sessionStatus))
+        : state;
       return {
-        ...state,
+        ...opened,
         connectionState: event.connectionState,
         sessionId: event.sessionId,
         ...(event.agentInfo !== undefined && { agentInfo: event.agentInfo }),
@@ -470,7 +502,7 @@ export const reduceAcpThreadState = (
 
     case "run-start":
       return {
-        ...withMessage(state, event.message),
+        ...withMessage(withRemoteRunning(state, false), event.message),
         run: { type: "running", assistantId: event.message.id },
         passiveAssistantId: undefined,
         passiveUserOpen: false,

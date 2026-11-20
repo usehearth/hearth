@@ -130,6 +130,8 @@ describe('opening a thread', () => {
     t.ws.reply('_hearth/thread/provider', {});
     expect(await p).toBe('s1');
     expect(t.ws.methods()).toEqual(['initialize', 'session/new', 'session/set_mode', '_hearth/thread/provider']);
+    // N1: the thread opens in the mode just set, not the one session/new reported before it.
+    expect(t.client.modes?.currentModeId).toBe('plan');
   });
 
   it.fails('a mode the server refuses before the first message stops that message (AcpClient.ts: the error is swallowed)', async () => {
@@ -164,7 +166,7 @@ describe('opening a thread', () => {
 });
 
 describe('a turn', () => {
-  it('session/prompt has no deadline', async () => {
+  it('session/prompt has no deadline (a long command can be silent; the thread pane says so after 5 minutes instead)', async () => {
     vi.useFakeTimers();
     const t = setup();
     await openSession(t);
@@ -176,14 +178,21 @@ describe('a turn', () => {
     expect(await p).toBe('end_turn');
   });
 
-  it.fails('a turn that sends nothing for ten minutes is given up (AcpClient.ts: no watchdog on session/prompt)', async () => {
-    vi.useFakeTimers();
-    const t = setup();
-    await openSession(t);
-    let settled = false;
-    void t.client.prompt([{ type: 'text', text: 'hi' }]).then(() => { settled = true; }, () => { settled = true; });
-    await vi.advanceTimersByTimeAsync(10 * 60_000);
-    expect(settled).toBe(true);
+  it("Stop on a turn this window didn't start asks the server to stop it, every time", async () => {
+    const t = setup({ sessionId: 's1' });
+    const controller = new AcpThreadController({ client: t.client });
+    controller.attach();
+    const loading = controller.load();
+    t.ws.onopen!();
+    await flush();
+    t.ws.reply('initialize', INIT);
+    await flush();
+    t.ws.reply('session/load', { modes: MODES, _meta: { hearth: { status: 'running' } } });
+    await loading;
+    expect(controller.getState().remoteRunning).toBe(true);
+    await controller.cancel();
+    await controller.cancel();
+    expect(t.ws.sent.filter((f) => f.method === 'session/cancel')).toHaveLength(2);
   });
 
   it('an aborted signal stops the turn before it is sent, even while the session opens', async () => {
