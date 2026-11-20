@@ -62,6 +62,7 @@ describe('export', () => {
     const md = threadMarkdown('Greet', [
       { role: 'user', content: [{ type: 'text', text: 'add a flag' }] },
       { role: 'assistant', content: [{ type: 'tool-call', toolName: 'edit', providerMetadata: { acp: { title: 'Edit a.ts', content: [{ type: 'diff', path: 'a.ts', oldText: 'one\n', newText: 'two\n' }] } } }, { type: 'text', text: 'Done.' }] },
+      { role: 'assistant', content: [{ type: 'data', name: 'hearth-notice', data: { text: 'primary is overloaded, so your message went to the next model provider.' } }] },
     ]);
     expect(md).toContain('# Greet');
     expect(md).toContain('## You');
@@ -69,6 +70,8 @@ describe('export', () => {
     expect(md).toContain('-one');
     expect(md).toContain('+two');
     expect(md).toContain('Done.');
+    // A server notice stays in the export, set apart from the agent's words.
+    expect(md).toContain('_primary is overloaded, so your message went to the next model provider._');
   });
 });
 

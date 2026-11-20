@@ -698,6 +698,37 @@ export function appendContentBlock(
   return [...content, ...parts];
 }
 
+/** Hearth: the name of the data part that holds a server notice. */
+export const NOTICE_PART = "hearth-notice";
+
+/**
+ * Hearth: a server notice's text, or null when the update isn't one. The server marks its own thread lines
+ * ("primary is overloaded, so your message went to the next model provider…") with `_meta.hearth.notice`
+ * (core's own mark is `_meta.monolith.notice`); they are not the agent's words.
+ */
+export function noticeText(update: unknown): string | null {
+  if (!isRecord(update)) return null;
+  const meta = isRecord(update._meta) ? update._meta : undefined;
+  const marked = (isRecord(meta?.hearth) && meta.hearth.notice) || (isRecord(meta?.monolith) && meta.monolith.notice);
+  if (!marked || !isRecord(update.content) || update.content.type !== "text") return null;
+  return String(update.content.text ?? "").trim();
+}
+
+/**
+ * Hearth: what an agent chunk adds to a message. A server notice becomes its own `hearth-notice` data part, drawn as a
+ * quiet grey line, so it neither reads as the agent's answer nor runs into the text around it.
+ */
+export function appendAgentChunk(
+  content: readonly AssistantPart[],
+  update: { content: AcpContentBlock },
+  kind: "text" | "reasoning",
+): readonly AssistantPart[] | undefined {
+  const notice = kind === "text" ? noticeText(update) : null;
+  if (notice === null) return appendContentBlock(content, update.content, kind);
+  if (!notice) return undefined;
+  return [...content, { type: "data", name: NOTICE_PART, data: { text: notice } } as AssistantPart];
+}
+
 /** Hearth: text-like MIME types sent as embedded text. */
 const isTextMime = (t: string) =>
   t.startsWith("text/") ||

@@ -1,5 +1,6 @@
 // The everyday journeys, against the fake server. These should all pass.
 import { assistantMessages, composer, connect, expect, header, newThread, openThread, rememberServer, send, sendButton, sidebar, stopButton, test, threadRow, userMessages } from './support';
+import { FALLBACK_LINE } from '../fake-server/fixtures.ts';
 
 test('connect: add a server with its address and device key', async ({ page, fake }) => {
   await page.goto('/');
@@ -110,6 +111,8 @@ for (const [choice, outcome, after] of [
     await send(page, 'Run the tests #permission');
     await page.getByRole('button', { name: choice, exact: true }).click();
     await expect(assistantMessages(page).last()).toContainText(after, { timeout: 15_000 });
+    // The server's "From now on" line is a notice, drawn as a quiet line.
+    if (choice.startsWith('Always')) await expect(assistantMessages(page).last().getByRole('note')).toContainText('From now on:');
     const thread = fake.threads.get(fake.callsOf('session/prompt')[0].params.sessionId)!;
     expect(thread.cards.at(-1)).toMatchObject({ status: outcome, decidedBy: 'this window' });
   });
@@ -139,6 +142,24 @@ test('slash menu: "/" on a new thread lists the project commands', async ({ page
   await expect(menu.getByRole('option')).toHaveText([/\/compact/, /\/context/]);
   await composer(page).press('Enter');
   await expect(composer(page)).toHaveValue('/compact ');
+});
+
+test('notice: a server line (provider fallback) is a quiet line apart from the answer, live and after reopening', async ({ page, fake }) => {
+  await connect(page, fake);
+  await newThread(page, 'Todo API');
+  await send(page, 'Check the build #fallback');
+  const check = async () => {
+    const answer = assistantMessages(page).last();
+    await expect(answer).toContainText('Done: the tests pass.');
+    await expect(answer.getByRole('note')).toHaveText(FALLBACK_LINE);
+    // Not the agent's words: the answer's Markdown holds only the agent's text.
+    await expect(answer.locator('.aui-md')).toHaveCount(1);
+    await expect(answer.locator('.aui-md')).not.toContainText('overloaded');
+  };
+  await check();
+  await openThread(page, 'Scratch notes');
+  await openThread(page, 'Check the build');
+  await check();
 });
 
 test('switch: going to another thread and back shows the first one again', async ({ page, fake }) => {
