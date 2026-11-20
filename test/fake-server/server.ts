@@ -183,7 +183,7 @@ export async function startFakeServer(opts: FakeServerOptions = {}) {
   });
   const cardEntry = (t: Thread, card: Card) => ({ sessionId: t.id, title: t.title, project: t.project, projectName: t.projectName, kind: t.kind, cwd: t.cwd, card });
   const live = () => [...threads.values()].filter((t) => !t.deleted);
-  const sessionResult = (t: Thread) => ({ modes: { ...MODES, currentModeId: t.modeId }, configOptions: null, _meta: { hearth: { project: t.project, kind: t.kind, title: t.title, provider: t.provider, model: null } } });
+  const sessionResult = (t: Thread) => ({ modes: { ...MODES, currentModeId: t.modeId }, configOptions: null, _meta: { hearth: { project: t.project, kind: t.kind, title: t.title, status: t.status, provider: t.provider, model: null } } });
   const thread = (params: any) => {
     const t = threads.get(String(params?.sessionId));
     if (!t || t.deleted) throw { code: -32002, message: 'Resource not found' };

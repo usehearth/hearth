@@ -367,6 +367,15 @@ export class AcpClient {
     return result.stopReason ?? "end_turn";
   }
 
+  /**
+   * Hearth: stops a turn this window didn't start (it was running when the thread reopened, or another window
+   * started it). The server stops it and reports the thread idle; each press sends again.
+   */
+  cancelRemote(): void {
+    if (!this._sessionId || this._connectionState !== "connected") return;
+    this.sendNotification("session/cancel", { sessionId: this._sessionId });
+  }
+
   async cancel(): Promise<void> {
     this.settlePermissions({ outcome: "cancelled" });
     if (!this._sessionId || this._connectionState !== "connected") return;
@@ -560,14 +569,19 @@ export class AcpClient {
     }
     this._sessionId = session.sessionId;
     this.lostSessionId = undefined;
+    let modeApplied: string | undefined;
     if (attach === undefined && lost === undefined) {
       // Hearth: what was picked before the thread existed applies before its first prompt.
       const p = this.beforeSession;
       this.beforeSession = {};
-      if (p.mode) await this.request("session/set_mode", { sessionId: session.sessionId, modeId: p.mode }).catch(() => undefined);
+      if (p.mode) modeApplied = await this.request("session/set_mode", { sessionId: session.sessionId, modeId: p.mode }).then(() => p.mode, () => undefined);
       if (p.provider) await this.request("_hearth/thread/provider", { sessionId: session.sessionId, provider: p.provider.name, ...(p.provider.model ? { model: p.provider.model } : {}) }).catch(() => undefined);
     }
-    this.sessionModes = session.modes ?? undefined;
+    // Hearth (N1): session/new reported the mode before set_mode changed it; the thread is in the mode just set, so
+    // that is the one it opens with (otherwise the pill flips back to Ask after the first message).
+    this.sessionModes = session.modes
+      ? { ...session.modes, ...(modeApplied ? { currentModeId: modeApplied } : {}) }
+      : undefined;
     this.sessionConfigOptions = session.configOptions ?? undefined;
     this.lastSessionMeta = ((session as { _meta?: { hearth?: Record<string, unknown> } })._meta?.hearth) ?? undefined;
     this.emitConnectionChange();
