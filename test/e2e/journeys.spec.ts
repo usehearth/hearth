@@ -504,3 +504,19 @@ test.describe('client field, simple client mode', () => {
   });
 });
 
+for (const mode of ['simple', 'strict'] as const) {
+  test.describe(`auto mode for a client project, ${mode} client mode`, () => {
+    test.use({ fakeOptions: { world: clientWorld(), clientMode: mode, extensions: [...EXTENSIONS, 'project', 'permissions'] } });
+
+    test(mode === 'simple' ? 'simple: a client project can allow auto mode, like any project' : 'strict: a client project has no auto mode tick', async ({ page, fake }, info) => {
+      await connect(page, fake);
+      await sidebar(page).getByRole('button', { name: 'Settings for Acme site' }).click();
+      await expect(page.getByRole('radiogroup', { name: 'Mode new threads start in' })).toBeVisible();
+      const tick = page.getByRole('checkbox', { name: /Allow auto mode/ });
+      if (mode === 'simple') await expect(tick).toBeVisible(); else await expect(tick).toHaveCount(0);
+      await tick.or(page.getByRole('radiogroup', { name: 'Mode new threads start in' })).first().scrollIntoViewIfNeeded();
+      await page.screenshot({ path: info.outputPath(`auto-${mode}.png`) });
+    });
+  });
+}
+
