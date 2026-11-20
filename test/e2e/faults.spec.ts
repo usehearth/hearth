@@ -346,33 +346,44 @@ test.describe('a long thread list', () => {
 });
 
 test.describe('the error banner', () => {
-  /** A dropped socket mid-turn puts up the banner, then the thread reconnects. */
+  /** A dropped socket mid-turn puts up the banner (checked while the connection is down), then the thread reconnects. */
   async function dropMidTurn(page: Page, fake: FakeServer) {
     await connect(page, fake);
     await newThread(page, 'Scratch');
     await send(page, 'Count slowly #drop');
-    await reloaded(fake, 0);
     await expect(errorBanner(page)).toBeVisible();
   }
 
   test('says what happened in plain words', async ({ page, fake }) => {
-    knownFailure('App.tsx shows the raw error: "ACP WebSocket connection closed"');
     await dropMidTurn(page, fake);
+    await expect(errorBanner(page)).toContainText('The connection to the server dropped');
     await expect(errorBanner(page)).not.toHaveText(/ACP|WebSocket|JSON|-32\d{3}/);
   });
 
   test('can be dismissed', async ({ page, fake }) => {
-    knownFailure('App.tsx: the banner has no close button; only opening another thread clears it');
-    await dropMidTurn(page, fake);
-    await errorBanner(page).getByRole('button', { name: /dismiss|close/i }).click({ timeout: 3000 });
+    await connect(page, fake);
+    await send(page, 'Try it #error'); // a turn the server ends with an error: its banner stays until dismissed
+    await expect(errorBanner(page)).toContainText('provider down');
+    await errorBanner(page).getByRole('button', { name: 'Dismiss' }).click();
     await expect(errorBanner(page)).toBeHidden();
   });
 
   test('goes away once the connection is back', async ({ page, fake }) => {
-    knownFailure('App.tsx: nothing clears the banner when the thread reconnects');
     await dropMidTurn(page, fake);
+    await reloaded(fake, 0);
     await expect(reconnectPill(page)).toBeHidden();
     await expect(errorBanner(page)).toBeHidden({ timeout: 10_000 });
+  });
+
+  test('an error that is not about the connection stays after a reconnect', async ({ page, fake }) => {
+    await connect(page, fake);
+    await send(page, 'Try it #error');
+    await expect(errorBanner(page)).toContainText('provider down');
+    const loads = fake.callsOf('session/load').length;
+    fake.dropAll();
+    await reloaded(fake, loads);
+    await expect(reconnectPill(page)).toBeHidden({ timeout: 15_000 });
+    await expect(errorBanner(page)).toContainText('provider down');
   });
 });
 
@@ -386,7 +397,6 @@ test.describe('"Done" notifications', () => {
   });
 
   test('a stopped turn is not announced as done', async ({ page, fake }) => {
-    knownFailure('ThreadPane.tsx Watch: any running -> idle change notifies "Done", a Stop included');
     const notes = await captureNotifications(page);
     await connect(page, fake);
     await send(page, 'Count slowly #long');
@@ -398,13 +408,13 @@ test.describe('"Done" notifications', () => {
   });
 
   test('a failed turn is not announced as done', async ({ page, fake }) => {
-    knownFailure('ThreadPane.tsx Watch: an error ends the run like a success and notifies "Done"');
     const notes = await captureNotifications(page);
     await connect(page, fake);
     await send(page, 'Try it #error');
     await expect(sendButton(page)).toBeVisible();
     await page.waitForTimeout(1000);
     expect(await notes()).not.toContainEqual(expect.stringMatching(/^Done|turn finished/));
+    expect(await notes()).toContainEqual(expect.stringMatching(/^Failed|a turn failed/)); // said as what it is
   });
 });
 

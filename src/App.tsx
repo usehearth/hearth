@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { notify } from '@/lib/notify';
 import { assetUrl, hostReady, inVsCode, onHostEvent } from '@/lib/hostBridge';
-import { Archive, BellDot, Briefcase, ChevronDown, FolderPlus, History as HistoryIcon, Lock, Menu, Settings as SettingsIcon, ShieldAlert, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert, Download } from 'lucide-react';
+import { Archive, BellDot, Briefcase, ChevronDown, FolderPlus, History as HistoryIcon, Lock, Menu, Settings as SettingsIcon, ShieldAlert, SlidersHorizontal, Flame, Loader2, MoonStar, Pin, Plus, RefreshCw, Server as ServerIcon, Sun, TriangleAlert, Download, X } from 'lucide-react';
 import { useAdminKey } from '@/components/hearth/Admin';
 import { errorText } from '@/lib/hearth';
+import { isConnectionError, plainError } from '@/lib/errors';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { ThreadPane, type Blocked, type FirstMessage, type ThreadTarget } from '@/components/hearth/ThreadPane';
@@ -164,7 +165,9 @@ export default function App() {
     return off;
   }, []);
   const events = useMemo(() => ({
-    onError: (m: string) => setError(m),
+    onError: (m: string) => { if (m) setError(plainError(m)); },
+    // The thread is connected again: a message about the dropped connection is no longer true.
+    onRecovered: () => setError((e) => (e && isConnectionError(e) ? null : e)),
     onSession: (sessionId: string) => setTarget((t) => {
       if (!t || t.sessionId === sessionId) return t;
       refresh?.(); // a new thread now exists on the server
@@ -356,7 +359,8 @@ export default function App() {
           )}
           {error && (
             <div data-testid="error-banner" className="mx-5 mt-3 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
-              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" /><span className="text-foreground/90">{error}</span>
+              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" /><span className="min-w-0 flex-1 text-foreground/90">{error}</span>
+              <button onClick={() => setError(null)} aria-label="Dismiss" title="Dismiss" className="-my-0.5 -mr-1 grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><X className="size-3.5" /></button>
             </div>
           )}
           {view === 'settings' && (
