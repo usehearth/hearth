@@ -183,6 +183,11 @@ export class AcpClient {
   private lostSessionId: string | undefined;
   private readonly retiredSessionIds = new Set<string>();
   private restartLoadDeadline: (() => void) | undefined;
+  /** Hearth: how the last socket ended: whether it opened, and its close code and reason (4401, 4429...). */
+  private _lastClose: { opened: boolean; code?: number; reason?: string } | undefined;
+  get lastClose(): { opened: boolean; code?: number; reason?: string } | undefined {
+    return this._lastClose;
+  }
   /** Hearth: when the socket last sent anything, and the heartbeat timer (heartbeatMs). */
   private lastHeard = 0;
   private heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -467,9 +472,12 @@ export class AcpClient {
       }
       this.ws = ws;
       const isCurrent = () => this.ws === ws;
+      const ended: { opened: boolean; code?: number; reason?: string } = { opened: false };
+      this._lastClose = ended;
 
       ws.onopen = () => {
         if (!isCurrent()) return;
+        ended.opened = true;
         void (async () => {
           try {
             const result = await this.request<AcpInitializeResponse>(
@@ -509,8 +517,10 @@ export class AcpClient {
         this.lastHeard = Date.now();
         this.handleMessage(typeof event.data === "string" ? event.data : "");
       };
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         if (!isCurrent()) return;
+        ended.code = event?.code;
+        ended.reason = event?.reason;
         this.handleClose();
         fail(new Error("ACP WebSocket closed before handshake completed"));
       };

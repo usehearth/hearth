@@ -8,7 +8,7 @@ import { createWebSocketStream } from '@agentclientprotocol/sdk/experimental/ws-
 import { keyFor, type Server } from './servers';
 import type { CardAnswer, CardEntry } from './hearth';
 import { adminAnswerSig } from './admin';
-import { HEARTBEAT_MS, HEARTBEAT_TIMEOUT_MS, reconnectDelay, REFUSED_AFTER, serverUp } from './reach';
+import { HEARTBEAT_MS, HEARTBEAT_TIMEOUT_MS, noteServer, noteUp, reconnectDelay, refusalOf, refusalText, waitAllowed, type CloseInfo } from './reach';
 
 export interface ThreadItem {
   sessionId: string;
@@ -57,6 +57,10 @@ export type DirectoryState =
   | { state: 'no-key' }
   | { state: 'connecting' }
   | { state: 'ready'; agent: string; groups: ProjectGroup[]; refresh: () => void; reconnecting?: boolean;
+      /** While reconnecting: what is happening, when it is more than "Reconnecting…" (a long wait, a lockout). */
+      note?: string;
+      /** While reconnecting: try now instead of waiting. */
+      tryNow?: () => void;
       /** Every open card this device may see (`_hearth/cards`); empty on servers without it. */
       cards: CardEntry[];
       answer: (e: CardEntry, a: CardAnswer) => Promise<unknown>;
@@ -72,9 +76,9 @@ export type DirectoryState =
       /** A request on the list connection (settings use it). */
       request: <T = unknown>(method: string, params?: unknown) => Promise<T> }
   | { state: 'error'; message: string; retry: () => void;
-      /** The server is up and refused this device's key: ask for a key (no more tries on our own, they count toward its lockout). */
+      /** The server refused this device's key: ask for a key (no more tries on our own, they count toward its lockout). */
       refused: boolean;
-      /** The server is away: Hearth keeps trying by itself (Retry tries now). */
+      /** Hearth keeps trying by itself (Retry tries now). */
       retrying: boolean };
 
 const folderName = (cwd: string) => cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || cwd;
@@ -118,13 +122,12 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
   const [st, setSt] = useState<DirectoryState>({ state: 'connecting' });
   const [nonce, setNonce] = useState(0);
   // Each bump reconnects. `fails` picks the backoff and resets after a good connect; `wasReady` says a drop
-  // should reconnect quietly (keep the list on screen) rather than show an error. `refusals` counts tries the server
-  // refused while it was up (reach.ts): only those lead to asking for the key again; a server that is away costs none.
+  // should reconnect quietly (keep the list on screen) rather than show an error. When to try again, and when to stop
+  // and ask for the key, comes from how the socket was refused (reach.ts), so an outage never becomes a lockout.
   const [attempt, setAttempt] = useState(0);
   const fails = useRef(0);
-  const refusals = useRef(0);
   const wasReady = useRef(false);
-  useEffect(() => { wasReady.current = false; fails.current = 0; refusals.current = 0; }, [server?.id, server?.url, keyVersion, nonce]);
+  useEffect(() => { wasReady.current = false; fails.current = 0; }, [server?.id, server?.url, keyVersion, nonce]);
 
   useEffect(() => {
     if (!server) return;
@@ -136,9 +139,12 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
     let retry: ReturnType<typeof setTimeout> | null = null;
     let refresh = () => {};
     let beat: ReturnType<typeof setInterval> | null = null;
+    const url = server.url;
+    /** Try again after the backoff, or later if a lockout or the shared budget says so; returns the wait. */
     const reconnectLater = () => {
-      if (!live || retry) return;
-      retry = setTimeout(() => setAttempt((n) => n + 1), reconnectDelay(fails.current++));
+      const wait = Math.max(reconnectDelay(fails.current++), waitAllowed(url));
+      if (live && !retry) retry = setTimeout(() => setAttempt((n) => n + 1), wait);
+      return wait;
     };
     if (!wasReady.current) setSt({ state: 'connecting' });
     const app = new ClientApp({ name: 'hearth-directory' })
@@ -148,7 +154,16 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
       .onNotification('_hearth/cards_changed', (p: unknown) => p, () => {
         relist ??= setTimeout(() => { relist = null; refresh(); }, RELIST_MS);
       });
-    const conn = app.connect(createWebSocketStream(server.url, { protocols: ['acp', `bearer.${key}`] }));
+    // How this socket ended (opened? which close code?), to tell a refused key and a lockout from an outage.
+    const seen: CloseInfo = { opened: false };
+    class Watched extends WebSocket {
+      constructor(u: string | URL, protocols?: string | string[]) {
+        super(u, protocols);
+        this.addEventListener('open', () => { seen.opened = true; });
+        this.addEventListener('close', (e) => { seen.code = e.code; seen.reason = e.reason; });
+      }
+    }
+    const conn = app.connect(createWebSocketStream(url, { protocols: ['acp', `bearer.${key}`], WebSocket: Watched as never }));
     let hasCards = true;
     // Every page (servers that page send nextCursor), up to MAX_PAGES so a huge server can't stall the sidebar.
     const listAll = async () => {
@@ -190,7 +205,7 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
     const lost = () => {
       if (!ready || !live) return;
       ready = false;
-      setSt((prev) => (prev.state === 'ready' ? { ...prev, reconnecting: true } : prev));
+      setSt((prev) => (prev.state === 'ready' ? { ...prev, reconnecting: true, note: undefined, tryNow: undefined } : prev));
       try { conn.close(); } catch { /* */ }
       reconnectLater();
     };
@@ -217,7 +232,8 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
         ready = true;
         wasReady.current = true;
         fails.current = 0;
-        refusals.current = 0;
+        noteServer(url, init?._meta);
+        noteUp(url);
         setSt({ state: 'ready', agent, ...first, refresh, answer, extensions, request });
         // Heartbeat: a socket can stay open and say nothing (a half-open connection after sleep or a network change);
         // the browser won't notice. Any answer to a ping proves it is alive, "method not found" included.
@@ -234,22 +250,26 @@ export function useDirectory(server: Server | undefined, keyVersion: number): Di
           setSt({ state: 'error', message: (e as Error).message, retry: () => setNonce((n) => n + 1), refused: false, retrying: false });
           return;
         }
-        // Away (restarting, offline) or turned away? Only a refusal while the server is up counts toward asking for the
-        // key again; while it is away Hearth keeps trying by itself, the list (if it had one) still on screen.
-        const up = await serverUp(server.url);
+        await new Promise((r) => setTimeout(r, 0)); // the close event may land just after the failure
         if (!live) return;
-        refusals.current = up ? refusals.current + 1 : 0;
-        if (!up || refusals.current < (wasReady.current ? REFUSED_AFTER : 1)) {
-          reconnectLater();
-          if (!wasReady.current) setSt({ state: 'error', message: up ? 'The server turned this device away. Trying again…' : "Can't reach the server. Trying again…", retry: tryNow, refused: false, retrying: true });
+        const why = refusalOf(url, seen);
+        if (why.kind === 'refused') {
+          // The key: stop (every further try counts toward the server's lockout) and ask for one.
+          wasReady.current = false;
+          setSt({ state: 'error', message: refusalText(why, 0), retry: () => setNonce((n) => n + 1), refused: true, retrying: false });
           return;
         }
-        wasReady.current = false;
-        setSt({ state: 'error', message: "The server refused this device's key. It may have been revoked: paste a new one.", retry: () => setNonce((n) => n + 1), refused: true, retrying: false });
+        // Away, locked out for a while, or unclear: try again when allowed, the list (if there was one) still shown.
+        const wait = reconnectLater();
+        const message = refusalText(why, wait);
+        const long = why.kind === 'locked' || wait > 60_000;
+        if (wasReady.current) setSt((prev) => (prev.state === 'ready' ? { ...prev, reconnecting: true, note: long ? message : undefined, tryNow: long ? tryNow : undefined } : prev));
+        else setSt({ state: 'error', message, retry: tryNow, refused: false, retrying: true });
       }
     })();
-    // Back to the window or back online: catch anything missed, or try again now rather than wait out the backoff.
-    const now = () => { if (ready) refresh(); else if (retry) tryNow(); };
+    // Back to the window or back online: catch anything missed, or try again now rather than wait out the backoff
+    // (never past a lockout or the shared budget: those protect the key).
+    const now = () => { if (ready) refresh(); else if (retry && waitAllowed(url) === 0) tryNow(); };
     window.addEventListener('focus', now);
     window.addEventListener('online', now);
     return () => {

@@ -287,7 +287,17 @@ export default function App() {
             )}
           </nav>
           <div className="border-t border-sidebar-border px-4 py-2.5 text-[11px] text-muted-foreground">
-            {dir.state === 'ready' ? (dir.reconnecting ? 'Reconnecting…' : <>Connected to {dir.agent}. Chats live on the server.</>) : 'Chats live on the server, not this device.'}
+            {dir.state === 'ready'
+              ? (dir.reconnecting
+                ? (dir.note ? (
+                  <>
+                    <span role="status">{dir.note}{dir.tryNow && <> <button onClick={dir.tryNow} className="font-medium text-foreground underline-offset-2 hover:underline">Try now</button></>}</span>
+                    {/* It may be the key (a server that doesn't say why it refuses): a new one can go in from here. */}
+                    {server && <div className="mt-1.5"><KeyPrompt compact server={server} onSaved={() => setKeyVersion((v) => v + 1)} /></div>}
+                  </>
+                ) : 'Reconnecting…')
+                : <>Connected to {dir.agent}. Chats live on the server.</>)
+              : 'Chats live on the server, not this device.'}
           </div>
         </aside>
 

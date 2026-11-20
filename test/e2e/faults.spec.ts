@@ -52,40 +52,74 @@ test.describe('server restart', () => {
     await expect(assistantMessages(page).last()).toContainText('You said: Still there?');
   });
 
-  test('a long outage keeps the list on screen and says it is reconnecting', async ({ page, fake }) => {
+  test('a long outage on a server that does not say why it refuses spends few tries, then waits and offers Try now', async ({ page, fake }) => {
+    await connect(page, fake);
+    const back = fake.restart(25_000);
+    // At most 4 failed tries per 15 minutes from this page (the server locks an address out at 5 wrong keys, and
+    // today it can't tell the page whether a refusal was the key or the server being away).
+    await expect(sidebar(page)).toContainText('Next try at', { timeout: 20_000 });
+    await expect(threadRow(page, 'Run the tests')).toBeVisible(); // the list stays
+    await back;
+    await sidebar(page).getByRole('button', { name: 'Try now' }).click();
+    await expect(sidebar(page)).toContainText('Connected to Fake Hearth', { timeout: 15_000 });
+    await expect(reconnectPill(page)).toBeHidden({ timeout: 15_000 }); // the thread follows the sidebar back
+  });
+});
+
+test.describe('a server that says why it refuses (close codes 4401 and 4429)', () => {
+  test.use({ fakeOptions: { refusals: 'close', lockoutMs: 8000 } });
+
+  test('a long outage keeps the list on screen and keeps trying until the server is back', async ({ page, fake }) => {
     await connect(page, fake);
     const back = fake.restart(20_000);
     await expect(sidebar(page)).toContainText('Reconnecting…');
-    await page.waitForTimeout(15_000); // well past the old give-up point
+    await page.waitForTimeout(15_000);
     await expect(threadRow(page, 'Run the tests')).toBeVisible();
     await expect(sidebar(page).getByText('Not connected')).toBeHidden();
     await back;
     await expect(sidebar(page)).toContainText('Connected to Fake Hearth', { timeout: 40_000 });
   });
-});
 
-test.describe('server restart, older server (its /healthz not readable from the page)', () => {
-  test.use({ fakeOptions: { healthz: false } });
-  test('the sidebar still comes back by itself', async ({ page, fake }) => {
+  test('a revoked key: asked for at once, one try per connection, and a new key reconnects', async ({ page, fake }) => {
     await connect(page, fake);
-    await fake.restart(4000);
-    await expect(sidebar(page)).toContainText('Connected to Fake Hearth', { timeout: 20_000 });
-    await expect(threadRow(page, 'Run the tests')).toBeVisible();
-  });
-});
-
-test.describe('a refused key', () => {
-  test('a revoked key brings back the key prompt, spending few tries, and a new key reconnects', async ({ page, fake }) => {
-    await connect(page, fake);
-    fake.revokeKey('replacement-key'); // the server stays up but refuses the old key from now on
+    fake.revokeKey('replacement-key');
     await expect(sidebar(page)).toContainText("The server refused this device's key", { timeout: 15_000 });
-    await expect(page.getByText('The server turned this device away.')).toBeVisible(); // the thread stops trying too
+    await expect(page.getByRole('status').filter({ hasText: "The server refused this device's key" })).toBeVisible(); // the thread stops too
     await page.waitForTimeout(5000);
-    expect(fake.refusedUpgrades).toBeLessThanOrEqual(3); // the real server locks a key out after 5 refusals in 15 minutes
+    expect(fake.refusedUpgrades).toBeLessThanOrEqual(2);
+    expect(fake.locked).toBe(false);
     await sidebar(page).getByPlaceholder('Paste the key').fill('replacement-key');
     await sidebar(page).getByRole('button', { name: 'Unlock' }).click();
     await expect(sidebar(page)).toContainText('Connected to Fake Hearth');
     await expect(reconnectPill(page)).toBeHidden({ timeout: 15_000 });
+  });
+
+  test('a lockout (429) is said plainly and waited out, with no tries before it lifts', async ({ page, fake }) => {
+    await connect(page, fake);
+    fake.lockOut(); // as if this address had sent 5 wrong keys just now; it lifts after 8 s
+    await expect(sidebar(page)).toContainText('refusing this address for a while, after too many wrong keys', { timeout: 10_000 });
+    await expect(threadRow(page, 'Run the tests')).toBeVisible();
+    const during = fake.lockedRefusals;
+    expect(during).toBeLessThanOrEqual(2); // the sidebar's and the thread's first tries, then nothing until it lifts
+    await expect(sidebar(page)).toContainText('Connected to Fake Hearth', { timeout: 20_000 });
+    expect(fake.lockedRefusals).toBe(during);
+  });
+});
+
+test.describe('a server that does not say why it refuses (today: 401 and 429 at the upgrade)', () => {
+  test.use({ fakeOptions: { lockoutMs: 30_000 } });
+
+  test('a revoked key never locks the address out, and the key can be replaced', async ({ page, fake }) => {
+    await connect(page, fake);
+    fake.revokeKey('replacement-key'); // a stale page with an old key, as the UI session saw
+    await expect(sidebar(page)).toContainText('may have turned this device\'s key away', { timeout: 20_000 });
+    await page.waitForTimeout(5000);
+    expect(fake.refusedUpgrades).toBeLessThanOrEqual(4);
+    expect(fake.locked).toBe(false);
+    await sidebar(page).getByRole('button', { name: 'New key' }).click();
+    await sidebar(page).getByPlaceholder('Paste the key').fill('replacement-key');
+    await sidebar(page).getByRole('button', { name: 'Unlock' }).click();
+    await expect(sidebar(page)).toContainText('Connected to Fake Hearth');
   });
 });
 
