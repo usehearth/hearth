@@ -11,7 +11,8 @@ import { field } from '@/components/ui/field';
 import { ImportReceipt } from '@/components/hearth/ImportReceipt';
 import { errorText } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
-import { readExports, type ChatExport, type ExportFile } from '@/lib/claudeai';
+import { type ChatExport, type ExportFile } from '@/lib/claudeai';
+import { readExportsInBackground } from '@/lib/exportReader';
 import { filesFromDrop, filesFromInput } from '@/lib/dropfiles';
 import {
   applyPlaceDecisions, bringAcross, canScanThisMachine, configGroup, dateRange, defaultChoices, gather, homeStats, homeWords, leftOutFrom, localSources, previewOf, readConfig, rememberOf, scanLocal,
@@ -152,7 +153,7 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
     if (!more.length) return;
     setErr(null); setReading(true);
     const all = [...files.filter((f) => !more.some((m) => m.path === f.path)), ...more];
-    try { const r = await readExports(all); setFiles(all); setExports(r.exports); if (r.problems.length) setErr(r.problems.join(' ')); }
+    try { const r = await readExportsInBackground(all); setFiles(all); setExports(r.exports); if (r.problems.length) setErr(r.problems.join(' ')); }
     catch (e) { setErr(errorText(e)); } finally { setReading(false); }
   }, [files]);
 

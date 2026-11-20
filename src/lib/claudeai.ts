@@ -61,10 +61,27 @@ export interface ChatExport {
 }
 
 /** One file of what the person gave: inside a zip, in a folder (picker or drop), or a loose file. */
-export interface ExportFile { path: string; size: number; bytes(): Promise<Uint8Array> }
+export interface ExportFile {
+  path: string; size: number; bytes(): Promise<Uint8Array>;
+  /** When known (a File): with path and size, what a file already read is remembered by, so adding another file doesn't read it again. */
+  lastModified?: number;
+  /** The File itself, when there is one: it can be handed to the background reader (src/lib/exportWorker.ts). */
+  file?: File;
+}
 /** A File from an <input> (a folder picker gives each file its path inside the folder) as an ExportFile. */
 export const exportFile = (f: File, path?: string): ExportFile =>
-  ({ path: (path ?? ((f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name)).replace(/\\/g, '/').replace(/^\/+/, ''), size: f.size, bytes: async () => new Uint8Array(await f.arrayBuffer()) });
+  ({ path: (path ?? ((f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name)).replace(/\\/g, '/').replace(/^\/+/, ''), size: f.size, lastModified: f.lastModified, file: f,
+    bytes: async () => new Uint8Array(await f.arrayBuffer()) });
+
+/** The biggest single part read in one go (a JavaScript string can't hold much more). Bigger: a plain message, not a freeze. */
+let MAX_PART = 450_000_000;
+/** Tests only: a smaller limit, to check the message without a 450 MB file. */
+export function setMaxPartForTest(n: number) { MAX_PART = n; }
+// What was already read, by file: adding another file to the export reads only the new one.
+type Opened = { entries: Entry[]; names: Name[]; problems: string[]; unreadable: (Name & { why: string })[] };
+const opened = new Map<string, Opened>();
+const parsed = new WeakMap<Entry, unknown>();
+const chats = new Map<string, { unit: LocalUnit; body: Uint8Array; attached: ExportNotKept | null }>();
 
 // The parts Hearth reads, wherever they sit in the export.
 const PART = /(^|\/)(conversations|projects|users)\.json$|(^|\/)(memories|projects)\/[^/]+\.json$|(^|\/)artifacts\/[^/]+\/artifact\.json$/;
@@ -97,11 +114,31 @@ export async function openExport(files: ExportFile[]): Promise<{ entries: Entry[
       try { entries.push({ path, group, data: await data() }); } catch (e) { bad(path, group, `it could not be read (${(e as Error)?.message ?? e})`); }
     } else names.push({ path, group });
   };
-  for (const f of files) await visit(f.path, top(f), () => f.bytes(), 0);
+  for (const f of files) {
+    const key = f.lastModified != null ? `${f.path}|${f.size}|${f.lastModified}` : null;
+    const had = key ? opened.get(key) : undefined;
+    if (had) { entries.push(...had.entries); names.push(...had.names); problems.push(...had.problems); unreadable.push(...had.unreadable); continue; }
+    const at = { e: entries.length, n: names.length, p: problems.length, u: unreadable.length };
+    await visit(f.path, top(f), () => f.bytes(), 0);
+    if (key) opened.set(key, { entries: entries.slice(at.e), names: names.slice(at.n), problems: problems.slice(at.p), unreadable: unreadable.slice(at.u) });
+  }
   return { entries, names, problems, unreadable };
 }
 
-const parse = (e: Entry): any => { try { return JSON.parse(strFromU8(e.data)); } catch { return undefined; } };
+const parse = (e: Entry): any => {
+  if (parsed.has(e)) return parsed.get(e);
+  if (e.data.length > MAX_PART) {
+    throw new Error(`${e.path} is ${Math.round(e.data.length / 1e6)} MB, too big for Hearth to read in one go. Ask claude.ai for the export again: big ones come in parts (conversations-000.zip, conversations-001.zip, ...), which Hearth reads one by one.`);
+  }
+  let v: unknown;
+  try { v = JSON.parse(strFromU8(e.data)); }
+  catch (err) {
+    if (err instanceof RangeError) throw new Error(`${e.path} is too big for Hearth to read in one go (${Math.round(e.data.length / 1e6)} MB). Ask claude.ai for the export again, in parts.`);
+    v = undefined;
+  }
+  parsed.set(e, v);
+  return v;
+};
 
 /** What the other parts of an export are, in words (for the receipt's "not kept yet" lines and the inventory). */
 function otherKind(path: string): { id: string; title: string } | null {
@@ -237,35 +274,47 @@ export async function readExports(files: ExportFile[]): Promise<{ exports: ChatE
       const nid = String(c?.uuid ?? '');
       if (!nid || !/^[A-Za-z0-9_-]{1,80}$/.test(nid)) { notKept.push({ id: `bad:${nid || title}`, kind: 'chat', title, reason: 'unsupported', detail: 'it has no id Hearth can use' }); continue; }
       if (!msgs.length) { skipped++; notKept.push({ id: (await sha(`${folder}/${nid}`)).slice(0, 24), kind: 'chat', title, reason: 'empty', detail: 'it has no messages' }); continue; }
-      const lines: string[] = [];
-      if (name) lines.push(JSON.stringify({ type: 'custom-title', customTitle: name, source: 'claude-ai' }));
-      let messages = 0, firstUser = '', attached = 0;
-      for (const m of msgs) {
-        const type = m?.sender === 'human' ? 'user' : 'assistant';
-        const content = blocks(m);
-        // Files and images in a chat: the export has only their names (the chat keeps a line where each was).
-        attached += (Array.isArray(m?.files) ? m.files.length : 0) + (Array.isArray(m?.attachments) ? m.attachments.filter((x: any) => !x?.extracted_content).length : 0)
-          + (Array.isArray(m?.content) ? m.content.filter((b: any) => b && !['text', 'thinking', 'tool_use', 'tool_result'].includes(b.type)).length : 0);
-        if (!content.length) continue;
-        messages++;
-        if (type === 'user' && !firstUser) firstUser = content.find((b) => b.type === 'text')?.text ?? '';
-        lines.push(JSON.stringify({ type, uuid: m.uuid, timestamp: m.created_at ?? c.created_at, source: 'claude-ai', message: { role: type, content } }));
-      }
-      if (attached) notKept.push({ id: `files:${nid}`, kind: 'other', title: `${attached} file${attached === 1 ? '' : 's'} attached to the chat "${title}"`, reason: 'unsupported', detail: "claude.ai's export holds only their names, so the chat keeps a line where each one was" });
-      // A chat whose messages are blank in the export still keeps its title (as earlier imports did).
-      const body = enc.encode(lines.join('\n') + '\n');
-      const rel = `${folder}/${nid}.jsonl`;
       const projectName = c.project_uuid ? projects.get(c.project_uuid)?.name ?? '' : String(c.project?.name ?? '').trim();
-      // Same fingerprint as earlier versions of this reader, so a re-run finds what is already here.
-      const fingerprint = (await sha(`${c.updated_at ?? ''}|${msgs.length}|${body.length}`)).slice(0, 32);
-      bytes.set(rel, body);
-      const content = [...new Uint8Array(await crypto.subtle.digest('SHA-256', body))].map((b) => b.toString(16).padStart(2, '0')).join('');
-      units.push({
-        id: (await sha(`${folder}/${nid}`)).slice(0, 24), folder, uuid: nid, source: 'claude-ai', fingerprint, cwd: null, repo: null,
-        hint: projectName || null, title: name || firstUser.replace(/\s+/g, ' ').slice(0, 80) || 'Untitled chat',
-        started: c.created_at ?? null, ended: c.updated_at ?? c.created_at ?? null, messages, threads: 0, bytes: body.length,
-        files: [{ rel, size: body.length, sha256: content }], from: `claude.ai export ${[...a.inputs].join(', ')}`,
-      });
+      const from = `claude.ai export ${[...a.inputs].join(', ')}`;
+      // The same chat read before (another file added since): its transcript is not built again.
+      const ck = `${folder}/${nid}|${c.updated_at ?? ''}|${msgs.length}|${projectName}|${from}|${name}`;
+      let done = chats.get(ck);
+      if (!done) {
+        const lines: string[] = [];
+        if (name) lines.push(JSON.stringify({ type: 'custom-title', customTitle: name, source: 'claude-ai' }));
+        let messages = 0, firstUser = '', attached = 0;
+        for (const m of msgs) {
+          const type = m?.sender === 'human' ? 'user' : 'assistant';
+          const content = blocks(m);
+          // Files and images in a chat: the export has only their names (the chat keeps a line where each was).
+          attached += (Array.isArray(m?.files) ? m.files.length : 0) + (Array.isArray(m?.attachments) ? m.attachments.filter((x: any) => !x?.extracted_content).length : 0)
+            + (Array.isArray(m?.content) ? m.content.filter((b: any) => b && !['text', 'thinking', 'tool_use', 'tool_result'].includes(b.type)).length : 0);
+          if (!content.length) continue;
+          messages++;
+          if (type === 'user' && !firstUser) firstUser = content.find((b) => b.type === 'text')?.text ?? '';
+          lines.push(JSON.stringify({ type, uuid: m.uuid, timestamp: m.created_at ?? c.created_at, source: 'claude-ai', message: { role: type, content } }));
+        }
+        // A chat whose messages are blank in the export still keeps its title (as earlier imports did).
+        const body = enc.encode(lines.join('\n') + '\n');
+        const rel = `${folder}/${nid}.jsonl`;
+        // Same fingerprint as earlier versions of this reader, so a re-run finds what is already here.
+        const fingerprint = (await sha(`${c.updated_at ?? ''}|${msgs.length}|${body.length}`)).slice(0, 32);
+        const content = [...new Uint8Array(await crypto.subtle.digest('SHA-256', body))].map((b) => b.toString(16).padStart(2, '0')).join('');
+        done = {
+          body,
+          attached: attached ? { id: `files:${nid}`, kind: 'other', title: `${attached} file${attached === 1 ? '' : 's'} attached to the chat "${title}"`, reason: 'unsupported', detail: "claude.ai's export holds only their names, so the chat keeps a line where each one was" } : null,
+          unit: {
+            id: (await sha(`${folder}/${nid}`)).slice(0, 24), folder, uuid: nid, source: 'claude-ai', fingerprint, cwd: null, repo: null,
+            hint: projectName || null, title: name || firstUser.replace(/\s+/g, ' ').slice(0, 80) || 'Untitled chat',
+            started: c.created_at ?? null, ended: c.updated_at ?? c.created_at ?? null, messages, threads: 0, bytes: body.length,
+            files: [{ rel, size: body.length, sha256: content }], from,
+          },
+        };
+        chats.set(ck, done);
+      }
+      if (done.attached) notKept.push(done.attached);
+      bytes.set(done.unit.files[0].rel, done.body);
+      units.push(done.unit);
     }
     const inputs = [...a.inputs];
     out.push({ account, label: u?.email ? `claude.ai, ${u.email}` : u?.name ? `claude.ai, ${u.name}` : `claude.ai export (${inputs.join(', ')})`, email: u?.email ?? null, name: u?.name ?? null,

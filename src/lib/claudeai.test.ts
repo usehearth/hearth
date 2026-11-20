@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { strToU8, zipSync } from 'fflate';
-import { readClaudeExport, readExports, type ExportFile } from './claudeai';
+import { readClaudeExport, readExports, setMaxPartForTest, type ExportFile } from './claudeai';
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 const conv = (uuid: string, name: string, account = 'acct-1', extra: Record<string, unknown> = {}) => ({ uuid, name, created_at: '2026-10-01T10:00:00Z', updated_at: '2026-10-01T11:00:00Z', account: { uuid: account },
@@ -114,6 +114,25 @@ describe('claude.ai export', () => {
     expect(nk).toEqual(['unreadable:export/broken.zip', 'unsupported:1 file attached to the chat "With a photo"'.replace('1 file', '2 files'),
       'unsupported:export/deep.zip/a.zip/b.zip/c.zip/d.zip/e.zip', 'unsupported:export/notes.txt'].sort());
     expect(exports[0].ignored).toContain('.DS_Store');
+  });
+
+  it('adding another file reads only the new one: files already read are remembered', async () => {
+    const reads: string[] = [];
+    const counted = (path: string, data: Uint8Array): ExportFile => ({ path, size: data.length, lastModified: 1, bytes: async () => { reads.push(path); return data; } });
+    const first = [counted('x/conversations-000.zip', zip({ 'conversations.json': [conv('c1', 'One')] }))];
+    await readExports(first);
+    const second = [...first, counted('x/memories-000.zip', zip({ 'memories/acct.json': { account_uuid: 'acct-1', memory_files: [{ path: '/profile.md', content: 'hi' }] } }))];
+    const { exports } = await readExports(second);
+    expect(reads).toEqual(['x/conversations-000.zip', 'x/memories-000.zip']);
+    expect(exports[0].units).toHaveLength(1);
+    expect(exports[0].memories).toHaveLength(1);
+  });
+
+  it('a part too big to read in one go fails with a plain message, not a freeze', async () => {
+    setMaxPartForTest(100);
+    try {
+      await expect(readExports([ef('big/conversations.json', json([conv('c1', 'One'), conv('c2', 'Two')]))])).rejects.toThrow(/too big for Hearth to read in one go/);
+    } finally { setMaxPartForTest(450_000_000); }
   });
 
   it('a zip inside a zip is opened too', async () => {
