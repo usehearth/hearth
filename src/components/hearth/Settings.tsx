@@ -1,12 +1,12 @@
 // Settings: servers and this device's key, the server's model providers (read-only here, with health and a Test),
 // and appearance. Channels come when the server has them. Nothing here is chat content; keys are never shown.
 import { useCallback, useEffect, useState } from 'react';
-import { BarChart3, CalendarClock, Check, CircleAlert, Plug, Puzzle, KeyRound, Laptop, Loader2, MoonStar, Palette, Pencil, Plus, Radio, RefreshCw, ScrollText, Server as ServerIcon, ShieldAlert, Sparkles, Sun, Trash2, X, Zap } from 'lucide-react';
+import { BarChart3, CalendarClock, Check, CircleAlert, Plug, Puzzle, KeyRound, Laptop, Loader2, MoonStar, Palette, Pencil, Plus, Radio, ScrollText, Server as ServerIcon, ShieldAlert, Sparkles, Sun, Trash2, X, Zap } from 'lucide-react';
 import { AdminKeySettings } from '@/components/hearth/Admin';
 import { Button } from '@/components/ui/button';
 import { KeyPrompt } from '@/components/hearth/AddServer';
 import { DeviceKeys, ProviderForm } from '@/components/hearth/AdminSettings';
-import { AuditLog, ConnectorsPage, ExtensionsPage, SchedulesPage, SectionHead, UsagePage } from '@/components/hearth/ServerSettings';
+import { AuditLog, ConnectorsPage, ExtensionsPage, RefreshButton, SchedulesPage, SectionHead, UsagePage } from '@/components/hearth/ServerSettings';
 import { clientNames } from '@/lib/choices';
 import type { DirectoryState } from '@/lib/directory';
 import { forgetKey, isDesktop, keyFor, removeServer, renameServer, type Server } from '@/lib/servers';
@@ -81,12 +81,12 @@ function Servers({ servers, server, dir, onAdd, onUse, onKeyChanged }: { servers
   }, [ready?.request]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
-      <SectionHead title="Servers and keys" sub="Hearth remembers each server's address and name. Its device key lives in your system keychain on the desktop, or in memory for this window on the web." />
+      <SectionHead title="Servers and keys" sub="Hearth remembers each server's address and name. Its device key lives in your system keychain on the desktop, or in memory for this window on the web."
+        action={<Button size="sm" onClick={onAdd}><Plus className="size-3.5" />Add a server</Button>} />
       <div className="space-y-3">
         {servers.map((s) => <ServerRow key={s.id} s={s} current={s.id === server?.id} dir={s.id === server?.id ? dir : undefined}
           device={s.id === server?.id ? device : null} onUse={() => onUse(s.id)} onKeyChanged={onKeyChanged} />)}
       </div>
-      <Button variant="outline" className="mt-4" onClick={onAdd}><Plus className="size-4" />Add a server</Button>
       {device?.admin && ready ? <DeviceKeys request={ready.request} /> : (
         <p className="mt-6 text-xs text-muted-foreground">Device keys are made and revoked on the server's page (or from an admin device). Revoking one disconnects it at once.</p>
       )}
@@ -178,7 +178,11 @@ function Providers({ dir, server }: { dir: DirectoryState; server?: Server }) {
   useEffect(load, [load]);
   return (
     <>
-      <SectionHead title="Model providers" sub="Where the server's agents get their thinking, in the order it tries them. When one is down, new work moves to the next." />
+      <SectionHead title="Model providers" sub="Where the server's agents get their thinking, in the order it tries them. When one is down, new work moves to the next."
+        action={rows ? <div className="flex gap-2">
+          <RefreshButton onClick={load} />
+          {canEdit && <Button size="sm" disabled={editing !== null} onClick={() => setEditing('')}><Plus className="size-3.5" />Add a provider</Button>}
+        </div> : undefined} />
       {!ready && <p className="text-sm text-muted-foreground">Connect to a server to see its providers.</p>}
       {ready && !supported && <p className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">{server?.name ?? 'This server'} doesn't share its providers with Hearth. They are set on the server itself.</p>}
       {err && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{err}</p>}
@@ -186,6 +190,7 @@ function Providers({ dir, server }: { dir: DirectoryState; server?: Server }) {
       {rows && rows.length === 0 && <p className="rounded-xl border bg-card p-4 text-sm">No providers yet: the server waits until one is added.</p>}
       {rows && (
         <>
+          {canEdit && editing === '' && <div className="mb-3">{form()}</div>}
           <div className="space-y-3">{rows.map((p, i) => editing === p.name ? <div key={p.name}>{form(p)}</div> : (
             <ProviderCard key={p.name} p={p} n={i + 1} test={(name) => ready!.request<{ ok: boolean; status?: number; error?: string; ms: number }>('_hearth/providers/test', { name })} onTested={load}
               admin={canEdit ? (
@@ -202,11 +207,6 @@ function Providers({ dir, server }: { dir: DirectoryState; server?: Server }) {
                 )
               ) : undefined} />
           ))}</div>
-          {canEdit && editing === '' && <div className="mt-3">{form()}</div>}
-          <div className="mt-4 flex items-center gap-2">
-            {canEdit && editing === null && <Button size="sm" variant="outline" onClick={() => setEditing('')}><Plus className="size-3.5" />Add a provider</Button>}
-            <Button size="sm" variant="ghost" onClick={load}><RefreshCw className="size-3.5" />Refresh</Button>
-          </div>
           <p className="mt-4 text-xs text-muted-foreground">
             Keys are never shown, only whether one is set.{' '}
             {canEdit ? 'This is an admin device, so it can add and change providers; every change is recorded on the server.'

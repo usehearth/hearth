@@ -71,9 +71,9 @@ export function ProviderForm({ initial, request, onSaved, onCancel }: {
         <label className="flex items-center gap-2"><input type="checkbox" checked={f.sensitive_ok} onChange={(e) => set('sensitive_ok', e.target.checked)} className="size-4 accent-primary" />Allowed for client work</label>
       </div>
       {err && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{err}</p>}
-      <div className="flex gap-2">
+      <div className="flex justify-end gap-2">
+        <Button type="button" size="sm" variant="outline" onClick={onCancel}>Cancel</Button>
         <Button type="submit" size="sm" disabled={busy}>{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}Save</Button>
-        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
       </div>
     </form>
   );

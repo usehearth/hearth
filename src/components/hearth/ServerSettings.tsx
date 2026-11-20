@@ -1,7 +1,7 @@
 // Settings sections that read the server's own records (each shown only when the server has the extension):
 // the audit log (`audit`, admin devices). Nothing here is chat content.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronRight, Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { ChevronRight, Loader2, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { errorText } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
@@ -13,6 +13,11 @@ import { auditDetail, auditLine, type AuditEntry } from '@/lib/audit';
 import { fullWhen, shortWhen } from '@/lib/dates';
 
 export type Request = <T = unknown>(method: string, params?: unknown) => Promise<T>;
+
+/** The header's Refresh: an icon button, as in Schedules (the page's Add button sits beside it). */
+export function RefreshButton({ onClick, busy }: { onClick: () => void; busy?: boolean }) {
+  return <Button size="icon-sm" variant="ghost" aria-label="Refresh" title="Refresh" disabled={busy} onClick={onClick}><RefreshCw className={cn('size-3.5', busy && 'animate-spin')} /></Button>;
+}
 
 export function SectionHead({ title, sub, action }: { title: string; sub?: string; action?: React.ReactNode }) {
   return (
@@ -49,7 +54,7 @@ export function UsagePage({ request }: { request: Request }) {
   return (
     <div>
       <SectionHead title="Usage" sub="What the agents cost, from the engines' own reports. Projects can have a monthly budget (project settings)."
-        action={<Button size="sm" variant="outline" onClick={load}><RefreshCw className="size-3.5" />Refresh</Button>} />
+        action={<RefreshButton onClick={load} />} />
       <div className="grid grid-cols-2 gap-3">
         <div className="rounded-xl border bg-card p-3"><div className="text-xs text-muted-foreground">This month</div><div className="text-xl font-semibold tabular-nums">{usd(month)}</div></div>
         <div className="rounded-xl border bg-card p-3"><div className="text-xs text-muted-foreground">Last {r.days} days</div><div className="text-xl font-semibold tabular-nums">{usd(total)}</div></div>
@@ -138,7 +143,7 @@ export function ExtensionsPage({ request, projects = [] }: { request: Request; p
   return (
     <div>
       <SectionHead title="Extensions" sub="Your own skills, slash commands, subagents, hooks and output styles. They reach every project's agents (or one project's). A repo's own .claude folder is never used."
-        action={<Button size="sm" onClick={() => setEdit({ kind: 'command', scope: 'global', enabled: true, name: '', content: '' })}>Add</Button>} />
+        action={<Button size="sm" disabled={!!edit} onClick={() => setEdit({ kind: 'command', scope: 'global', enabled: true, name: '', content: '' })}><Plus className="size-3.5" />Add an extension</Button>} />
       {error && <p role="alert" className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
       <ClaudeImport request={request} projects={projects} onDone={load} onError={setError} />
       <PluginImport request={request} onDone={load} onError={setError} />
@@ -268,7 +273,7 @@ export function ConnectorsPage({ request, clients = [] }: { request: Request; /*
   return (
     <div>
       <SectionHead title="Connectors" sub="MCP servers your agents can use: a web address, or a command the agent starts on its runner (like Claude Code's stdio servers). Give a project the ones it needs in its settings. Tokens and environment values are stored encrypted and never shown."
-        action={<Button size="sm" onClick={() => setForm({ ...EMPTY_FORM })}>Add</Button>} />
+        action={<Button size="sm" disabled={!!form} onClick={() => setForm({ ...EMPTY_FORM })}><Plus className="size-3.5" />Add a connector</Button>} />
       {error && <p role="alert" className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
       {form && (
         <div className="mb-4 space-y-2 rounded-xl border bg-card p-3 text-sm">
@@ -549,7 +554,7 @@ export function AuditLog({ request, projects = [] }: { request: Request; /** To 
   return (
     <div>
       <SectionHead title="Audit log" sub="Every change on the server, with who made it. Newest first."
-        action={<Button size="sm" variant="outline" onClick={() => void load()} disabled={busy}><RefreshCw className="size-3.5" />Refresh</Button>} />
+        action={<RefreshButton onClick={() => void load()} busy={busy} />} />
       <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter: who (zed-laptop) or a kind of change (chat., provider.)" aria-label="Filter the audit log"
         className={cn(field, 'mb-3')} />
       {error && <p role="alert" className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">{error}</p>}
