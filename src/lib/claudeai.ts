@@ -74,30 +74,31 @@ interface Entry { path: string; group: string; data: Uint8Array }
 interface Name { path: string; group: string }
 
 /**
- * Open everything the person gave: zips (and zips inside folders or zips, two levels down), folders, loose files.
+ * Open everything the person gave: zips (and zips inside folders or zips, four levels down), folders, loose files.
  * Returns the parts Hearth reads, with the bytes, and the names of everything else. `group` is the top thing the
  * person gave (the folder they picked, or the zip), so the parts of one export stay together.
  */
-export async function openExport(files: ExportFile[]): Promise<{ entries: Entry[]; names: Name[]; problems: string[] }> {
-  const entries: Entry[] = [], names: Name[] = [], problems: string[] = [];
+export async function openExport(files: ExportFile[]): Promise<{ entries: Entry[]; names: Name[]; problems: string[]; unreadable: (Name & { why: string })[] }> {
+  const entries: Entry[] = [], names: Name[] = [], problems: string[] = [], unreadable: (Name & { why: string })[] = [];
+  const bad = (path: string, group: string, why: string) => { problems.push(`${path}: ${why}`); unreadable.push({ path, group, why }); };
   const top = (f: ExportFile) => (f.path.includes('/') ? f.path.split('/')[0] : f.path);
   const visit = async (path: string, group: string, data: () => Promise<Uint8Array>, depth: number) => {
     if (/\.zip$/i.test(path)) {
       let raw: Uint8Array;
-      try { raw = await data(); } catch (e) { problems.push(`${path}: could not be read (${(e as Error)?.message ?? e})`); return; }
+      try { raw = await data(); } catch (e) { bad(path, group, `it could not be read (${(e as Error)?.message ?? e})`); return; }
       let inner: Record<string, Uint8Array>;
       // Only the parts Hearth reads (and zips inside) are unpacked; everything else is listed by name.
-      try { inner = unzipSync(raw, { filter: (f) => { if (f.name.endsWith('/')) return false; const want = PART.test(f.name) || (/\.zip$/i.test(f.name) && depth < 2); if (!want) names.push({ path: `${path}/${f.name}`, group }); return want; } }); }
-      catch { problems.push(`${path}: not a zip Hearth can open`); return; }
+      try { inner = unzipSync(raw, { filter: (f) => { if (f.name.endsWith('/')) return false; const want = PART.test(f.name) || (/\.zip$/i.test(f.name) && depth < 4); if (!want) names.push({ path: `${path}/${f.name}`, group }); return want; } }); }
+      catch { bad(path, group, 'it is not a zip Hearth can open'); return; }
       for (const [n, b] of Object.entries(inner)) await visit(`${path}/${n}`, group, async () => b, depth + 1);
       return;
     }
     if (PART.test(path) || /\.json$/i.test(path) && !path.includes('/')) {
-      try { entries.push({ path, group, data: await data() }); } catch (e) { problems.push(`${path}: could not be read (${(e as Error)?.message ?? e})`); }
+      try { entries.push({ path, group, data: await data() }); } catch (e) { bad(path, group, `it could not be read (${(e as Error)?.message ?? e})`); }
     } else names.push({ path, group });
   };
   for (const f of files) await visit(f.path, top(f), () => f.bytes(), 0);
-  return { entries, names, problems };
+  return { entries, names, problems, unreadable };
 }
 
 const parse = (e: Entry): any => { try { return JSON.parse(strFromU8(e.data)); } catch { return undefined; } };
@@ -119,7 +120,7 @@ function otherKind(path: string): { id: string; title: string } | null {
  * was given looks like a claude.ai export.
  */
 export async function readExports(files: ExportFile[]): Promise<{ exports: ChatExport[]; problems: string[] }> {
-  const { entries, names, problems } = await openExport(files);
+  const { entries, names, problems, unreadable } = await openExport(files);
   const by = (rx: RegExp) => entries.filter((e) => rx.test(e.path));
   const usersFiles = by(/(^|\/)users\.json$/), convFiles = by(/(^|\/)conversations\.json$/).concat(entries.filter((e) => !e.path.includes('/') && /\.json$/i.test(e.path) && !/(conversations|users|projects)\.json$/.test(e.path)));
   const memFiles = by(/(^|\/)memories\/[^/]+\.json$/), projFiles = by(/(^|\/)projects\.json$|(^|\/)projects\/[^/]+\.json$/), artFiles = by(/(^|\/)artifacts\/[^/]+\/artifact\.json$/);
@@ -201,13 +202,24 @@ export async function readExports(files: ExportFile[]): Promise<{ exports: ChatE
     const a = acc(accountOf({ path: '', group: n.group, data: new Uint8Array() }), n.group);
     if (/(^|\/)login_history\.json$/.test(n.path)) { a.ignored.push('sign-in history'); continue; }
     const o = otherKind(n.path);
-    if (!o) { if (!/\.zip$/i.test(n.path)) a.ignored.push(n.path); continue; }
+    if (!o) {
+      // Nothing is passed over without a word: a zip too deep to open here, or a file Hearth doesn't know, gets a line.
+      const file = n.path.split('/').pop() ?? n.path;
+      if (/^(\.ds_store|thumbs\.db|desktop\.ini)$/i.test(file)) a.ignored.push(file);
+      else if (/\.zip$/i.test(n.path)) a.notKept.push({ id: `deep:${n.path}`, kind: 'other', title: n.path, reason: 'unsupported', detail: 'a zip inside zips four deep: unzip the outer ones and add the folder' });
+      else a.notKept.push({ id: `unknown:${n.path}`, kind: 'other', title: n.path, reason: 'unsupported', detail: "Hearth doesn't know this part of a claude.ai export" });
+      continue;
+    }
     if (seen.has(`${a.key}/${o.id}`)) continue;
     seen.add(`${a.key}/${o.id}`);
     const t = o.id.startsWith('artifact:') ? artTitle.get(o.id.slice(9)) : '';
     a.notKept.push({ id: o.id, kind: 'other', title: t ? `The artifact "${t}" made on claude.ai` : o.title, reason: 'unsupported', detail: 'Hearth does not bring this part of a claude.ai export yet' });
   }
 
+  for (const u of unreadable) {
+    const a = acc(accountOf({ path: '', group: u.group, data: new Uint8Array() }), u.group);
+    a.notKept.push({ id: `unreadable:${u.path}`, kind: 'other', title: u.path, reason: 'unreadable', detail: u.why });
+  }
   const out: ChatExport[] = [];
   for (const a of accs.values()) {
     if (!a.chats.size && !a.memories.size && !a.notKept.length) continue;
@@ -227,15 +239,19 @@ export async function readExports(files: ExportFile[]): Promise<{ exports: ChatE
       if (!msgs.length) { skipped++; notKept.push({ id: (await sha(`${folder}/${nid}`)).slice(0, 24), kind: 'chat', title, reason: 'empty', detail: 'it has no messages' }); continue; }
       const lines: string[] = [];
       if (name) lines.push(JSON.stringify({ type: 'custom-title', customTitle: name, source: 'claude-ai' }));
-      let messages = 0, firstUser = '';
+      let messages = 0, firstUser = '', attached = 0;
       for (const m of msgs) {
         const type = m?.sender === 'human' ? 'user' : 'assistant';
         const content = blocks(m);
+        // Files and images in a chat: the export has only their names (the chat keeps a line where each was).
+        attached += (Array.isArray(m?.files) ? m.files.length : 0) + (Array.isArray(m?.attachments) ? m.attachments.filter((x: any) => !x?.extracted_content).length : 0)
+          + (Array.isArray(m?.content) ? m.content.filter((b: any) => b && !['text', 'thinking', 'tool_use', 'tool_result'].includes(b.type)).length : 0);
         if (!content.length) continue;
         messages++;
         if (type === 'user' && !firstUser) firstUser = content.find((b) => b.type === 'text')?.text ?? '';
         lines.push(JSON.stringify({ type, uuid: m.uuid, timestamp: m.created_at ?? c.created_at, source: 'claude-ai', message: { role: type, content } }));
       }
+      if (attached) notKept.push({ id: `files:${nid}`, kind: 'other', title: `${attached} file${attached === 1 ? '' : 's'} attached to the chat "${title}"`, reason: 'unsupported', detail: "claude.ai's export holds only their names, so the chat keeps a line where each one was" });
       // A chat whose messages are blank in the export still keeps its title (as earlier imports did).
       const body = enc.encode(lines.join('\n') + '\n');
       const rel = `${folder}/${nid}.jsonl`;

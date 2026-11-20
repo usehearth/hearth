@@ -46,6 +46,8 @@ export interface ConfigItem {
   name: string; description: string | null; bytes: number; content: string | null; files: Record<string, string> | null; leftOut: string[]; problem: string | null;
   /** Found where Claude Code doesn't load it (a skill one folder down, a loose file in skills/): where. */
   nested?: string | null;
+  /** Its own name, when it goes by another here (no letters Hearth can use, or shared with another once made a name). */
+  renamed?: string | null;
 }
 export interface Odd { from: string; rel: string; reason: string }
 
@@ -130,7 +132,7 @@ export function homeWords(s: LocalSource): { title: string; who: string | null; 
 
 const KIND_OF: Record<ConfigItem['kind'], ItemKind> = { skill: 'skill', agent: 'agent', command: 'command', output_style: 'output_style', hook: 'hook', plugin: 'other' };
 /** A config item's title on the receipt: its name and where it came from. */
-export const configTitle = (c: ConfigItem) => (c.kind === 'plugin' ? `The plugin ${c.name}` : `${c.name}${c.origin.startsWith('plugin:') ? ` (from the plugin ${c.origin.slice(7)})` : c.origin === 'repo' && c.repo ? ` (in ${c.repo.split('/').pop()})` : ''}`);
+export const configTitle = (c: ConfigItem) => (c.kind === 'plugin' ? `The plugin ${c.name}` : `${c.renamed ? `${c.renamed} (kept as ${c.name})` : c.name}${c.origin.startsWith('plugin:') ? ` (from the plugin ${c.origin.slice(7)})` : c.origin === 'repo' && c.repo ? ` (in ${c.repo.split('/').pop()})` : ''}`);
 const configSha = (c: ConfigItem) => JSON.stringify([c.kind, c.name, c.content, Object.entries(c.files ?? {}).sort(([a], [b]) => a.localeCompare(b))]);
 
 /** What the person left out on the review page (all in by default), and what they chose to bring anyway. */
@@ -233,6 +235,8 @@ export function gather(o: {
     firstOf.set(configSha(c), c);
     items.push(base);
     config.push(h ? { ...c, overrule: true } : c);
+    // A skill's files that can't come with it (binary, too big, past the limit) are named, each on its own line.
+    for (const f of c.leftOut ?? []) items.push({ source: c.source, kind: 'other', id: `${c.key}#${f}`, title: `${f} (a file in the skill ${c.name})`, reason: 'unsupported', detail: "Hearth keeps a skill's text files; this one is binary, too big, or past the limit" });
   }
 
   const memories: Gathered['memories'] = [];

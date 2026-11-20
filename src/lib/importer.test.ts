@@ -154,6 +154,17 @@ describe('what was offered and not taken', () => {
   });
 });
 
+describe('nothing dropped for its name or its files', () => {
+  it("a renamed skill says what it was called; a skill's left-out files are each named", () => {
+    const g = gather({ sources: [home()], scan: null, config: [
+      cfg(`${H1}/user/skill/skill-1a2b3c4d`, H1, 'skill-1a2b3c4d', 'Japanese.', { renamed: '日本語' }),
+      cfg(`${H1}/user/skill/tidy`, H1, 'tidy', 'Tidy.', { leftOut: ['logo.png', 'big.csv'] }),
+    ], exports: [] });
+    expect(g.inventory.items.map((i) => `${i.kind}:${i.title}:${i.reason ?? 'send'}`)).toEqual([
+      'skill:日本語 (kept as skill-1a2b3c4d):send', 'skill:tidy:send', 'other:logo.png (a file in the skill tidy):unsupported', 'other:big.csv (a file in the skill tidy):unsupported']);
+  });
+});
+
 describe('copies in several homes', () => {
   it('leaving out the home that owns a copy keeps the copy in a home that is kept: sent once, owned there', () => {
     const H3 = 'C:/Users/sam/.claude-tests/projects';

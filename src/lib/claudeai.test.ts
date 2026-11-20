@@ -103,6 +103,19 @@ describe('claude.ai export', () => {
     expect(p.inputs).toContain('frames-000.zip');
   });
 
+  it('nothing is passed over without a line: an unknown file, a zip four deep, a broken zip, files attached to a chat', async () => {
+    const withFiles = { ...conv('c9', 'With a photo'), chat_messages: [{ uuid: 'p1', sender: 'human', text: 'Look', created_at: '2026-10-01T10:00:00Z', files: [{ file_name: 'photo.jpg' }], content: [{ type: 'text', text: 'Look' }, { type: 'image' }] }] };
+    const deep = zip({ 'a.zip': zip({ 'b.zip': zip({ 'c.zip': zip({ 'd.zip': zip({ 'e.zip': zip({ 'conversations.json': [conv('c8', 'Deep')] }) }) }) }) }) });
+    const { exports } = await readExports([
+      ef('export/conversations.json', json([conv('c1', 'One'), withFiles])), ef('export/notes.txt', strToU8('hi')), ef('export/.DS_Store', strToU8('x')),
+      ef('export/broken.zip', strToU8('not a zip')), ef('export/deep.zip', deep),
+    ]);
+    const nk = exports[0].notKept.map((n) => `${n.reason}:${n.title}`).sort();
+    expect(nk).toEqual(['unreadable:export/broken.zip', 'unsupported:1 file attached to the chat "With a photo"'.replace('1 file', '2 files'),
+      'unsupported:export/deep.zip/a.zip/b.zip/c.zip/d.zip/e.zip', 'unsupported:export/notes.txt'].sort());
+    expect(exports[0].ignored).toContain('.DS_Store');
+  });
+
   it('a zip inside a zip is opened too', async () => {
     const outer = zip({ 'claude-export/conversations-000.zip': zip({ 'conversations.json': [conv('c1', 'One')] }) });
     const { exports } = await readExports([ef('download.zip', outer)]);

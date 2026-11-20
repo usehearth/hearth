@@ -468,6 +468,12 @@ pub struct ConfigItem {
     /// Found where Claude Code doesn't load it (a skill one folder down, a loose file in skills/): where it is.
     /// The app lists it and brings it only when the person ticks it.
     nested: Option<String>,
+    /// Its own name, when it goes by another here: a name with no letters Hearth can use, or one that two items share
+    /// once made into an extension name (the second is kept as name-2). Never dropped for its name.
+    renamed: Option<String>,
+    /// The name as found (folder or file name), for the checks above.
+    #[serde(skip)]
+    raw: String,
 }
 #[derive(Serialize)]
 pub struct ConfigOut { items: Vec<ConfigItem> }
@@ -535,11 +541,12 @@ fn read_skill(dir: &Path) -> Option<(String, BTreeMap<String, String>, Vec<Strin
 /// One Claude Code layout (a home, a plugin's folder, or a project folder's .claude).
 fn read_layout(root: &Path, source: &str, origin: &str, key_base: &str, repo: Option<&str>, hooks: bool, out: &mut Vec<ConfigItem>) {
     let mut push_at = |kind: &'static str, raw: &str, content: Option<String>, files: Option<BTreeMap<String, String>>, left: Vec<String>, bytes: usize, desc: Option<String>, problem: Option<String>, nested: Option<String>| {
-        let name = ext_name(raw);
-        if name.is_empty() { return; }
+        // A name with no letters Hearth can use (all in another script, say) keeps the item, under a stand-in name.
+        let made = ext_name(raw);
+        let (name, renamed) = if made.is_empty() { (format!("{}-{}", kind.replace('_', "-"), &sha_hex(raw)[..8]), Some(raw.to_string())) } else { (made, None) };
         let key = match &nested { Some(at) => format!("{key_base}/{kind}-elsewhere/{at}"), None => format!("{key_base}/{kind}/{name}") };
         out.push(ConfigItem { key, source: source.to_string(), origin: origin.to_string(), repo: repo.map(String::from), kind, name,
-            description: desc.or_else(|| content.as_deref().and_then(desc_of)), bytes: bytes as u64, content, files, left_out: left, problem, nested });
+            description: desc.or_else(|| content.as_deref().and_then(desc_of)), bytes: bytes as u64, content, files, left_out: left, problem, nested, renamed, raw: raw.to_string() });
     };
     macro_rules! push { ($($a:expr),*) => { push_at($($a),*, None) } }
     fn md_files(d: &Path, prefix: &str, deep: bool, out: &mut Vec<(String, PathBuf)>) {
@@ -630,7 +637,7 @@ pub fn config(homes_in: &[String], repos: &[String], st: &Scanned) -> Result<Con
             let origin = format!("plugin:{}", ext_name(&name));
             if !p.is_dir() {
                 items.push(ConfigItem { key: format!("{}/{origin}", s.home_path), source: s.path.clone(), origin: origin.clone(), repo: None, kind: "plugin", name: ext_name(&name), description: None, bytes: 0,
-                    content: None, files: None, left_out: vec![], problem: Some("the plugin is listed as installed, but its folder is not on this computer".into()), nested: None });
+                    content: None, files: None, left_out: vec![], problem: Some("the plugin is listed as installed, but its folder is not on this computer".into()), nested: None, renamed: None, raw: name.clone() });
                 continue;
             }
             read_layout(&p, &s.path, &origin, &format!("{}/{origin}", s.home_path), None, true, &mut items);
@@ -640,6 +647,17 @@ pub fn config(homes_in: &[String], repos: &[String], st: &Scanned) -> Result<Con
         if !known.contains(r) { return Err(format!("not a project folder from the latest scan: {r}")); }
         let root = PathBuf::from(r).join(".claude");
         if root.is_dir() { read_layout(&root, "repos", "repo", &format!("repo:{r}"), Some(r), false, &mut items); }
+    }
+    // Two items that become the same extension name ("My Skill" and "my-skill"): both kept, the second as name-2.
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    for it in items.iter_mut() {
+        let n = seen.entry(it.key.clone()).or_insert(0);
+        *n += 1;
+        if *n > 1 {
+            it.key = format!("{}-{}", it.key, n);
+            it.renamed = Some(it.raw.clone());
+            it.name = format!("{}-{}", it.name.chars().take(60).collect::<String>(), n);
+        }
     }
     Ok(ConfigOut { items })
 }
@@ -770,6 +788,12 @@ mod tests {
         fs::write(c1.join("skills").join("development").join("upgrade").join("SKILL.md"), "---\ndescription: Upgrade a site\n---\nUpgrade.").unwrap();
         fs::write(c1.join("skills").join("development").join("notes.md"), "Loose notes.").unwrap();
         fs::write(c1.join("skills").join("loose.md"), "A loose skill file.").unwrap();
+        // A name with no letters Hearth can use, and two names that become the same one.
+        fs::create_dir_all(c1.join("skills").join("日本語")).unwrap();
+        fs::write(c1.join("skills").join("日本語").join("SKILL.md"), "Japanese.").unwrap();
+        fs::create_dir_all(c1.join("agents")).unwrap();
+        fs::write(c1.join("agents").join("Code Review.md"), "One.").unwrap();
+        fs::write(c1.join("agents").join("code-review.md"), "Two.").unwrap();
         fs::create_dir_all(c1.join("skills").join(".trash").join("old")).unwrap();
         fs::write(c1.join("skills").join(".trash").join("old").join("SKILL.md"), "Old.").unwrap();
         fs::create_dir_all(c1.join("agents")).unwrap();
@@ -813,7 +837,7 @@ mod tests {
         assert_eq!(h1.profiles.iter().map(|p| (p.name.as_str(), p.sessions)).collect::<Vec<_>>(), vec![("Personal", 1), ("Work", 1)], "two profiles share this home");
         assert_eq!(h1.terminal, 3);
         assert_eq!((h1.email.as_deref(), h1.org.as_deref()), (Some("sam@example.com"), Some("Sam's org")));
-        assert_eq!((h1.skills, h1.agents, h1.commands, h1.plugins, h1.folders), (1, 1, 1, 2, 1));
+        assert_eq!((h1.skills, h1.agents, h1.commands, h1.plugins, h1.folders), (2, 3, 1, 2, 1));
         assert!(h1.last_used.is_some());
         assert_eq!(src[1].conversations, 0);
         assert_eq!(src[1].commands, 1);
@@ -847,8 +871,15 @@ mod tests {
         assert_eq!(out.units.len(), 5);
 
         let cfg = config(&[src[0].home_path.clone()], &[real(&repo)], &st).unwrap();
-        let keys: Vec<String> = cfg.items.iter().map(|i| format!("{}:{}:{}", i.origin, i.kind, i.name)).collect();
+        let keys: Vec<String> = cfg.items.iter().filter(|i| i.renamed.is_none() && !i.name.starts_with("code-review")).map(|i| format!("{}:{}:{}", i.origin, i.kind, i.name)).collect();
         assert_eq!(keys, vec!["user:command:git-ship", "user:agent:reviewer", "user:skill:tidy", "user:skill:notes", "user:skill:upgrade", "user:skill:loose", "plugin:gone:plugin:gone", "plugin:helper:skill:helping", "plugin:helper:hook:helper-hooks", "repo:skill:watering"], "{keys:?}");
+        let jp = cfg.items.iter().find(|i| i.renamed.as_deref() == Some("日本語")).expect("kept under a stand-in name");
+        assert!(jp.name.starts_with("skill-") && jp.content.is_some());
+        let reviews: Vec<_> = cfg.items.iter().filter(|i| i.kind == "agent" && i.name.starts_with("code-review")).map(|i| (i.name.clone(), i.renamed.clone())).collect();
+        assert_eq!(reviews.len(), 2, "both kept: {reviews:?}");
+        assert!(reviews.iter().any(|(n, r)| n == "code-review-2" && r.is_some()), "{reviews:?}");
+        let keys: HashSet<_> = cfg.items.iter().map(|i| i.key.clone()).collect();
+        assert_eq!(keys.len(), cfg.items.len(), "every key is its own");
         let nested: Vec<_> = cfg.items.iter().filter_map(|i| i.nested.clone()).collect();
         assert_eq!(nested, vec!["skills/development/notes.md", "skills/development/upgrade", "skills/loose.md"], "found where Claude Code doesn't load them, and said so");
         assert_eq!(cfg.items.iter().find(|i| i.name == "upgrade").unwrap().description.as_deref(), Some("Upgrade a site"));
