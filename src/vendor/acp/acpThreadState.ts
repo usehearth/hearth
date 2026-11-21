@@ -100,6 +100,8 @@ export type AcpThreadState = {
   readonly remoteRunning?: boolean | undefined;
   /** Hearth: messages this window sent while a turn ran, waiting in the server's queue for their turn, oldest first. */
   readonly queued?: readonly AcpQueuedMessage[] | undefined;
+  /** Hearth: the thread's waiting messages as the server lists them (`_hearth/queue`); shown instead of `queued` when set. */
+  readonly serverQueued?: readonly AcpQueuedMessage[] | undefined;
 };
 
 export type AcpQueuedMessage = { readonly id: string; readonly text: string };
@@ -152,6 +154,7 @@ export type AcpThreadEvent =
   | { readonly type: "run-settled"; readonly assistantId: string }
   | { readonly type: "queue-add"; readonly message: AcpQueuedMessage }
   | { readonly type: "queue-remove"; readonly id: string }
+  | { readonly type: "queue-server"; readonly items: readonly AcpQueuedMessage[] }
   | { readonly type: "reset"; readonly threadId: string };
 
 export const EMPTY_ACP_THREAD_STATE: AcpThreadState = {
@@ -592,6 +595,9 @@ export const reduceAcpThreadState = (
 
     case "queue-add":
       return { ...state, queued: [...(state.queued ?? []), event.message] };
+
+    case "queue-server":
+      return { ...state, serverQueued: event.items };
 
     case "queue-remove":
       return state.queued?.some((m) => m.id === event.id)

@@ -80,7 +80,7 @@ export const fallback = (prompt: string): Script => ({ name: 'fallback', prompt,
 export const never = (prompt: string): Script => ({ name: 'never', prompt, steps: [{ t: 0, kind: 'hang' }], realtime: true });
 
 /** Starts, then the turn fails with a server error. */
-export const failing = (prompt: string): Script => ({ name: 'error', prompt, steps: [text(50, 'Working on it… '), { t: 400, kind: 'fail', message: 'The turn ended with "error": provider down' }], realtime: true });
+export const failing = (prompt: string): Script => ({ name: 'error', prompt, steps: [text(50, 'Working on it… '), { t: 400, kind: 'fail', message: 'provider down' }], realtime: true });
 
 /**
  * The recorded permission turn, but another device answers the prompt (allow once) `after` ms after it is asked: the
