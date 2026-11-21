@@ -12,10 +12,10 @@ import { ImportReceipt } from '@/components/hearth/ImportReceipt';
 import { errorText } from '@/lib/hearth';
 import { cn } from '@/lib/utils';
 import { type ChatExport, type ExportFile } from '@/lib/claudeai';
-import { readExportsInBackground } from '@/lib/exportReader';
+import { readExportsInBackground, stopExportReader } from '@/lib/exportReader';
 import { filesFromDrop, filesFromInput } from '@/lib/dropfiles';
 import {
-  applyPlaceDecisions, bringAcross, canScanThisMachine, configGroup, dateRange, defaultChoices, gather, homeStats, homeWords, leftOutFrom, localSources, previewOf, readConfig, rememberOf, scanLocal,
+  applyPlaceDecisions, bringAcross, canScanThisMachine, configGroup, copyIn, dateRange, defaultChoices, gather, homeStats, homeWords, leftOutFrom, localSources, previewOf, readConfig, rememberOf, scanLocal,
   type Choice, type ConfigItem, type Decisions, type Gathered, type LocalSource, type LocalUnit, type Odd, type Preview, type Proposal, type RunProgress,
 } from '@/lib/importer';
 import { clientMatcher, holdBack, secretLines } from '@/lib/secrets';
@@ -192,6 +192,8 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
     setImportSnapshot(s);
   }, [phase, homes, exports, gathered, preview, choices, err, admin, info, leftOutSources]);
   useEffect(() => () => setImportSnapshot(null), []);
+  // The export reader keeps what it read for the next part added (a 287 MB export: about 2 GB); leaving the screen lets it go.
+  useEffect(() => () => stopExportReader(), []);
 
   const step = phase === 'done' ? 2 : phase === 'importing' ? 1 : 0;
   return (
@@ -228,7 +230,7 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
               {canScanThisMachine && sources?.length === 0 && <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-muted-foreground">No Claude Code on this computer. If you use it on another computer, run Hearth there too.</p>}
               {!!sources?.length && (
                 <ul className="divide-y rounded-xl border bg-card">
-                  {sources.map((s) => <HomeRow key={s.path} s={s} units={scan?.units.filter((u) => u.from === s.path || u.also?.includes(s.path)) ?? null} />)}
+                  {sources.map((s) => <HomeRow key={s.path} s={s} units={scan?.units.filter((u) => u.from === s.path || u.also?.includes(s.path)).map((u) => copyIn(u, s.path)) ?? null} />)}
                 </ul>
               )}
               {scanning && <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />{scanning.total ? `Reading conversations: ${n(scanning.done)} of ${n(scanning.total)}…` : 'Reading…'} Nothing is sent yet.</p>}
@@ -254,7 +256,7 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
                   {exports.map((x) => <ExportRow key={x.account} x={x} />)}
                 </ul>
               )}
-              {files.length > 0 && <Button size="sm" variant="ghost" className="mt-1" onClick={() => { setFiles([]); setExports([]); }}>Clear the exports</Button>}
+              {files.length > 0 && <Button size="sm" variant="ghost" className="mt-1" onClick={() => { setFiles([]); setExports([]); stopExportReader(); }}>Clear the exports</Button>}
             </section>
 
             <section aria-labelledby="h-skills" ref={skillsRef} className={cn(part === 'skills' && 'rounded-xl ring-2 ring-primary/40 ring-offset-4 ring-offset-background')}>
@@ -304,7 +306,7 @@ export function ImportWizard({ request, serverName, admin, part, onDone, setup }
               </div>
             )}
             {receipt ? <ImportReceipt receipt={receipt} serverName={serverName} /> : <p role="status" className="rounded-xl border bg-card px-4 py-3 text-sm">{plain}</p>}
-            <p className="text-sm text-muted-foreground">Each project's history is in the sidebar, under the project. Search history finds anything you said or were told. Run this again any time: only what is new or changed will move.</p>
+            <p className="text-sm text-muted-foreground">Each project's history is in the sidebar, under the project. The search box at the top of the sidebar finds anything you said or were told. Run this again any time: only what is new or changed will move.</p>
             {!setup && <Button onClick={() => { const slug = created[0]; const c = Object.values(choices).find((x) => x.action === 'new' && x.slug === slug) as { name?: string } | undefined; onDone(slug ? { slug, name: c?.name || slug } : undefined); }}>Open Hearth</Button>}
           </div>
         )}
@@ -366,7 +368,9 @@ function SkillsSummary({ gathered, config, scanning }: { gathered: Gathered | nu
   if (!canScanThisMachine) return <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-muted-foreground">These live with Claude Code on your computer: the Hearth desktop app brings them across.</p>;
   if (scanning || !gathered) return <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Looking…</p>;
   if (!config.length) return <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-muted-foreground">No skills, subagents, slash commands or plugins found in Claude Code on this computer.</p>;
-  const items = gathered.inventory.items.filter((i) => config.some((c) => c.key === i.id) || gathered.config.some((c) => c.key === i.id));
+  // A set, not a search per item: with a big claude.ai export there are tens of thousands of items (36,000 took 0.36 s a render).
+  const keys = new Set([...config.map((c) => c.key), ...gathered.config.map((c) => c.key)]);
+  const items = gathered.inventory.items.filter((i) => keys.has(i.id));
   const byKind = (k: string) => gathered.config.filter((c) => c.kind === k).length;
   const held = items.filter((i) => i.reason === 'secret' || i.reason === 'client');
   const odd = items.filter((i) => i.reason === 'unreadable');

@@ -34,3 +34,13 @@ export async function readExportsInBackground(files: ExportFile[]): Promise<Resu
     worker!.postMessage({ id, files: files.map((f) => ({ path: f.path, file: f.file! })) });
   });
 }
+
+/** Lets go of the worker and everything it kept (the exports were cleared, or the import screen closed). A read still
+ * waiting is told so; the next read starts a fresh worker. */
+export function stopExportReader() {
+  const w = worker;
+  worker = null;
+  for (const p of waiting.values()) p.bad(new Error('The export reading was stopped.'));
+  waiting.clear();
+  try { w?.terminate(); } catch { /* */ }
+}

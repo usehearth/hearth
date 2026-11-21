@@ -32,6 +32,19 @@ export interface LocalUnit {
   empty?: boolean; unreadable?: string | null;
   /** Desktop scan only: the other sources the same conversation was found in. */
   also?: string[];
+  /** Desktop scan only: the copies in those sources, each as it is there (this one is the biggest). */
+  copies?: UnitCopy[];
+}
+/** Another copy of a conversation (in another home, or the archive): what can differ between copies. */
+export type UnitCopy = Pick<LocalUnit, 'from' | 'fingerprint' | 'started' | 'ended' | 'messages' | 'threads' | 'bytes' | 'files'> & { root: string; empty: boolean; unreadable: string | null };
+
+/** The conversation as the copy in `from` has it (that source's own files, sizes and hash); itself if it is that copy. */
+export function copyIn(u: LocalUnit, from: string): LocalUnit {
+  if (from === u.from) return u;
+  const c = u.copies?.find((x) => x.from === from);
+  if (!c) return u;
+  const { copies: _c, ...rest } = u;
+  return { ...rest, ...c, also: [u.from, ...(u.also ?? []).filter((a) => a !== from)] };
 }
 /** A Claude Code home (or the older archive) on this machine, with what it holds and whose it is. */
 export interface LocalSource {
@@ -86,7 +99,8 @@ export async function readConfig(homes: string[], repos: string[]): Promise<Conf
   return (await invoke<{ items: ConfigItem[] }>('import_config', { homes, repos })).items;
 }
 
-export const localReader: Reader = async (u, rel, offset, length) => new Uint8Array(await invoke<ArrayBuffer>('import_read', { id: u.id, rel, offset, length }));
+/** Reads from the copy in `u.from` (gather sends the copy from a home that is kept). */
+export const localReader: Reader = async (u, rel, offset, length) => new Uint8Array(await invoke<ArrayBuffer>('import_read', { id: u.id, from: u.from, rel, offset, length }));
 export const memoryReader = (bytes: Map<string, Uint8Array>): Reader => async (_u, rel, offset, length) => (bytes.get(rel) ?? new Uint8Array()).subarray(offset, offset + length);
 
 /** The same conversation found twice (an archive copy and the original): keep the bigger one. */
@@ -187,12 +201,15 @@ export function gather(o: {
   }
   const leave = (src: string) => (skipped.has(src) ? { reason: 'skipped' as const, detail: `you left out ${labelOf.get(src) ?? 'this source'}${since(`import:source:${src}`)}` } : null);
   for (const u of o.scan?.units ?? []) {
-    // The same conversation can sit in several homes. It is sent once, owned by the first home that is not left out:
-    // leaving out one home must never drop a copy that lives in a home that was kept.
+    // The same conversation can sit in several homes. It is sent once, owned by the first home that is not left out
+    // (one whose copy can be read, if any): leaving out one home must never drop a copy that lives in a home that was
+    // kept. What is sent is that home's own copy, read from there: nothing is read from a home that was left out.
     const homes = [u.from, ...(u.also ?? [])];
-    const owner = homes.find((h) => !skipped.has(h)) ?? null;
+    const kept = homes.filter((h) => !skipped.has(h));
+    const owner = kept.find((h) => { const c = copyIn(u, h); return !c.unreadable && !c.empty; }) ?? kept[0] ?? null;
     const own = owner ?? u.from;
-    const reason = (owner ? null : leave(u.from)) ?? (u.unreadable ? { reason: 'unreadable' as const, detail: u.unreadable } : u.empty ? { reason: 'empty' as const, detail: 'the transcript file is empty' } : null);
+    const sent = copyIn(u, own);
+    const reason = (owner ? null : leave(u.from)) ?? (sent.unreadable ? { reason: 'unreadable' as const, detail: sent.unreadable } : sent.empty ? { reason: 'empty' as const, detail: 'the transcript file is empty' } : null);
     items.push({ source: own, kind: 'conversation', id: u.id, title: u.title, profile: u.profile ?? 'terminal', ...(reason ?? {}) });
     for (const a of homes) {
       if (a === own) continue;
@@ -200,7 +217,7 @@ export function gather(o: {
       const r2 = leave(a) ?? (reason ? reason : null);
       items.push({ source: a, kind: 'conversation', id: u.id, title: u.title, ...(r2 ? r2 : { dupOf: own }) });
     }
-    if (!reason) units.set(u.id, { unit: u, reader: o.reader ?? localReader });
+    if (!reason) units.set(u.id, { unit: sent, reader: o.reader ?? localReader });
   }
   for (const x of o.scan?.odd ?? []) items.push({ source: x.from, kind: 'conversation', id: `odd:${x.rel}`, title: x.rel.split('/').pop() ?? x.rel, reason: 'unsupported', detail: x.reason });
 
@@ -333,7 +350,7 @@ export function dateRange(from: string | null, to: string | null): string | null
 
 /** What the plan request sends: metadata only (no file content), and the inventory for the receipt. */
 export const previewOf = (request: Request, units: LocalUnit[], home: string, inventory?: Inventory) =>
-  request<Preview>('_hearth/import/preview', { home, units: units.map(({ from: _f, root: _r, profile: _p, empty: _e, unreadable: _u, also: _a, ...u }) => u), ...(inventory ? { inventory } : {}) });
+  request<Preview>('_hearth/import/preview', { home, units: units.map(({ from: _f, root: _r, profile: _p, empty: _e, unreadable: _u, also: _a, copies: _c, ...u }) => u), ...(inventory ? { inventory } : {}) });
 
 /** Default choices from a preview: existing projects as they are, suggested merges applied, everything else new. */
 export function defaultChoices(p: Preview): Record<string, Choice> {

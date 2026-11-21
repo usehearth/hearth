@@ -284,6 +284,9 @@ test('import: the claude.ai export folder, added whole, comes across with a rece
   await expect(card).toContainText('Nothing here');
   await expect(card).toContainText('The artifact "Budget tracker" made on claude.ai');
   await expect(page.getByRole('button', { name: 'Save the receipt' })).toBeVisible();
+  // Where to find it again: the search box at the top of the sidebar (there is no "Search history" row any more).
+  await expect(page.getByText('The search box at the top of the sidebar finds anything you said or were told.')).toBeVisible();
+  await expect(sidebar(page).getByRole('textbox', { name: 'Search threads and history' })).toBeVisible();
   // What was sent: the two chats with messages, the memory inside the same run, and what was found (for the receipt).
   expect(fake.callsOf('_hearth/import/commit')).toHaveLength(2);
   expect(fake.callsOf('_hearth/import/memories').map((c) => c.params.runId)).toEqual([1]);

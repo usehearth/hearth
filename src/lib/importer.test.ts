@@ -1,6 +1,6 @@
 // The import's inventory (src/lib/importer.ts gather and homeWords) and what stays on this computer (secrets.ts).
 import { describe, expect, it } from 'vitest';
-import { RunGone, applyPlaceDecisions, dateRange, gather, homeStats, homeWords, isRunGone, leftOutFrom, rememberOf, type ConfigItem, type LocalSource, type LocalUnit } from './importer';
+import { RunGone, applyPlaceDecisions, copyIn, dateRange, gather, homeStats, homeWords, isRunGone, leftOutFrom, previewOf, rememberOf, type ConfigItem, type LocalSource, type LocalUnit, type Reader, type UnitCopy } from './importer';
 import { clientMatcher, holdBack, secretHits } from './secrets';
 import type { ChatExport } from './claudeai';
 
@@ -175,6 +175,36 @@ describe('copies in several homes', () => {
     expect(a.map((i) => `${i.source === H1 ? 'H1' : i.source === H2 ? 'H2' : 'H3'}:${i.reason ?? (i.dupOf ? 'same as H1' : 'send')}`)).toEqual(['H1:send', 'H3:skipped', 'H2:same as H1']);
     expect([...g.units.keys()]).toEqual(['a']);
     expect(g.inventory.items.find((i) => i.id === 'b')?.reason).toBe('skipped');
+  });
+  it('sends the kept home\'s own copy and reads it from there, even when the left-out home\'s copy is longer', async () => {
+    const H3 = 'C:/Users/sam/.claude-tests/projects';
+    const sources = [home(), home({ path: H2, account: 'work' }), home({ path: H3, account: 'tests' })];
+    const copy = (from: string, size: number, fp: string, over: Partial<UnitCopy> = {}): UnitCopy => ({ from, root: from, fingerprint: fp, started: null, ended: '2026-11-01T00:00:00Z', messages: size / 10, threads: 0, bytes: size, files: [{ rel: 'f/a.jsonl', size, sha256: fp }], empty: false, unreadable: null, ...over });
+    // The longest copy is in the tests home (left out); ~/.claude's copy is empty; the work home's can be read.
+    const scan = { units: [unit('a', H3, { bytes: 500, fingerprint: 'long', files: [{ rel: 'f/a.jsonl', size: 500, sha256: 'long' }], also: [H1, H2], copies: [copy(H1, 0, 'none', { empty: true }), copy(H2, 120, 'mid')] })] };
+    const read: string[] = [];
+    const reader: Reader = async (u, rel) => { read.push(`${u.from}|${rel}`); return new Uint8Array(u.files[0].size); };
+    const g = gather({ sources, scan, config: [], exports: [], reader, leftOut: { sources: new Set([H3]) } });
+    const sent = g.units.get('a')!;
+    expect({ from: sent.unit.from, bytes: sent.unit.bytes, fingerprint: sent.unit.fingerprint, size: sent.unit.files[0].size }).toEqual({ from: H2, bytes: 120, fingerprint: 'mid', size: 120 });
+    expect('copies' in sent.unit).toBe(false);
+    expect((await sent.reader(sent.unit, 'f/a.jsonl', 0, 1000)).length).toBe(120);
+    expect(read).toEqual([`${H2}|f/a.jsonl`]);
+    // On the receipt: sent from the work home, the same in ~/.claude, left out in the tests home.
+    expect(g.inventory.items.filter((i) => i.id === 'a').map((i) => `${i.source === H1 ? 'H1' : i.source === H2 ? 'H2' : 'H3'}:${i.reason ?? (i.dupOf ? 'same' : 'send')}`)).toEqual(['H2:send', 'H3:skipped', 'H1:same']);
+    // What the plan request sends: that copy's files and fingerprint, and nothing about where it is kept.
+    let params: { units: Record<string, unknown>[] } | null = null;
+    await previewOf((async (_m: string, p: unknown) => { params = p as typeof params; return {}; }) as never, [sent.unit], '');
+    expect(params!.units[0]).toMatchObject({ id: 'a', fingerprint: 'mid', bytes: 120 });
+    expect(Object.keys(params!.units[0]).some((k) => ['from', 'root', 'also', 'copies'].includes(k))).toBe(false);
+    // Nothing left out: the longest copy is sent, as before.
+    expect(gather({ sources, scan, config: [], exports: [], reader }).units.get('a')!.unit.fingerprint).toBe('long');
+  });
+  it('a home\'s figures come from its own copy', () => {
+    const u = unit('a', H1, { bytes: 500, ended: '2026-11-19T00:00:00Z', also: [H2], copies: [{ from: H2, root: H2, fingerprint: 'old', started: '2026-10-01T00:00:00Z', ended: '2026-10-02T00:00:00Z', messages: 3, threads: 0, bytes: 40, files: [{ rel: 'f/a.jsonl', size: 40 }], empty: false, unreadable: null }] });
+    expect(copyIn(u, H1)).toBe(u);
+    expect(copyIn(u, H2)).toMatchObject({ from: H2, ended: '2026-10-02T00:00:00Z', bytes: 40, also: [H1] });
+    expect(homeStats([copyIn(u, H2)]).to).toBe('2026-10-02T00:00:00Z');
   });
 });
 
